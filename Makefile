@@ -35,9 +35,13 @@ GROUP_TABS := $(addprefix src/dylib/Commands/GroupTabs/,Plan.m Title.m Registrab
 build/group-tabs: tests/group-tabs.m $(GROUP_TABS) | build
 	clang $(CFLAGS) -Isrc/dylib -framework AppKit -o $@ $^
 
-# Checks that need no Dia: the Group Tabs by Domain logic, and that Settings shows each tweak like its neighbours.
-check: build/group-tabs build/patches.json
+build/mouse-back-forward: tests/mouse-back-forward.m src/dylib/Patches/MouseBackForward/MouseBackForward.m src/dylib/StdPatch/Hook.m $(wildcard src/dylib/StdPatch/*.h) | build
+	clang $(CFLAGS) -Isrc/dylib -framework AppKit -o $@ tests/mouse-back-forward.m src/dylib/StdPatch/Hook.m
+
+# Checks that need no Dia: grouping, mouse navigation, and that Settings shows each tweak like its neighbours.
+check: build/group-tabs build/mouse-back-forward build/patches.json
 	build/group-tabs
+	build/mouse-back-forward
 	scripts/check-patches
 
 test: build/DiaPatches.dylib
