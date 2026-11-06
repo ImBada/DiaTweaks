@@ -19,23 +19,26 @@ static NSArray *DPWindowScriptFacades(void) {
     return windows;
 }
 
-NSString *DPWindowTabURL(NSWindow *window) {
-    for (id scripted in DPWindowScriptFacades()) {
-        if (![DPRead(scripted, @"windowId") isEqual:window.identifier]) continue;
-        id url = DPRead(DPRead(scripted, @"activeTab"), @"URL");
-        if ([url isKindOfClass:NSURL.class]) return [url absoluteString];
-        return [url isKindOfClass:NSString.class] ? url : nil;
-    }
+static id DPWindowActiveTab(NSWindow *window) {
+    for (id scripted in DPWindowScriptFacades())
+        if ([DPRead(scripted, @"windowId") isEqual:window.identifier]) return DPRead(scripted, @"activeTab");
     return nil;
 }
 
+NSString *DPWindowTabURL(NSWindow *window) {
+    id url = DPRead(DPWindowActiveTab(window), @"URL");
+    if ([url isKindOfClass:NSURL.class]) return [url absoluteString];
+    return [url isKindOfClass:NSString.class] ? url : nil;
+}
+
 NSString *DPWindowTabIdentifier(NSWindow *window) {
-    for (id scripted in DPWindowScriptFacades()) {
-        if (![DPRead(scripted, @"windowId") isEqual:window.identifier]) continue;
-        id identifier = DPRead(DPRead(scripted, @"activeTab"), @"tabId");
-        return [identifier isKindOfClass:NSString.class] ? identifier : nil;
-    }
-    return nil;
+    id identifier = DPRead(DPWindowActiveTab(window), @"tabId");
+    return [identifier isKindOfClass:NSString.class] ? identifier : nil;
+}
+
+NSString *DPWindowTabTitle(NSWindow *window) {
+    id title = DPRead(DPWindowActiveTab(window), @"title");
+    return [title isKindOfClass:NSString.class] ? title : nil;
 }
 
 NSView *DPWindowSourceToolbar(NSWindow *window) {

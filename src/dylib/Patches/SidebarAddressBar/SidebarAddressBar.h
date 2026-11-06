@@ -34,6 +34,7 @@ void DPSidebarLayoutNativeControls(NSView *row);
 
 NSString *DPSidebarURL(NSWindow *window);
 BOOL DPSidebarIsEmptyAddress(NSString *URLString);
+NSString *DPSidebarDisplayTitle(NSWindow *window, NSString *URLString);
 NSString *DPSidebarDomain(NSString *URLString);
 BOOL DPSidebarOpenEditor(NSView *anchor);
 BOOL DPSidebarOpenEditorWithQuery(NSView *anchor, NSString *query);

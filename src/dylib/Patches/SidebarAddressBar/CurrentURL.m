@@ -24,3 +24,16 @@ NSString *DPSidebarURL(NSWindow *window) {
         ![@[@"http", @"https"] containsObject:current.scheme.lowercaseString]) return saved;
     return current.URL.absoluteString ?: saved;
 }
+
+NSString *DPSidebarDisplayTitle(NSWindow *window, NSString *url) {
+    NSURLComponents *parts = [NSURLComponents componentsWithString:url ?: @""];
+    BOOL generated = [parts.host.lowercaseString hasPrefix:@"template_output."];
+    if ([parts.scheme.lowercaseString isEqual:@"file"])
+        generated = [parts.path.lastPathComponent.lowercaseString hasPrefix:@"template_output."];
+    if (!generated) return DPSidebarDomain(url);
+
+    NSString *title = [DPWindowTabTitle(window) stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    if (!title.length || [title.lowercaseString hasPrefix:@"template_output"] || [title containsString:@"://"])
+        return @"Dia page";
+    return title;
+}

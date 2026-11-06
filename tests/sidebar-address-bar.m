@@ -9,6 +9,7 @@ DPPatch DPSidebarAddressBar;
 @implementation NavigationFixtureButton @end
 @interface TestTab : NSObject
 @property(copy) NSString *URL;
+@property(copy) NSString *title;
 @end
 @implementation TestTab @end
 @interface TestScriptWindow : NSObject
@@ -140,6 +141,19 @@ int main(void) { @autoreleasepool {
     [row refresh];
     NSCAssert([row.URLString isEqual:tab.URL], @"copy source must retain the full URL");
     NSCAssert([((NSButton *)row.subviews.firstObject).title isEqual:@"example.com"], @"display must follow the active tab");
+    NSString *ordinaryURL = tab.URL;
+    tab.title = @"Friday Brief";
+    tab.URL = @"https://template_output.404.example/";
+    [row refresh];
+    NSCAssert([((NSButton *)row.subviews.firstObject).title isEqual:@"Friday Brief"], @"generated pages use Dia’s tab title");
+    NSCAssert([row.URLString isEqual:tab.URL], @"generated titles preserve the actual address");
+    tab.title = @"template_output.404.example";
+    [row refresh];
+    NSCAssert([((NSButton *)row.subviews.firstObject).title isEqual:@"Dia page"], @"unfinished generated pages use a readable fallback");
+    tab.title = @"Regular tab title";
+    tab.URL = ordinaryURL;
+    [row refresh];
+    NSCAssert([((NSButton *)row.subviews.firstObject).title isEqual:@"example.com"], @"ordinary pages still use the host");
     NSButton *addressButton = (NSButton *)row.subviews.firstObject;
     NSCAssert([addressButton.contentTintColor isEqual:NSColor.labelColor], @"loaded addresses keep full contrast");
     NSString *loadedURL = tab.URL;

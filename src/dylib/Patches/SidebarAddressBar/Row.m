@@ -100,7 +100,7 @@
 - (void)refresh {
     NSString *url = DPSidebarURL(self.window);
     self.URLString = url;
-    if (!self.copyFeedback && !self.addressFlipOutgoing) [self updateAddressTitle:DPSidebarDomain(url)];
+    if (!self.copyFeedback && !self.addressFlipOutgoing) [self updateAddressTitle:DPSidebarDisplayTitle(self.window, url)];
     DPSidebarRefreshNativeControls(self);
     DPSidebarUpdateHover(self, NO);
 }
@@ -131,7 +131,7 @@
     });
 }
 - (NSString *)addressFeedbackTitle {
-    return self.copyFeedback ? @"✓ Link copied" : DPSidebarDomain(self.URLString);
+    return self.copyFeedback ? @"✓ Link copied" : DPSidebarDisplayTitle(self.window, self.URLString);
 }
 - (void)transitionAddressTitle {
     NSString *title = [self addressFeedbackTitle];
