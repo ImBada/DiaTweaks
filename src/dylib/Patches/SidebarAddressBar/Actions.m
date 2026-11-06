@@ -29,8 +29,12 @@ BOOL DPSidebarNavigate(NSWindow *window, NSString *address) {
     return NO;
 }
 
+BOOL DPSidebarIsEmptyAddress(NSString *url) {
+    return !url.length || [url isEqual:@"about:blank"] || [url hasPrefix:@"chrome://newtab"];
+}
+
 NSString *DPSidebarDomain(NSString *url) {
-    if (!url.length || [url isEqual:@"about:blank"] || [url hasPrefix:@"chrome://newtab"]) return @"Search or enter URL";
+    if (DPSidebarIsEmptyAddress(url)) return @"Search or enter URL";
     NSURLComponents *parts = [NSURLComponents componentsWithString:url];
     if ([parts.scheme.lowercaseString isEqual:@"file"]) return @"Local file";
     // Never show user info, query strings, or data URLs as a sidebar title.
@@ -63,7 +67,7 @@ static BOOL DPOpenSidebarEditor(NSView *anchor, NSString *query, BOOL anchored) 
     if (!window || window.attachedSheet) return NO;
     [window makeKeyAndOrderFront:nil];
     NSString *url = DPSidebarURL(window);
-    BOOL empty = !url.length || [url isEqual:@"about:blank"] || [url hasPrefix:@"chrome://newtab"];
+    BOOL empty = DPSidebarIsEmptyAddress(url);
     BOOL inlineEmpty = query != nil && empty;
     if (query) empty = NO;
     NSMenuItem *item = DPShortcutItem(NSApp.mainMenu, empty ? @"t" : @"l");

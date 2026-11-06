@@ -7,7 +7,7 @@
     // NSButtonCell can tighten its title when its available width changes.
     // Draw the same glyphs at the same origin and truncate only the tail.
     NSDictionary *attributes = @{NSFontAttributeName: self.font,
-        NSForegroundColorAttributeName: NSColor.labelColor};
+        NSForegroundColorAttributeName: self.contentTintColor ?: NSColor.labelColor};
     NSString *title = self.title;
     CGFloat available = MAX(0, NSWidth(self.bounds) - 4);
     if ([title sizeWithAttributes:attributes].width > available) {
@@ -40,6 +40,11 @@
 }
 @end
 
+
+@interface DPSidebarAddressRow ()
+@property NSUInteger addressFlipGeneration;
+@property BOOL addressFlipOutgoing;
+@end
 
 @implementation DPSidebarAddressRow
 - (CGFloat)preferredHeight { return 36 + (self.suggestions ? self.suggestionURLs.count * 34 + 8 : 0); }
@@ -95,7 +100,7 @@
 - (void)refresh {
     NSString *url = DPSidebarURL(self.window);
     self.URLString = url;
-    if (!self.copyFeedback) self.address.title = DPSidebarDomain(url);
+    if (!self.copyFeedback && !self.addressFlipOutgoing) [self updateAddressTitle:DPSidebarDomain(url)];
     DPSidebarRefreshNativeControls(self);
     DPSidebarUpdateHover(self, NO);
 }
@@ -114,7 +119,7 @@
 }
 - (void)showCopyFeedback {
     NSUInteger feedback = ++self.copyFeedback;
-    [self setAddressTitleWithTransition:@"✓ Link copied"];
+    [self transitionAddressTitle];
     NSAccessibilityPostNotificationWithUserInfo(self.address, NSAccessibilityAnnouncementRequestedNotification,
         @{NSAccessibilityAnnouncementKey: @"Link copied", NSAccessibilityPriorityKey: @(NSAccessibilityPriorityMedium)});
     __weak DPSidebarAddressRow *weakRow = self;
@@ -122,24 +127,61 @@
         DPSidebarAddressRow *row = weakRow;
         if (!row || row.copyFeedback != feedback) return;
         row.copyFeedback = 0;
-        [row setAddressTitleWithTransition:DPSidebarDomain(row.URLString)];
+        [row transitionAddressTitle];
     });
 }
-- (void)setAddressTitleWithTransition:(NSString *)title {
-    if (!NSWorkspace.sharedWorkspace.accessibilityDisplayShouldReduceMotion) {
-        self.address.wantsLayer = YES;
-        CABasicAnimation *tilt = [CABasicAnimation animationWithKeyPath:@"transform.rotation.x"];
-        tilt.fromValue = @(-1.15);
-        tilt.toValue = @0;
-        tilt.duration = 0.28;
-        tilt.timingFunction = [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseOut];
-        [self.address.layer addAnimation:tilt forKey:@"copyFeedback"];
+- (NSString *)addressFeedbackTitle {
+    return self.copyFeedback ? @"✓ Link copied" : DPSidebarDomain(self.URLString);
+}
+- (void)transitionAddressTitle {
+    NSString *title = [self addressFeedbackTitle];
+    NSUInteger generation = ++self.addressFlipGeneration;
+    if (NSWorkspace.sharedWorkspace.accessibilityDisplayShouldReduceMotion || self.address.hiddenOrHasHiddenAncestor) {
+        self.addressFlipOutgoing = NO;
+        [self.address.layer removeAnimationForKey:@"copyFeedback"];
+        [self updateAddressTitle:title];
+        return;
     }
+
+    self.address.wantsLayer = YES;
+    CALayer *layer = self.address.layer;
+    NSNumber *angle = [layer.presentationLayer valueForKeyPath:@"transform.rotation.x"] ?: @0;
+    CABasicAnimation *outgoing = [CABasicAnimation animationWithKeyPath:@"transform.rotation.x"];
+    outgoing.fromValue = angle;
+    outgoing.toValue = @(-M_PI_2);
+    outgoing.duration = 0.17;
+    outgoing.timingFunction = [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseIn];
+    outgoing.fillMode = kCAFillModeForwards;
+    outgoing.removedOnCompletion = NO;
+
+    self.addressFlipOutgoing = YES;
+    __weak DPSidebarAddressRow *weakRow = self;
+    [CATransaction begin];
+    [CATransaction setCompletionBlock:^{
+        DPSidebarAddressRow *row = weakRow;
+        if (!row || row.addressFlipGeneration != generation) return;
+        row.addressFlipOutgoing = NO;
+        [row updateAddressTitle:[row addressFeedbackTitle]];
+        [row.address displayIfNeeded];
+
+        CABasicAnimation *incoming = [CABasicAnimation animationWithKeyPath:@"transform.rotation.x"];
+        incoming.fromValue = @(M_PI_2);
+        incoming.toValue = @0;
+        incoming.duration = 0.17;
+        incoming.timingFunction = [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseOut];
+        [row.address.layer addAnimation:incoming forKey:@"copyFeedback"];
+    }];
+    [layer addAnimation:outgoing forKey:@"copyFeedback"];
+    [CATransaction commit];
+}
+- (void)updateAddressTitle:(NSString *)title {
     self.address.title = title;
+    self.address.contentTintColor = !self.copyFeedback && DPSidebarIsEmptyAddress(self.URLString)
+        ? NSColor.secondaryLabelColor : NSColor.labelColor;
 }
 - (void)copyLink:(id)sender {
     NSString *url = DPSidebarURL(self.window);
-    if (!url.length || [url isEqual:@"about:blank"] || [url hasPrefix:@"chrome://newtab"]) return;
+    if (DPSidebarIsEmptyAddress(url)) return;
     [NSPasteboard.generalPasteboard clearContents];
     if ([NSPasteboard.generalPasteboard setString:url forType:NSPasteboardTypeString]) [self showCopyFeedback];
 }

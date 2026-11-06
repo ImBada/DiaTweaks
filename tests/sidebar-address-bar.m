@@ -140,6 +140,18 @@ int main(void) { @autoreleasepool {
     [row refresh];
     NSCAssert([row.URLString isEqual:tab.URL], @"copy source must retain the full URL");
     NSCAssert([((NSButton *)row.subviews.firstObject).title isEqual:@"example.com"], @"display must follow the active tab");
+    NSButton *addressButton = (NSButton *)row.subviews.firstObject;
+    NSCAssert([addressButton.contentTintColor isEqual:NSColor.labelColor], @"loaded addresses keep full contrast");
+    NSString *loadedURL = tab.URL;
+    for (NSString *emptyURL in @[@"about:blank", @"chrome://newtab/"]) {
+        tab.URL = emptyURL;
+        [row refresh];
+        NSCAssert([addressButton.title isEqual:@"Search or enter URL"], @"empty tabs show the search prompt");
+        NSCAssert([addressButton.contentTintColor isEqual:NSColor.secondaryLabelColor], @"the prompt uses the secondary label color");
+    }
+    tab.URL = loadedURL;
+    [row refresh];
+    NSCAssert([addressButton.contentTintColor isEqual:NSColor.labelColor], @"navigating restores full contrast");
     row.frameSize = NSMakeSize(220,36);
     DPAddressNativeControls *native = DPAddressControlsFor(row, YES);
     DPCreateAddressExtensionsHost(native);

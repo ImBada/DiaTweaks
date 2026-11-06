@@ -45,9 +45,12 @@ void DPSidebarApplyToolbar(NSView *pane) {
     DPSidebarStopToolbarHover([DPToolbarHover forPane:pane]);
     NSRect base = DPSidebarToolbarBase(bar), frame = base;
     CGFloat height = NSHeight(base), edge = DPBottom(pane, base);
-    frame.origin.y += pane.isFlipped ? -edge : edge;
+    BOOL peeking = DPSidebarToolbarIsPeeking(pane);
+    if (!peeking) frame.origin.y += pane.isFlipped ? -edge : edge;
+    if (peeking && pane.subviews.lastObject != bar)
+        [pane addSubview:bar positioned:NSWindowAbove relativeTo:nil];
     DPReplacementFrame(bar, frame);
-    bar.alphaValue = 0;
+    bar.alphaValue = peeking ? 1 : 0;
     NSMutableArray<NSView *> *stack = [NSMutableArray new];
     for (NSView *view in pane.subviews) if (view != bar) [stack addObject:view];
     [stack sortUsingComparator:^NSComparisonResult(NSView *a, NSView *b) {

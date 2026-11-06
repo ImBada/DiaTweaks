@@ -9,3 +9,5 @@ void DPSidebarInstallToolbarVerification(void);
 NSString *DPSidebarVerifyToolbar(void);
 NSRect DPSidebarToolbarBase(NSView *view);
 void DPSidebarCheckToolbarState(void);
+BOOL DPSidebarToolbarIsPeeking(NSView *pane);
+BOOL DPSidebarUsesToolbarCopyFeedback(NSWindow *window);

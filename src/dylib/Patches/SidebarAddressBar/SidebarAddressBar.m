@@ -1,5 +1,6 @@
 #import "SidebarAddressBar.h"
 #import "Settings.h"
+#import "Toolbar.h"
 
 static NSTimer *DPAddressWatch;
 
@@ -52,14 +53,39 @@ static NSApplicationTerminateReply DPAddressAppShouldTerminate(id self, SEL _cmd
     return reply;
 }
 
+// Dia 1.56 presents copy feedback in a toast panel, independently of the toolbar.
+static BOOL DPAddressSuppressCopyToast;
+
+static void DPAddressToastOrderFront(NSWindow *self, SEL _cmd, id sender) {
+    if (!DPAddressSuppressCopyToast) DPCallOriginal(DPAddressToastOrderFront, self, sender);
+}
+
+static void DPAddressToastOrderRegardless(NSWindow *self, SEL _cmd) {
+    if (!DPAddressSuppressCopyToast) DPCallOriginal(DPAddressToastOrderRegardless, self);
+}
+
+static void DPAddressToastOrderWindow(NSWindow *self, SEL _cmd, NSWindowOrderingMode place, NSInteger other) {
+    if (place == NSWindowOut || !DPAddressSuppressCopyToast)
+        DPCallOriginal(DPAddressToastOrderWindow, self, place, other);
+}
+
 static BOOL DPAddressAppSendAction(NSApplication *self, SEL _cmd, SEL action, id target, id sender) {
     if ([sender isKindOfClass:NSButton.class] && [[sender title] isEqual:@"Quit"] && [sender window].sheetParent)
         DPAddressPrepareToQuit();
     BOOL copiesURL = DPSidebarAddressBar.on && action == NSSelectorFromString(@"copyCurrentURL:");
     NSWindow *window = copiesURL ? self.keyWindow : nil;
     NSInteger before = window ? NSPasteboard.generalPasteboard.changeCount : 0;
-    BOOL sent = DPCallOriginal(DPAddressAppSendAction, self, action, target, sender);
+    BOOL useToolbarFeedback = window && DPSidebarUsesToolbarCopyFeedback(window);
+    BOOL previousSuppression = DPAddressSuppressCopyToast;
+    DPAddressSuppressCopyToast |= window && !useToolbarFeedback && DPSidebarAddressRowAvailable(window);
+    BOOL sent;
+    @try {
+        sent = DPCallOriginal(DPAddressAppSendAction, self, action, target, sender);
+    } @finally {
+        DPAddressSuppressCopyToast = previousSuppression;
+    }
     if (!sent || !window || before == NSPasteboard.generalPasteboard.changeCount) return sent;
+    if (useToolbarFeedback) return sent;
     for (NSView *header in DPFindViews(DPDiaSidebarHeader)) {
         if (header.window != window || header.hiddenOrHasHiddenAncestor) continue;
         for (NSView *view in header.superview.subviews)
@@ -79,6 +105,12 @@ static void DPInstallSidebarAddress(void) {
         DPHookClass(NSApp.class, @selector(replyToApplicationShouldTerminate:), (IMP)DPAddressAppReplyToQuit);
         DPHookClass(NSApp.delegate.class, @selector(applicationShouldTerminate:), (IMP)DPAddressAppShouldTerminate);
         DPHookClass(NSApp.class, @selector(sendAction:to:from:), (IMP)DPAddressAppSendAction);
+        Class toast = objc_getClass(DPDiaToasts);
+        if (toast) {
+            DPHookClass(toast, @selector(orderFront:), (IMP)DPAddressToastOrderFront);
+            DPHookClass(toast, @selector(orderFrontRegardless), (IMP)DPAddressToastOrderRegardless);
+            DPHookClass(toast, @selector(orderWindow:relativeTo:), (IMP)DPAddressToastOrderWindow);
+        }
         DPApplySidebarAddress(&DPSidebarAddressBar);
     });
 }
