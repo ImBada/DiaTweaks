@@ -61,6 +61,7 @@ NSString *DPAppSupport(NSString *path);
 NSString *DPRelayProblem(void);  // nil if diapatch and the original Dia it starts are in place.
 NSString *DPHostProblem(NSString *manifest, NSString *name);  // nil if the native host manifest at that path sends `name` to diapatch.
 extern NSNotificationName const DPPatchesDidChangeNotification;
+extern BOOL DPTesting;  // Under make test, which saves nothing and has no one to answer an alert.
 
 #pragma mark Hooks
 

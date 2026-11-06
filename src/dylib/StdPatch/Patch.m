@@ -44,13 +44,16 @@ static void DPAnimate(void) {
     [NSRunLoop.mainRunLoop addTimer:timer forMode:NSRunLoopCommonModes];
 }
 
+BOOL DPTesting;
+
 static void DPEnsureReady(DPPatch *patch) {
     NSString *problem = patch->ready(patch);
     for (int tries = 1; problem && tries < 3; tries++) {
         if (patch->apply) patch->apply(patch);
         problem = patch->ready(patch);
     }
-    if (!problem) return;
+    // The test reports the problem itself; an alert would stop it until someone answers.
+    if (!problem || DPTesting) return;
     NSLog(@"DiaPatches: %@ couldn't turn on: %@", patch->title, problem);
     patch->on = NO;
     [DPDefaults setBool:NO forKey:patch->key];
