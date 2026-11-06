@@ -4,6 +4,7 @@
 static const NSTimeInterval DPSettleSeconds = 1;
 
 static void DPWriteReport(NSArray<NSDictionary *> *results, NSString *path) {
+    DPTesting = NO;  // Dia carries on with the saved settings.
     NSMutableArray<NSString *> *unavailable = [NSMutableArray new];
     for (NSUInteger i = 0; i < DPPatchCount; i++) if (DPPatches[i]->unavailable && !DPPatches[i]->inDia) [unavailable addObject:DPPatches[i]->key];
     NSDictionary *info = NSBundle.mainBundle.infoDictionary;
@@ -38,6 +39,7 @@ static void DPRunScenario(NSArray<NSArray<NSString *> *> *scenarios, NSUInteger 
 }
 
 void DPRunTests(NSString *path) {
+    DPTesting = YES;
     DPOnLaunch(^{
         __block int polls = 0;
         [NSTimer scheduledTimerWithTimeInterval:0.5 repeats:YES block:^(NSTimer *timer) {
