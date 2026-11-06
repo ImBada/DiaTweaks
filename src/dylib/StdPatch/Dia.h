@@ -32,6 +32,7 @@
 #define DPDiaBrowser            "ArcBrowser"
 #define DPDiaBrowserDelegate    "_TtC3ADK15ChromiumBrowser"
 #define DPDiaWebContents        "ArcWebContents"
+#define DPDiaNavigationController "ArcWebContentsNavigationController"
 #define DPDiaTabGroupProperties "ArcTabGroupProperties"
 #define DPDiaToasts             "_TtC11DiaToastsV210ToastPanel"  // Dia 1.56 shows "Copied Current URL" with these.
 #define DPDiaTabSwitcher        "_TtC10RecentTabs26RecentTabsWindowController"
