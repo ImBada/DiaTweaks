@@ -41,11 +41,6 @@
 @end
 
 
-@interface DPSidebarAddressRow ()
-@property NSUInteger addressFlipGeneration;
-@property BOOL addressFlipOutgoing;
-@end
-
 @implementation DPSidebarAddressRow
 - (CGFloat)preferredHeight { return 36 + (self.suggestions ? self.suggestionURLs.count * 34 + 8 : 0); }
 - (instancetype)initWithFrame:(NSRect)frame {
@@ -100,7 +95,7 @@
 - (void)refresh {
     NSString *url = DPSidebarURL(self.window);
     self.URLString = url;
-    if (!self.copyFeedback && !self.addressFlipOutgoing) [self updateAddressTitle:DPSidebarDisplayTitle(self.window, url)];
+    if (!self.copyFeedback) [self updateAddressTitle:DPSidebarDisplayTitle(self.window, url)];
     DPSidebarRefreshNativeControls(self);
     DPSidebarUpdateHover(self, NO);
 }
@@ -135,44 +130,20 @@
 }
 - (void)transitionAddressTitle {
     NSString *title = [self addressFeedbackTitle];
-    NSUInteger generation = ++self.addressFlipGeneration;
-    if (NSWorkspace.sharedWorkspace.accessibilityDisplayShouldReduceMotion || self.address.hiddenOrHasHiddenAncestor) {
-        self.addressFlipOutgoing = NO;
-        [self.address.layer removeAnimationForKey:@"copyFeedback"];
-        [self updateAddressTitle:title];
-        return;
+    if ([self.address.title isEqualToString:title]) return;
+    if (!NSWorkspace.sharedWorkspace.accessibilityDisplayShouldReduceMotion && !self.address.hiddenOrHasHiddenAncestor) {
+        self.address.wantsLayer = YES;
+        self.address.layer.masksToBounds = YES;
+        [self.address displayIfNeeded];
+        CATransition *slide = [CATransition animation];
+        slide.type = kCATransitionPush;
+        slide.subtype = kCATransitionFromBottom;
+        slide.duration = 0.24;
+        slide.timingFunction = [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseInEaseOut];
+        [self.address.layer addAnimation:slide forKey:@"copyFeedback"];
     }
-
-    self.address.wantsLayer = YES;
-    CALayer *layer = self.address.layer;
-    NSNumber *angle = [layer.presentationLayer valueForKeyPath:@"transform.rotation.x"] ?: @0;
-    CABasicAnimation *outgoing = [CABasicAnimation animationWithKeyPath:@"transform.rotation.x"];
-    outgoing.fromValue = angle;
-    outgoing.toValue = @(-M_PI_2);
-    outgoing.duration = 0.17;
-    outgoing.timingFunction = [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseIn];
-    outgoing.fillMode = kCAFillModeForwards;
-    outgoing.removedOnCompletion = NO;
-
-    self.addressFlipOutgoing = YES;
-    __weak DPSidebarAddressRow *weakRow = self;
-    [CATransaction begin];
-    [CATransaction setCompletionBlock:^{
-        DPSidebarAddressRow *row = weakRow;
-        if (!row || row.addressFlipGeneration != generation) return;
-        row.addressFlipOutgoing = NO;
-        [row updateAddressTitle:[row addressFeedbackTitle]];
-        [row.address displayIfNeeded];
-
-        CABasicAnimation *incoming = [CABasicAnimation animationWithKeyPath:@"transform.rotation.x"];
-        incoming.fromValue = @(M_PI_2);
-        incoming.toValue = @0;
-        incoming.duration = 0.17;
-        incoming.timingFunction = [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseOut];
-        [row.address.layer addAnimation:incoming forKey:@"copyFeedback"];
-    }];
-    [layer addAnimation:outgoing forKey:@"copyFeedback"];
-    [CATransaction commit];
+    [self updateAddressTitle:title];
+    [self.address displayIfNeeded];
 }
 - (void)updateAddressTitle:(NSString *)title {
     self.address.title = title;
