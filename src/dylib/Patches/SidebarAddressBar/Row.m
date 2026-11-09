@@ -47,6 +47,7 @@
     if (!(self = [super initWithFrame:frame])) return nil;
     self.wantsLayer = YES;
     self.layer.cornerRadius = 10;
+    self.layer.cornerCurve = kCACornerCurveContinuous;
     self.address = [DPSidebarActionButton buttonWithTitle:@"Search or enter URL" target:self action:@selector(openEditor:)];
     self.address.bordered = NO;
     self.address.font = [NSFont systemFontOfSize:13 weight:NSFontWeightMedium];

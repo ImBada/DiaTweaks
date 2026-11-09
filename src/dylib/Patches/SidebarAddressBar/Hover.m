@@ -22,10 +22,13 @@ NSColor *DPSidebarEditorFill(void) {
     return [NSColor.textBackgroundColor blendedColorWithFraction:0.02 ofColor:NSColor.controlAccentColor];
 }
 
-NSColor *DPSidebarEditorBorder(void) {
-    BOOL light = [[NSAppearance.currentDrawingAppearance bestMatchFromAppearancesWithNames:
+static BOOL DPAddressLightAppearance(void) {
+    return [[NSAppearance.currentDrawingAppearance bestMatchFromAppearancesWithNames:
         @[NSAppearanceNameAqua, NSAppearanceNameDarkAqua]] isEqual:NSAppearanceNameAqua];
-    return light ? [NSColor.whiteColor colorWithAlphaComponent:0.85] :
+}
+
+NSColor *DPSidebarEditorBorder(void) {
+    return DPAddressLightAppearance() ? [NSColor.whiteColor colorWithAlphaComponent:0.85] :
         [NSColor.labelColor colorWithAlphaComponent:0.16];
 }
 
@@ -35,14 +38,17 @@ void DPSidebarUpdateHover(NSView *row, BOOL animated) {
     BOOL editing = [(DPSidebarAddressRow *)row isEditingAddress];
     BOOL active = DPSidebarRowIsHovered(row) || focused;
     [row.effectiveAppearance performAsCurrentDrawingAppearance:^{
-        NSColor *fill = editing ? DPSidebarEditorFill() :
-            [NSColor.labelColor colorWithAlphaComponent:active ? 0.11 : 0.06];
-        NSColor *border = DPSidebarEditorBorder();
+        BOOL lightHover = active && DPAddressLightAppearance();
+        NSColor *surface = lightHover ? NSColor.whiteColor : NSColor.labelColor;
+        CGFloat opacity = active ? (lightHover ? 0.55 : 0.11) : 0.06;
+        NSColor *fill = editing ? DPSidebarEditorFill() : [surface colorWithAlphaComponent:opacity];
+        NSColor *border = editing ? DPSidebarEditorBorder() :
+            [NSColor.labelColor colorWithAlphaComponent:0.13];
         CGColorRef color = fill.CGColor;
         [CATransaction begin];
         [CATransaction setDisableActions:YES];
         row.layer.borderColor = border.CGColor;
-        row.layer.borderWidth = editing ? 1 : 0;
+        row.layer.borderWidth = editing ? 1 : 1 / MAX(1, row.window.backingScaleFactor);
         row.layer.maskedCorners = kCALayerMinXMinYCorner | kCALayerMaxXMinYCorner |
             kCALayerMinXMaxYCorner | kCALayerMaxXMaxYCorner;
         row.layer.masksToBounds = YES;
