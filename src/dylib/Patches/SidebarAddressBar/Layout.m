@@ -32,7 +32,9 @@ static void DPPlaceSidebarRow(NSView *header) {
     NSView *root = header.superview, *body = DPGet(header, &DPBodyKey);
     DPSidebarAddressRow *row = DPGet(header, &DPRowKey);
     if (body.superview == root) DPRestoreBody(body);
-    if (!DPSidebarAddressBar.on || !DPSidebarUsesVerticalTabs(root) || header.hiddenOrHasHiddenAncestor || !root.isFlipped) {
+    // Auto-hide can unhide the root before its floating parent. Keep the
+    // address row and tab offset ready throughout that transition.
+    if (!DPSidebarAddressBar.on || !DPSidebarUsesVerticalTabs(root) || header.hidden || !root.isFlipped) {
         DPSidebarRestoreNativeControls(row);
         [row removeFromSuperview];
         return;
@@ -158,8 +160,8 @@ void DPSidebarRefreshLayout(void) {
     for (NSView *header in DPFindViews(DPDiaSidebarHeader)) {
         DPSidebarAddressRow *row = DPGet(header, &DPRowKey);
         if (!row.superview || row.superview != header.superview ||
-            !DPSidebarUsesVerticalTabs(header.superview) || header.hiddenOrHasHiddenAncestor) {
-            if (row.superview || (!header.hiddenOrHasHiddenAncestor && DPSidebarUsesVerticalTabs(header.superview)))
+            !DPSidebarUsesVerticalTabs(header.superview) || header.hidden) {
+            if (row.superview || (!header.hidden && DPSidebarUsesVerticalTabs(header.superview)))
                 DPPlaceSidebarRow(header);
         } else {
             [row refresh];

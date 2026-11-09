@@ -5,6 +5,10 @@ DPPatch DPSidebarAddressBar;
 @implementation FlippedHost
 - (BOOL)isFlipped { return YES; }
 @end
+@interface SidebarLayoutWindow : NSWindow @end
+@implementation SidebarLayoutWindow
+- (BOOL)isVisible { return YES; }
+@end
 @interface NavigationFixtureButton : NSView @end
 @implementation NavigationFixtureButton @end
 @interface TestTab : NSObject
@@ -87,6 +91,30 @@ int main(void) { @autoreleasepool {
         NSCAssert(row.superview == root && !NSIntersectsRect(row.frame, body.frame),
                   @"revealing an inset tab host should restore the address row without overlap");
     }
+    // Dia can unhide the sidebar root before unhiding its floating parent.
+    // Keep the same row and offset through that gap, without a timer tick.
+    NSWindow *layoutWindow = [[SidebarLayoutWindow alloc] initWithContentRect:root.bounds
+        styleMask:NSWindowStyleMaskBorderless backing:NSBackingStoreBuffered defer:YES];
+    NSView *floating = [[NSView alloc] initWithFrame:root.bounds];
+    layoutWindow.contentView = floating;
+    [floating addSubview:root];
+    NSRect revealFrame = body.frame;
+    for (NSUInteger cycle = 0; cycle < 3; cycle++) {
+        floating.hidden = YES;
+        root.hidden = YES;
+        DPSidebarRefreshLayout();
+        NSCAssert(row.superview == root && NSEqualRects(body.frame, revealFrame),
+                  @"a hidden ancestor must not tear down the row or its spacing");
+        root.hidden = NO;
+        DPPlaceSidebarRow(header);
+        NSCAssert(row.superview == root && NSEqualRects(body.frame, revealFrame),
+                  @"layout must survive the root unhide while its parent is still hidden");
+        floating.hidden = NO;
+        NSCAssert(DPSidebarAddressRowAvailable(layoutWindow) && NSEqualRects(body.frame, revealFrame),
+                  @"the address row and tab spacing must be ready on the first visible frame");
+    }
+    [root removeFromSuperview];
+    layoutWindow = nil;
     DPAddressNativeControls *owned = DPAddressControlsFor(row, YES);
     owned.scroll = [[NSScrollView alloc] initWithFrame:NSMakeRect(6,96,228,90)];
     [root addSubview:owned.scroll positioned:NSWindowBelow relativeTo:body];
