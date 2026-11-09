@@ -1,72 +1,38 @@
-#import "StdPatch/StdPatch.h"
+#import "Patches/PinnedTabCloseButton/PinnedTabs.h"
 
-// Dia hides the close button on a pinned tab outside a folder by setting suppressesCloseButton on its tab controller,
-// and reads it again each time the pointer enters the tab. Clearing it first shows the button as on tabs in a folder.
-
-extern DPPatch DPPinnedTabCloseButton;
-extern void *swift_unknownObjectWeakLoadStrong(void *reference);
-
-static NSHashTable *DPCleared;  // Tab controllers whose flag this patch cleared.
-
-// TabView.viewModel.delegate is a Swift weak reference, which DPSwiftValue can't read.
-static id DPTabController(NSView *tab) {
-    void **viewModel = DPIvar(tab, "viewModel");
-    void *delegate = viewModel && *viewModel ? DPIvar((__bridge id)*viewModel, "delegate") : NULL;
-    return delegate ? (__bridge_transfer id)swift_unknownObjectWeakLoadStrong(delegate) : nil;
-}
-
-static BOOL *DPSuppressFlag(id controller) { return DPIvar(controller, "suppressesCloseButton"); }
-
-static void DPAllowClose(NSView *tab) {
-    id controller = DPTabController(tab);
-    BOOL *suppress = DPSuppressFlag(controller);
-    if (!suppress || !*suppress) return;
-    *suppress = NO;
-    [DPCleared addObject:controller];
-}
+// Clearing Dia's flag before the pointer enters a pinned tab outside a folder shows the button as on tabs in a folder.
 
 static void DPTracker_mouseEntered(id self, SEL _cmd, NSEvent *event) {
-    if (DPPinnedTabCloseButton.on) {
-        NSView *view = objc_loadWeak((__autoreleasing id *)DPIvar(self, "view"));
-        while (view && !DPIsKind(view, DPDiaTabView)) view = view.superview;
-        if (view) DPAllowClose(view);
-    }
+    if (DPPinnedTabCloseButton.on)
+        DPAllowClose(DPViewModelDelegate(DPTrackedTab(self)));
     DPCallOriginal(DPTracker_mouseEntered, self, event);
 }
 
 // Dia sets the flag again when it reconfigures a tab, which lays it out.
 static void DPTab_layout(NSView *self, SEL _cmd) {
     DPCallOriginal(DPTab_layout, self);
-    if (DPPinnedTabCloseButton.on) DPAllowClose(self);
+    if (DPPinnedTabCloseButton.on) DPAllowClose(DPViewModelDelegate(self));
 }
 
 // The button follows on the next hover.
 static void DPApplyPinnedTabCloseButton(DPPatch *patch) {
-    if (patch->on) {
-        for (NSView *tab in DPFindViews(DPDiaTabView)) DPAllowClose(tab);
-        return;
-    }
-    for (id controller in DPCleared.allObjects) {
-        BOOL *suppress = DPSuppressFlag(controller);
-        if (suppress) *suppress = YES;
-    }
-    [DPCleared removeAllObjects];
+    if (!patch->on) DPRestoreSuppressedCloseButtons();
+    else for (NSView *tab in DPFindViews(DPDiaTabView)) DPAllowClose(DPViewModelDelegate(tab));
 }
 
 static NSString *DPVerifyPinnedTabCloseButton(DPPatch *patch) {
+    if (!patch->on) return nil;  // Dia sets the flag back as it pleases.
     for (NSView *tab in DPFindViews(DPDiaTabView)) {
-        id controller = DPTabController(tab);
+        id controller = DPViewModelDelegate(tab);
         if (!controller) continue;  // A tab being torn down.
-        BOOL *suppress = DPSuppressFlag(controller);
+        BOOL *suppress = DPIvar(controller, "suppressesCloseButton");
         if (!suppress) return @"tab has no close button setting";
-        if (patch->on && *suppress) return @"pinned tab hides its close button";
-        if (!patch->on && !*suppress && [DPCleared containsObject:controller]) return @"pinned tab keeps its close button";
+        if (*suppress) return @"pinned tab hides its close button";
     }
     return nil;
 }
 
 static void DPInstallPinnedTabCloseButton(void) {
-    DPCleared = [NSHashTable weakObjectsHashTable];
     DPHook(DPDiaHoverTracker, @selector(mouseEntered:), (IMP)DPTracker_mouseEntered);
     DPHook(DPDiaTabView, @selector(layout), (IMP)DPTab_layout);
 }
