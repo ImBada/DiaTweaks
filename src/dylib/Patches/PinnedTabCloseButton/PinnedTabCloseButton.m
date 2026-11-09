@@ -39,14 +39,14 @@ static void DPApplyPinnedTabCloseButton(DPPatch *patch) {
     [DPCleared removeAllObjects];
 }
 
+// Off, Dia owns the flag again, so only the on state is checked.
 static NSString *DPVerifyPinnedTabCloseButton(DPPatch *patch) {
     for (NSView *tab in DPFindViews(DPDiaTabView)) {
         id controller = DPViewModelDelegate(tab);
-        if (!controller) continue;  // A tab being torn down.
+        if (!controller || tab.needsLayout) continue;  // Torn down, or about to be cleared.
         BOOL *suppress = DPIvar(controller, "suppressesCloseButton");
         if (!suppress) return @"tab has no close button setting";
         if (patch->on && *suppress) return @"pinned tab hides its close button";
-        if (!patch->on && !*suppress && [DPCleared containsObject:controller]) return @"pinned tab keeps its close button";
     }
     return nil;
 }

@@ -55,6 +55,7 @@
 #define DPDiaCommandBarButton   "_TtC15BoostCommandBar13ToolbarButton"
 #define DPDiaTabView            "_TtC5TabUI7TabView"
 #define DPDiaTabContentView     "_TtC5TabUI14TabContentView"
+#define DPDiaTabPageAttributes  "_TtC5TabUI33TabWebContentAttributesController"
 #define DPDiaTabGroupCell       "_TtC5TabUI16TabGroupCellView"
 #define DPDiaTabGroupBackground "_TtCC5TabUI16TabGroupCellViewP33_6B047B569AD47EBB5C3E7DC66393AFEF23ContainerBackgroundView"
 #define DPDiaTabShape           "_TtC5TabUIP33_903BE4B7F5DFD8B21A7A465D1A9EF8E412TabShapeView"
