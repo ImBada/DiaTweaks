@@ -64,6 +64,11 @@ void DPRelayoutLittleDiaBars(void);
 NSView *DPMakeAddressView(NSView *title);
 void DPRefreshAddressView(NSView *view);
 void DPEditLittleDiaAddress(NSWindow *window);  // As ⌘L does, once the window has its address.
+void DPShowLittleDiaNotice(NSWindow *window, NSString *message);  // In place of the address, for a moment.
+
+// Shortcuts.m: Dia's menu commands, like Copy URL, Go Back, Zoom In and Print, and their shortcuts, act on the page.
+void DPInstallLittleDiaShortcuts(void);
+NSString *DPLittleDiaShortcutsProblem(void);
 
 // Navigate.m: the page's own navigation.
 NSString *DPLittleDiaURL(NSWindow *window);                   // The page's address, or @"" before it has one.
