@@ -20,6 +20,7 @@ Each tweak changes one thing about Dia: it hides something you don't use, change
 | Window | How the window looks and behaves |
 | Passwords | Password managers and passkeys |
 | Links | Opening links in Peek and the address shown on hover |
+| Ad Blocking | Running uBlock Origin in place of Dia's ad blocker |
 
 Turn them on and off in **Dia → Settings → Patches**, or with the `diatweaks` command. Each one's Settings page links to its wiki page, which says what it does and when you'd want it.
 
@@ -76,7 +77,7 @@ rm -rf /tmp/DiaTweaks && git clone --depth 1 https://github.com/JaceThings/DiaTw
 <details>
 <summary><strong>Is it safe?</strong></summary>
 
-It's built on your Mac from this code, and it doesn't send anything about you anywhere. It goes online only to check for updates and to load the preview pictures in Settings. A few tweaks look at what's in Dia to work: Group Tabs by Domain reads your tabs' addresses, and Tidy Tabs gives your tab titles and addresses to Apple's on-device model, which runs on your Mac. The password tweaks pass messages between your password manager and its extension without reading them.
+It's built on your Mac from this code, and it doesn't send anything about you anywhere. It goes online only to check for updates, to load the preview pictures in Settings, and to download uBlock Origin from its GitHub releases if you turn that tweak on. A few tweaks look at what's in Dia to work: Group Tabs by Domain reads your tabs' addresses, and Tidy Tabs gives your tab titles and addresses to Apple's on-device model, which runs on your Mac. The password tweaks pass messages between your password manager and its extension without reading them.
 
 </details>
 
