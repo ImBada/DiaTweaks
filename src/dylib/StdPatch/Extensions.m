@@ -2,6 +2,18 @@
 
 static NSMutableArray<NSString *> *DPExtensionFolders, *DPLaunchFlags;
 
+// Chromium keeps only the last of a flag, so a list flag given more than once becomes one listing every value.
+static void DPMergeListFlag(NSMutableArray<NSString *> *args, NSString *flag) {
+    NSMutableArray<NSString *> *values = [NSMutableArray array];
+    NSUInteger first = NSNotFound;
+    for (NSUInteger i = args.count; i-- > 0;)
+        if ([args[i] hasPrefix:flag]) {
+            [values insertObject:[args[i] substringFromIndex:flag.length] atIndex:0];
+            [args removeObjectAtIndex:(first = i)];
+        }
+    if (values.count) [args insertObject:[flag stringByAppendingString:[values componentsJoinedByString:@","]] atIndex:first];
+}
+
 // Dia passes Chromium its command line here. Chromium keeps only the last --load-extension, so one flag lists every
 // folder, any Dia passed first.
 static id DPConfiguration_init(id self, SEL _cmd, int argc, NSArray<NSString *> *argv, NSString *profilePath, NSUInteger applicationID,
@@ -16,6 +28,8 @@ static id DPConfiguration_init(id self, SEL _cmd, int argc, NSArray<NSString *> 
     [folders addObjectsFromArray:DPExtensionFolders];
     if (folders.count) [args addObject:[flag stringByAppendingString:[folders componentsJoinedByString:@","]]];
     [args addObjectsFromArray:DPLaunchFlags];
+    DPMergeListFlag(args, @"--enable-features=");
+    DPMergeListFlag(args, @"--disable-features=");
     return DPCallOriginal(DPConfiguration_init, self, argc + (int)(args.count - argv.count), args, profilePath, applicationID, isProduction,
                           restorationPolicy, loadAllProfiles, quitRunLoop, suiteName);
 }

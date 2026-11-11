@@ -46,15 +46,21 @@ build/group-tabs: tests/group-tabs.m $(GROUP_TABS) | build
 build/mouse-back-forward: tests/mouse-back-forward.m src/dylib/Patches/MouseBackForward/MouseBackForward.m src/dylib/StdPatch/Hook.m $(wildcard src/dylib/StdPatch/*.h) | build
 	clang $(CFLAGS) -Isrc/dylib -framework AppKit -o $@ tests/mouse-back-forward.m src/dylib/StdPatch/Hook.m
 
+SPLIT := src/dylib/Patches/SplitClientHello/Split
+
+build/split-client-hello: tests/split-client-hello.m $(SPLIT).m $(SPLIT).h | build
+	clang $(CFLAGS) -fsanitize=address,undefined -Isrc/dylib -framework Foundation -o $@ tests/split-client-hello.m $(SPLIT).m
+
 build/vertical-tab-glow: tests/vertical-tab-glow.m $(wildcard src/dylib/Patches/HideVerticalTabGlow/*.[hm]) | build
 	clang $(CFLAGS) -Isrc/dylib -framework AppKit -framework QuartzCore -o $@ $<
 
-# Checks that need no Dia: grouping, the DiaTweaks update decision, mouse navigation, Hide Vertical Tab Glow, the Sidebar Grain textures, and that Settings shows each tweak like its neighbours.
-check: build/diapatch build/group-tabs build/mouse-back-forward build/vertical-tab-glow build/patches.json
+# Checks that need no Dia: grouping, the DiaTweaks update decision, mouse navigation, Hide Vertical Tab Glow, ClientHello splitting, the Sidebar Grain textures, and that Settings shows each tweak like its neighbours.
+check: build/diapatch build/group-tabs build/mouse-back-forward build/vertical-tab-glow build/split-client-hello build/patches.json
 	tests/tweaks-update
 	build/group-tabs
 	build/mouse-back-forward
 	build/vertical-tab-glow
+	build/split-client-hello
 	tests/sidebar-grain
 	scripts/check-patches
 
