@@ -15,14 +15,20 @@ static void DPNoteFront(NSWindow *window) {
 // The tab you were on before the one in front, or else one next to it.
 id DPTabBefore(NSWindow *window) {
     NSString *active = DPActiveTabID(window);
-    for (NSString *tabID in [DPRecent objectForKey:window].reverseObjectEnumerator) {
-        id tab = [tabID isEqual:active] ? nil : DPScriptTab(window, tabID);
-        if (tab) return tab;
-    }
     NSArray *tabs = [DPScriptWindow(window) valueForKey:@"appleScriptTabs"];
-    NSUInteger i = active ? [[tabs valueForKey:@"tabId"] indexOfObject:active] : NSNotFound;
+    NSArray<NSString *> *ids = [tabs valueForKey:@"tabId"];
+    for (NSString *tabID in [DPRecent objectForKey:window].reverseObjectEnumerator) {
+        NSUInteger i = [tabID isEqual:active] ? NSNotFound : [ids indexOfObject:tabID];
+        if (i != NSNotFound) return tabs[i];
+    }
+    NSUInteger i = active ? [ids indexOfObject:active] : NSNotFound;
     if (i == NSNotFound) return nil;
     return i + 1 < tabs.count ? tabs[i + 1] : i > 0 ? tabs[i - 1] : nil;
+}
+
+void DPForgetFrontTab(NSWindow *window) {
+    NSString *active = DPActiveTabID(window);
+    if (active) [[DPRecent objectForKey:window] removeObject:active];
 }
 
 static void DPContentPane_viewDidMoveToWindow(NSView *self, SEL _cmd) {

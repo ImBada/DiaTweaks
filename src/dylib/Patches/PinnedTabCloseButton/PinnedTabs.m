@@ -36,14 +36,27 @@ BOOL DPIsOpenPinned(NSView *content) {
     return pinned && *pinned && activeURL && *activeURL;
 }
 
-void DPCloseKeepingTab(NSView *content) {
+enum { DPCloseKeepingTabStyle = 1 };  // TabUI.TabCloseButtonStyle.closeKeepingTab.
+static BOOL DPKeeping;  // A click made by DPCloseKeepingTab, which the minus button's hook sees too.
+
+BOOL DPClickKeepingTab(NSView *content, void (^click)(void)) {
+    if (DPKeeping) return click(), YES;
     uint8_t *style = DPIvar(DPViewModelDelegate(DPEnclosingTab(content)), "requestedCloseButtonStyle");
-    if (!style) return;
+    if (!style) return NO;
     uint8_t dia = *style;
     *style = DPCloseKeepingTabStyle;  // Dia reads it before the click returns.
-    ((void (*)(id, SEL))objc_msgSend)(content, NSSelectorFromString(@"closeButtonClicked"));
+    DPKeeping = YES;
+    click();
+    DPKeeping = NO;
     *style = dia;
-    // The page is gone but Dia doesn't lay the tab out again, so the minus button would stay.
+    // The page is gone, but Dia doesn't lay the tab out again while the pointer is on it, so the minus would stay.
     __weak NSView *weakContent = content;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 4), dispatch_get_main_queue(), ^{ weakContent.needsLayout = YES; });
+    return YES;
+}
+
+BOOL DPCloseKeepingTab(NSView *content) {
+    SEL clicked = NSSelectorFromString(@"closeButtonClicked");
+    if (![content respondsToSelector:clicked]) return NO;
+    return DPClickKeepingTab(content, ^{ ((void (*)(id, SEL))objc_msgSend)(content, clicked); });
 }

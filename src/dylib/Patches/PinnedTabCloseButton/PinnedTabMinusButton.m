@@ -38,18 +38,8 @@ static void DPContent_layout(NSView *self, SEL _cmd) {
 // The button's icon decides, so a click does what it showed. Keeping the tab is the safe guess if the tab changed since.
 static void DPContent_closeButtonClicked(NSView *self, SEL _cmd) {
     BOOL minus = DPMinusOn() && DPCloseButton(self).image == DPMinus;
-    uint8_t *style = minus ? DPIvar(DPViewModelDelegate(DPEnclosingTab(self)), "requestedCloseButtonStyle") : NULL;
-    if (!style) {
+    if (!(minus && DPClickKeepingTab(self, ^{ DPCallOriginal(DPContent_closeButtonClicked, self); })))
         DPCallOriginal(DPContent_closeButtonClicked, self);
-        return;
-    }
-    uint8_t dia = *style;
-    *style = DPCloseKeepingTabStyle;  // Dia reads it before the click returns.
-    DPCallOriginal(DPContent_closeButtonClicked, self);
-    *style = dia;
-    // The pointer is still on the tab, whose page is closing, so Dia doesn't lay it out again and the minus would stay.
-    __weak NSView *content = self;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 4), dispatch_get_main_queue(), ^{ content.needsLayout = YES; });
 }
 
 static void DPApplyPinnedTabMinusButton(DPPatch *patch) { DPRelayoutTabContents(); }

@@ -54,16 +54,19 @@ static NSMenu *DPTab_menuForEvent(NSView *self, SEL _cmd, NSEvent *event) {
     id content = menu && DPUnloadTab.on ? DPTabContent(self) : nil;
     NSView *pane = content ? DPFindView(self, ^BOOL(NSView *view) { return DPIsKind(view, DPDiaTabContentView); }) : nil;
     // An open pinned tab closes its page and stays pinned, as its minus button does, so Dia knows it has no page.
-    BOOL pinned = pane && DPIsOpenPinned(pane);
+    BOOL pinned = pane && DPIsOpenPinned(pane) && [pane respondsToSelector:NSSelectorFromString(@"closeButtonClicked")];
     id page = content && !pinned ? DPPageAt(DPSwiftValue(content, @"webContentURL")) : nil;
     if (!pinned && (!page || [DPDiscarded containsObject:page])) return menu;
     // Chromium won't unload a page on screen, so for the tab in front the window goes back to the one before it first.
-    BOOL visible = page ? ((NSInteger (*)(id, SEL))objc_msgSend)(page, @selector(visibility)) == DPPageVisible : DPTabOpen(self);
-    id before = visible && DPTabOpen(self) ? DPTabBefore(self.window) : nil;
+    BOOL open = DPTabOpen(self);
+    BOOL visible = page ? ((NSInteger (*)(id, SEL))objc_msgSend)(page, @selector(visibility)) == DPPageVisible : open;
+    NSWindow *window = self.window;
+    id before = visible && open ? DPTabBefore(window) : nil;
     NSMenuItem *item = DPMenuItem(@"Unload Tab", ^{
+        if (before) DPForgetFrontTab(window);
         if (pinned) {
             if (before) DPFocusTab(before);
-            return DPCloseKeepingTab(pane);
+            return (void)DPCloseKeepingTab(pane);
         }
         if (!before) return (void)[page performSelector:@selector(discard)];
         [DPUnloadOnHide addObject:page];
