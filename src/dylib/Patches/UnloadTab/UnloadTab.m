@@ -1,12 +1,11 @@
-#import "StdPatch/StdPatch.h"
+#import "Patches/UnloadTab/Recent.h"
 #import <objc/message.h>
-
-extern DPPatch DPUnloadTab;
 
 enum { DPPageVisible = 2 };  // content::Visibility: hidden, occluded, visible.
 
 static NSHashTable *DPPages;
 static NSHashTable *DPDiscarded;  // Pages Chromium says it unloaded, until they're shown again.
+static NSHashTable *DPUnloadOnHide;  // Pages to unload as soon as switching away from them takes them off screen.
 
 // The tab's one page, as Dia's tab controller knows it. A split tab has more than one, and isn't offered.
 static id DPTabContent(NSView *tab) {
@@ -26,10 +25,21 @@ static id DPPageAt(NSURL *url) {
     return found;
 }
 
+static BOOL DPTabOpen(NSView *tab) {
+    NSString *state = [DPSwiftValue(DPSwiftValue(DPSwiftValue(tab, @"viewModel"), @"stateSubject"), @"currentValue") description];
+    NSString *style = [[state componentsSeparatedByString:@"selectionStyle: "].lastObject substringToIndex:5];
+    return ![style hasPrefix:@"nil"] && ![style hasPrefix:@"none"] && ![style hasPrefix:@"above"] && ![style hasPrefix:@"below"];
+}
+
 static void DPPage_setVisibility(id self, SEL _cmd, NSInteger visibility) {
     [DPPages addObject:self];
     DPCallOriginal(DPPage_setVisibility, self, visibility);
-    if (visibility == DPPageVisible) [DPDiscarded removeObject:self];  // Showing it loads it again.
+    if (visibility == DPPageVisible) {
+        [DPDiscarded removeObject:self];  // Showing it loads it again.
+    } else if ([DPUnloadOnHide containsObject:self]) {
+        [DPUnloadOnHide removeObject:self];
+        dispatch_async(dispatch_get_main_queue(), ^{ [self performSelector:@selector(discard)]; });
+    }
 }
 
 // Chromium may decline, as for a page playing audio, so a page only counts as unloaded once it says it went.
@@ -43,11 +53,24 @@ static NSMenu *DPTab_menuForEvent(NSView *self, SEL _cmd, NSEvent *event) {
     id content = menu && DPUnloadTab.on ? DPTabContent(self) : nil;
     id page = content ? DPPageAt(DPSwiftValue(content, @"webContentURL")) : nil;
     if (!page || [DPDiscarded containsObject:page]) return menu;
-    NSMenuItem *item = DPMenuItem(@"Unload Tab", ^{ [page performSelector:@selector(discard)]; });
+    // Chromium won't unload a page on screen, so for the tab in front the window goes back to the one before it first.
+    BOOL visible = ((NSInteger (*)(id, SEL))objc_msgSend)(page, @selector(visibility)) == DPPageVisible;
+    id before = visible && DPTabOpen(self) ? DPTabBefore(self.window) : nil;
+    NSMenuItem *item = DPMenuItem(@"Unload Tab", ^{
+        if (!before) return (void)[page performSelector:@selector(discard)];
+        [DPUnloadOnHide addObject:page];
+        DPFocusTab(before);
+        // If switching doesn't take it off screen, it isn't unloaded later out of the blue.
+        __weak id weakPage = page;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+            id shown = weakPage;
+            if (shown) [DPUnloadOnHide removeObject:shown];
+        });
+    });
     item.image = [NSImage imageWithSystemSymbolName:@"moon.zzz" accessibilityDescription:nil];
     // Hidden by default, unlike Dia's own items. By name: CI's SDK predates macOS 27. 1 is NSMenuItemImageVisibilityVisible.
     if (@available(macOS 27, *)) [item setValue:@1 forKey:@"preferredImageVisibility"];
-    item.enabled = ((NSInteger (*)(id, SEL))objc_msgSend)(page, @selector(visibility)) != DPPageVisible;  // Chromium keeps the page on screen.
+    item.enabled = !visible || before;  // A page on screen elsewhere, as in another window, stays.
     NSUInteger close = [menu.itemArray indexOfObjectPassingTest:^BOOL(NSMenuItem *it, NSUInteger i, BOOL *stop) { return [it.title isEqual:@"Close"]; }];
     [menu insertItem:item atIndex:close == NSNotFound ? (NSUInteger)menu.numberOfItems : close];
     return menu;
@@ -56,8 +79,10 @@ static NSMenu *DPTab_menuForEvent(NSView *self, SEL _cmd, NSEvent *event) {
 static void DPInstallUnloadTab(void) {
     DPPages = [NSHashTable weakObjectsHashTable];
     DPDiscarded = [NSHashTable weakObjectsHashTable];
+    DPUnloadOnHide = [NSHashTable weakObjectsHashTable];
     DPHook(DPDiaWebContents, @selector(setVisibility:), (IMP)DPPage_setVisibility);
     DPHook(DPDiaTabView, @selector(menuForEvent:), (IMP)DPTab_menuForEvent);
+    DPWatchFrontTabs();
     DPOnLaunch(^{
         DPHook(DPDiaWebContent, @selector(webContents:finalizeDiscardRequest:), (IMP)DPWebContent_finalizeDiscard);
     });
@@ -68,9 +93,9 @@ DP_PATCH(DPUnloadTab) {
     .order = 86,
     .section = @"Tabs",
     .title = @"Unload Tabs",
-    .detail = @"Right-click a tab and choose Unload Tab to free its memory. It stays in the sidebar and loads again when you open it.",
+    .detail = @"Right-click a tab and choose Unload Tab to free its memory. It stays in the sidebar and loads again when you open it. Unloading the tab you’re on takes you back to the one you were on before.",
     .symbol = @"moon.zzz.fill",
     .tint = @"systemPinkColor",
-    .classes = DPClasses(DPDiaWebContents, DPDiaTabView),
+    .classes = DPClasses(DPDiaWebContents, DPDiaTabView, DPDiaContentPane),
     .install = DPInstallUnloadTab,
 };
