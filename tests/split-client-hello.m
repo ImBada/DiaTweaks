@@ -1,5 +1,7 @@
 #import <Foundation/Foundation.h>
 #import "Patches/SplitClientHello/Split.h"
+#import "Patches/SplitClientHello/Write.h"
+#include <fcntl.h>
 #include <netinet/in.h>
 #include <poll.h>
 #include <sys/socket.h>
@@ -56,6 +58,80 @@ static size_t DPCheckSplit(NSData *data, size_t record, NSString *name, uint32_t
     return cut;
 }
 
+// A sendto stand-in that follows a script: step i sends up to steps[i].count bytes (all of them for -1), or fails with
+// steps[i].error. Past the script it sends everything.
+typedef struct { ssize_t count; int error; uintptr_t secondary; } DPStep;
+static DPStep gSteps[8];
+static int gStepCount, gCalls;
+static NSMutableData *gWire;
+
+static DPSendResult DPScriptedSend(int fd, const void *buffer, size_t length, int flags, const struct sockaddr *address,
+                                   socklen_t addressLength) {
+    DPStep step = gCalls < gStepCount ? gSteps[gCalls] : (DPStep){ -1, 0, 0 };
+    gCalls++;
+    if (step.error) return errno = step.error, (DPSendResult){ -1, 0 };
+    size_t sent = step.count < 0 || (size_t)step.count > length ? length : (size_t)step.count;
+    [gWire appendBytes:buffer length:sent];
+    return (DPSendResult){ (ssize_t)sent, step.secondary };
+}
+
+// Sends `data` through DPSendSplit on `fd` with `steps` as the socket's answers.
+static DPSendResult DPSendScripted(int fd, NSData *data, bool checkSecondary, int count, const DPStep *steps, bool *handled) {
+    if (count) memcpy(gSteps, steps, count * sizeof *steps);
+    gStepCount = count, gCalls = 0, gWire = [NSMutableData data];
+    DPSendResult result = { 0, 0 };
+    *handled = DPSendSplit(fd, data.bytes, data.length, MSG_NOSIGNAL, 7, DPScriptedSend, checkSecondary, &result);
+    return result;
+}
+
+static void DPCheckSend(NSData *hello) {
+    int pair[2], datagrams[2];
+    NSCAssert(socketpair(AF_UNIX, SOCK_STREAM, 0, pair) == 0 && socketpair(AF_UNIX, SOCK_DGRAM, 0, datagrams) == 0, @"socket pairs");
+    NSMutableData *expected = [NSMutableData dataWithLength:hello.length + 5];
+    DPSplitHello(hello.bytes, hello.length, expected.mutableBytes, 7);
+    bool handled;
+    struct { const char *what; int count; DPStep steps[4]; } goes[] = {
+        { "sends a split ClientHello in one go", 0, { { 0, 0, 0 } } },
+        { "sends the rest after a partial send", 1, { { 100, 0, 0 } } },
+        { "waits out EAGAIN and EINTR once some is sent", 3, { { 100, 0, 0 }, { 0, EAGAIN, 0 }, { 0, EINTR, 0 } } },
+        { "ignores the second register where Chromium doesn't read it", 1, { { -1, 0, 1 } } },
+    };
+    for (size_t i = 0; i < sizeof goes / sizeof *goes; i++) {
+        DPSendResult result = DPSendScripted(pair[0], hello, i < 3, goes[i].count, goes[i].steps, &handled);
+        NSCAssert(handled && result.sent == (ssize_t)hello.length && result.secondary == 0 && [gWire isEqual:expected], @"%s", goes[i].what);
+    }
+    DPSendResult result = DPSendScripted(pair[0], hello, true, 1, (DPStep[]){ { 0, EAGAIN, 0 } }, &handled);
+    NSCAssert(handled && result.sent == -1 && errno == EAGAIN && gWire.length == 0, @"EAGAIN before anything is sent goes back to Chromium");
+    result = DPSendScripted(pair[0], hello, true, 2, (DPStep[]){ { 50, 0, 0 }, { 0, EPIPE, 0 } }, &handled);
+    NSCAssert(handled && result.sent == -1 && errno == EPIPE, @"a failure partway keeps its errno");
+    result = DPSendScripted(pair[0], hello, true, 1, (DPStep[]){ { -1, 0, 1 } }, &handled);
+    NSCAssert(handled && result.sent == -1 && errno == ECONNRESET, @"the kernel bug Chromium checks for fails the send");
+
+    const char *request = "GET / HTTP/1.1\r\nHost: split-client-hello.example\r\nAccept: */*\r\n\r\n";
+    DPSendScripted(pair[0], [NSData dataWithBytes:request length:strlen(request)], true, 0, NULL, &handled);
+    NSCAssert(!handled && gCalls == 0, @"leaves other data to the real sendto");
+    DPSendScripted(datagrams[0], hello, true, 0, NULL, &handled);
+    NSCAssert(!handled && gCalls == 0, @"leaves datagram sockets alone");
+
+    // A TCP socket whose send buffer is full: the split might not go out whole, so it isn't made.
+    int server = socket(AF_INET, SOCK_STREAM, 0), client = socket(AF_INET, SOCK_STREAM, 0);
+    struct sockaddr_in address = { .sin_len = sizeof address, .sin_family = AF_INET, .sin_addr.s_addr = htonl(INADDR_LOOPBACK) };
+    socklen_t size = sizeof address;
+    NSCAssert(bind(server, (struct sockaddr *)&address, size) == 0 && listen(server, 1) == 0
+                  && getsockname(server, (struct sockaddr *)&address, &size) == 0
+                  && connect(client, (struct sockaddr *)&address, size) == 0, @"connects over loopback");
+    int peer = accept(server, NULL, NULL);
+    DPSendScripted(client, hello, true, 0, NULL, &handled);
+    NSCAssert(handled, @"splits on a fresh TCP socket");
+    fcntl(client, F_SETFL, O_NONBLOCK);
+    char filler[4096] = { 0 };
+    while (send(client, filler, sizeof filler, 0) > 0) {}
+    DPSendScripted(client, hello, true, 0, NULL, &handled);
+    NSCAssert(!handled && gCalls == 0, @"leaves it whole when the send buffer is full");
+    close(peer), close(client), close(server);
+    close(pair[0]), close(pair[1]), close(datagrams[0]), close(datagrams[1]);
+}
+
 int main(void) {
     @autoreleasepool {
         NSString *name = @"split-client-hello.example";
@@ -92,6 +168,7 @@ int main(void) {
             DPSplitHello(garbled.bytes, garbled.length, exact, arc4random());
             free(exact);
         }
+        DPCheckSend(hello);
         puts("all Split TLS ClientHello checks passed");
     }
 }

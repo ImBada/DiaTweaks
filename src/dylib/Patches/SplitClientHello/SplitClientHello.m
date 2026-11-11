@@ -1,15 +1,42 @@
 #import "SplitClientHello.h"
 #import "Updates/Updates.h"
+#include <libproc.h>
+#include <sys/sysctl.h>
 
 // Chromium runs its network service in a sandboxed helper that the dylib isn't loaded into, so while this is on the
 // service runs inside Dia, where Send.m sees what it sends. Chromium decides that only as Dia starts.
 
 static BOOL gInProcess;
 
+// Whether a helper Dia started runs the network service, which a Dia that ignores the flag would do.
+static BOOL DPNetworkServiceInHelper(void) {
+    pid_t children[512];
+    int bytes = proc_listpids(PROC_PPID_ONLY, (uint32_t)getpid(), children, sizeof children);
+    static const char service[] = "--utility-sub-type=network.mojom.NetworkService";
+    for (int i = 0; i < bytes / (int)sizeof *children; i++) {
+        char arguments[16384];
+        size_t size = sizeof arguments;
+        int name[] = { CTL_KERN, KERN_PROCARGS2, children[i] };
+        if (sysctl(name, 3, arguments, &size, NULL, 0) == 0 && memmem(arguments, size, service, sizeof service - 1)) return YES;
+    }
+    return NO;
+}
+
+static void DPCheckInProcess(void) {
+    if (!gInProcess || !DPNetworkServiceInHelper()) return;
+    NSLog(@"DiaPatches: Split TLS ClientHello is off: this Dia keeps its network service in a helper");
+    gInProcess = NO;  // so turning it off doesn't offer a relaunch
+    DPSplitClientHello.unavailable = YES;
+    DPSetPatch(&DPSplitClientHello, NO, NO);
+    [NSNotificationCenter.defaultCenter postNotificationName:DPPatchesDidChangeNotification object:nil];
+}
+
 static void DPInstallSplitClientHello(void) {
     DPInstallSplitSend();
     DPSplitting = gInProcess = DPSplitClientHello.on;
-    if (gInProcess) DPAddLaunchFlag(@"--enable-features=NetworkServiceInProcess2");
+    if (!gInProcess) return;
+    DPAddLaunchFlag(@"--enable-features=NetworkServiceInProcess2");
+    DPOnLaunch(^{ dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{ DPCheckInProcess(); }); });
 }
 
 static void DPApplySplitClientHello(DPPatch *patch) {
@@ -28,7 +55,7 @@ DP_PATCH(DPSplitClientHello) {
     .order = 120,
     .section = @"Network",
     .title = @"Split TLS ClientHello",
-    .detail = @"Send the first message of each secure connection in two pieces, cut at a random point in the site's name. This gets past some networks that block sites by name, but not DNS or address blocks, and a few servers refuse it. While it's on, Dia's network service runs unsandboxed.",
+    .detail = @"Send the first message of each HTTPS connection in two pieces, cut at a random point in the site's name. This gets past some networks that block sites by name, but not HTTP/3, DNS or address blocks, and a few servers refuse it. While on, Dia's network service runs unsandboxed.",
     .symbol = @"network.badge.shield.half.filled network",
     .tint = @"systemCyanColor",
     .install = DPInstallSplitClientHello,

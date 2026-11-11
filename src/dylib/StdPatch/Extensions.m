@@ -30,7 +30,7 @@ static id DPConfiguration_init(id self, SEL _cmd, int argc, NSArray<NSString *> 
     [args addObjectsFromArray:DPLaunchFlags];
     DPMergeListFlag(args, @"--enable-features=");
     DPMergeListFlag(args, @"--disable-features=");
-    return DPCallOriginal(DPConfiguration_init, self, argc + (int)(args.count - argv.count), args, profilePath, applicationID, isProduction,
+    return DPCallOriginal(DPConfiguration_init, self, argc + ((int)args.count - (int)argv.count), args, profilePath, applicationID, isProduction,
                           restorationPolicy, loadAllProfiles, quitRunLoop, suiteName);
 }
 
