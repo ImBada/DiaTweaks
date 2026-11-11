@@ -1,4 +1,5 @@
 #import "Patches/UnloadTab/Recent.h"
+#import "Patches/PinnedTabCloseButton/PinnedTabs.h"
 #import <objc/message.h>
 
 enum { DPPageVisible = 2 };  // content::Visibility: hidden, occluded, visible.
@@ -51,12 +52,19 @@ static void DPWebContent_finalizeDiscard(id self, SEL _cmd, id page, BOOL discar
 static NSMenu *DPTab_menuForEvent(NSView *self, SEL _cmd, NSEvent *event) {
     NSMenu *menu = DPCallOriginal(DPTab_menuForEvent, self, event);
     id content = menu && DPUnloadTab.on ? DPTabContent(self) : nil;
-    id page = content ? DPPageAt(DPSwiftValue(content, @"webContentURL")) : nil;
-    if (!page || [DPDiscarded containsObject:page]) return menu;
+    NSView *pane = content ? DPFindView(self, ^BOOL(NSView *view) { return DPIsKind(view, DPDiaTabContentView); }) : nil;
+    // An open pinned tab closes its page and stays pinned, as its minus button does, so Dia knows it has no page.
+    BOOL pinned = pane && DPIsOpenPinned(pane);
+    id page = content && !pinned ? DPPageAt(DPSwiftValue(content, @"webContentURL")) : nil;
+    if (!pinned && (!page || [DPDiscarded containsObject:page])) return menu;
     // Chromium won't unload a page on screen, so for the tab in front the window goes back to the one before it first.
-    BOOL visible = ((NSInteger (*)(id, SEL))objc_msgSend)(page, @selector(visibility)) == DPPageVisible;
+    BOOL visible = page ? ((NSInteger (*)(id, SEL))objc_msgSend)(page, @selector(visibility)) == DPPageVisible : DPTabOpen(self);
     id before = visible && DPTabOpen(self) ? DPTabBefore(self.window) : nil;
     NSMenuItem *item = DPMenuItem(@"Unload Tab", ^{
+        if (pinned) {
+            if (before) DPFocusTab(before);
+            return DPCloseKeepingTab(pane);
+        }
         if (!before) return (void)[page performSelector:@selector(discard)];
         [DPUnloadOnHide addObject:page];
         DPFocusTab(before);
@@ -70,7 +78,7 @@ static NSMenu *DPTab_menuForEvent(NSView *self, SEL _cmd, NSEvent *event) {
     item.image = [NSImage imageWithSystemSymbolName:@"moon.zzz" accessibilityDescription:nil];
     // Hidden by default, unlike Dia's own items. By name: CI's SDK predates macOS 27. 1 is NSMenuItemImageVisibilityVisible.
     if (@available(macOS 27, *)) [item setValue:@1 forKey:@"preferredImageVisibility"];
-    item.enabled = !visible || before;  // A page on screen elsewhere, as in another window, stays.
+    item.enabled = pinned || !visible || before;  // A page on screen elsewhere, as in another window, stays.
     NSUInteger close = [menu.itemArray indexOfObjectPassingTest:^BOOL(NSMenuItem *it, NSUInteger i, BOOL *stop) { return [it.title isEqual:@"Close"]; }];
     [menu insertItem:item atIndex:close == NSNotFound ? (NSUInteger)menu.numberOfItems : close];
     return menu;
@@ -93,7 +101,7 @@ DP_PATCH(DPUnloadTab) {
     .order = 86,
     .section = @"Tabs",
     .title = @"Unload Tabs",
-    .detail = @"Right-click a tab and choose Unload Tab to free its memory. It stays in the sidebar and loads again when you open it. Unloading the tab you’re on takes you back to the one you were on before.",
+    .detail = @"Right-click a tab and choose Unload Tab to free its memory. It stays in the sidebar and loads again when you open it. Unloading the tab you’re on takes you back to the one you were on before. A pinned tab goes back to its pinned page.",
     .symbol = @"moon.zzz.fill",
     .tint = @"systemPinkColor",
     .classes = DPClasses(DPDiaWebContents, DPDiaTabView, DPDiaContentPane),

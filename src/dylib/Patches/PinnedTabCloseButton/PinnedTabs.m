@@ -1,4 +1,5 @@
 #import "Patches/PinnedTabCloseButton/PinnedTabs.h"
+#import <objc/message.h>
 
 extern void *swift_unknownObjectWeakLoadStrong(void *reference);
 
@@ -16,4 +17,33 @@ NSView *DPEnclosingTab(NSView *view) {
 
 void DPRelayoutTabContents(void) {
     for (NSView *content in DPFindViews(DPDiaTabContentView)) content.needsLayout = YES;
+}
+
+// The page's attributes, while the tab shows a web page: the controller holds an enum whose other cases set top bits.
+id DPAttributes(NSView *content) {
+    void **slot = DPIvar(DPViewModelDelegate(content), "attributesController");
+    uintptr_t raw = slot ? (uintptr_t)*slot : 0;
+    if (!raw || (raw & 0xF000000000000007)) return nil;
+    id attributes = (__bridge id)(void *)raw;
+    return DPIsKind(attributes, DPDiaTabPageAttributes) ? attributes : nil;
+}
+
+// Dia keeps activeURL while a pinned tab has its page, and clears it when the tab closes.
+BOOL DPIsOpenPinned(NSView *content) {
+    id attributes = DPAttributes(content);
+    BOOL *pinned = DPIvar(attributes, "isInFavoritesOrPinnedContainer");
+    void **activeURL = DPIvar(attributes, "activeURL");
+    return pinned && *pinned && activeURL && *activeURL;
+}
+
+void DPCloseKeepingTab(NSView *content) {
+    uint8_t *style = DPIvar(DPViewModelDelegate(DPEnclosingTab(content)), "requestedCloseButtonStyle");
+    if (!style) return;
+    uint8_t dia = *style;
+    *style = DPCloseKeepingTabStyle;  // Dia reads it before the click returns.
+    ((void (*)(id, SEL))objc_msgSend)(content, NSSelectorFromString(@"closeButtonClicked"));
+    *style = dia;
+    // The page is gone but Dia doesn't lay the tab out again, so the minus button would stay.
+    __weak NSView *weakContent = content;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 4), dispatch_get_main_queue(), ^{ weakContent.needsLayout = YES; });
 }
