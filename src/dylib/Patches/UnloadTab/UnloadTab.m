@@ -87,6 +87,45 @@ static NSMenu *DPTab_menuForEvent(NSView *self, SEL _cmd, NSEvent *event) {
     return menu;
 }
 
+#pragma mark Verify
+
+// The tab's menu, built as a right-click would without showing it.
+static NSMenuItem *DPUnloadItem(NSView *tab) {
+    NSPoint point = [tab convertPoint:NSMakePoint(NSMidX(tab.bounds), NSMidY(tab.bounds)) toView:nil];
+    NSEvent *click = [NSEvent mouseEventWithType:NSEventTypeRightMouseDown location:point modifierFlags:0 timestamp:NSProcessInfo.processInfo.systemUptime
+                                    windowNumber:tab.window.windowNumber context:nil eventNumber:0 clickCount:1 pressure:1];
+    return [[tab menuForEvent:click] itemWithTitle:@"Unload Tab"];
+}
+
+// A tab showing a web page no other tab shows offers Unload Tab when its page is loaded, as the one in front of a window
+// always is, and the one in front can leave for another tab if the window has one. Nothing is unloaded.
+static NSString *DPVerifyUnloadTab(DPPatch *patch) {
+    NSArray<NSView *> *tabs = DPFindViews(DPDiaTabView);
+    NSCountedSet<NSURL *> *urls = [NSCountedSet set];
+    for (NSView *tab in tabs) {
+        NSURL *url = DPSwiftValue(DPTabContent(tab), @"webContentURL");
+        if (url) [urls addObject:url];
+    }
+    for (NSView *tab in tabs) {
+        if (!tab.window || tab.isHiddenOrHasHiddenAncestor) continue;
+        NSMenuItem *item = DPUnloadItem(tab);
+        if (!patch->on) {
+            if (item) return @"tab still offers Unload Tab";
+            continue;
+        }
+        NSURL *url = DPSwiftValue(DPTabContent(tab), @"webContentURL");
+        if (![url.scheme hasPrefix:@"http"] || [urls countForObject:url] > 1) continue;
+        BOOL front = DPTabOpen(tab);
+        if (!front && (!DPPageAt(url) || [DPDiscarded containsObject:DPPageAt(url)])) continue;
+        if (!item) return front ? @"tab in front has no Unload Tab" : @"loaded tab has no Unload Tab";
+        if (front && !item.enabled && [[DPScriptWindow(tab.window) valueForKey:@"appleScriptTabs"] count] > 1)
+            return @"Unload Tab can't leave the tab in front";
+    }
+    return nil;
+}
+
+#pragma mark Patch
+
 static void DPInstallUnloadTab(void) {
     DPPages = [NSHashTable weakObjectsHashTable];
     DPDiscarded = [NSHashTable weakObjectsHashTable];
@@ -109,4 +148,5 @@ DP_PATCH(DPUnloadTab) {
     .tint = @"systemPinkColor",
     .classes = DPClasses(DPDiaWebContents, DPDiaTabView, DPDiaContentPane),
     .install = DPInstallUnloadTab,
+    .verify = DPVerifyUnloadTab,
 };
