@@ -81,6 +81,7 @@ body:
         - Hide Link Address
         - Little Dia
         - Close with Escape
+        - Split TLS ClientHello
         - Patches pane in Settings
         - Installing, updating or restoring
         - Not sure
