@@ -34,7 +34,10 @@ static void DPCheckInProcess(void) {
 static void DPInstallSplitClientHello(void) {
     DPInstallSplitSend();
     DPSplitting = gInProcess = DPSplitClientHello.on;
-    if (!gInProcess) return;
+    if (!gInProcess) {
+        DPDropLaunchFeature(@"NetworkServiceInProcess2");
+        return;
+    }
     DPAddLaunchFlag(@"--enable-features=NetworkServiceInProcess2");
     DPOnLaunch(^{ dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{ DPCheckInProcess(); }); });
 }
