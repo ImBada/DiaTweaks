@@ -2,9 +2,8 @@
 #include <stdbool.h>
 #include <string.h>
 
-// The record cut Helium makes inside BoringSSL (imputnet/helium, patches/helium/core/network/split-clienthello.patch),
-// made here on the bytes about to go out instead. A ClientHello is sent before any keys exist, so its records can be
-// cut again on the way out, and the handshake hashes messages, not records, so the server ends up with the same one.
+// A ClientHello is sent before any keys exist, so its record can be cut in two on the way out, and the handshake
+// hashes messages, not records, so the server ends up with the same one.
 
 typedef struct { const uint8_t *at, *end; } DPReader;
 
