@@ -44,7 +44,7 @@ static void DPApplySplitClientHello(DPPatch *patch) {
     if (patch->on == gInProcess || patch->on != DPSavedOn(patch)) return;  // the self-test flips patches without saving
     NSAlert *alert = [NSAlert new];
     alert.messageText = patch->on ? @"Relaunch Dia to split ClientHellos" : @"Relaunch Dia to sandbox its network service again";
-    alert.informativeText = patch->on ? @"Until then, Dia sends them whole." : @"Dia already sends ClientHellos whole.";
+    alert.informativeText = patch->on ? @"Until then, Dia sends them whole. After, its network code runs outside its sandbox." : @"Until then, its network code keeps running outside its sandbox.";
     [alert addButtonWithTitle:@"Relaunch"];
     [alert addButtonWithTitle:@"Later"];
     if ([alert runModal] == NSAlertFirstButtonReturn) DPHandOffAndQuit(@[ @"apply" ]);
@@ -55,7 +55,7 @@ DP_PATCH(DPSplitClientHello) {
     .order = 120,
     .section = @"Network",
     .title = @"Split TLS ClientHello",
-    .detail = @"Send the first message of each HTTPS connection in two pieces, cut at a random point in the site's name. This gets past some networks that block sites by name, but not HTTP/3, DNS or address blocks, and a few servers refuse it. While on, Dia's network service runs unsandboxed.",
+    .detail = @"Send each HTTPS connection’s first message in two pieces, cut inside the site’s name, to get past networks that block sites by name. Not HTTP/3, DNS or address blocks, and a few servers refuse it. While on, Dia’s network code runs inside Dia, outside its sandbox. Experimental.",
     .symbol = @"network.badge.shield.half.filled network",
     .tint = @"systemCyanColor",
     .install = DPInstallSplitClientHello,
