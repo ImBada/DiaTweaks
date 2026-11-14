@@ -11,5 +11,4 @@ void DPFlattenTabMaterial(NSView *view, NSView *shape);
 NSString *DPVerifyFlatTabMaterial(NSView *shape, BOOL on);
 void DPInstallFlatTabMaterial(void);
 void DPStyleUniformTabBorder(NSView *shape);
-void DPRestoreTabBorder(NSView *shape);
 NSString *DPVerifyUniformTabBorder(NSView *shape, BOOL on);

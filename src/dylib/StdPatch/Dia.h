@@ -1,4 +1,3 @@
-// DPHook logs what it can't find: `log stream --predicate 'process == "Dia"'` shows which class Dia renamed.
 #define DPDiaToolbar            "_TtC13NavigationBar17NavigationBarView"
 #define DPDiaBookmarksBar       "_TtC11BookmarkBar15BookmarkBarView"
 #define DPDiaAddressField       "_TtC13NavigationBar16AssistantBarView"
@@ -21,7 +20,7 @@
 #define DPDiaPinnedTabOutline   "_TtC5TabUIP33_CFF5B89D7BC9743BBA6108D119E2E37020SelectionOutlineView"
 #define DPDiaContentPane        "_TtC11ContentPane15ContentPaneView"
 #define DPDiaContentContainer   "_TtC6Window20ContentContainerView"
-#define DPDiaSplitPane          "_TtC5ARCUI24SplitViewContentPaneView"  // One per page of a split, and one in a window without.
+#define DPDiaSplitPane          "_TtC5ARCUI24SplitViewContentPaneView"
 #define DPDiaFloatingSidebar    "_TtC6Window28FloatingSidebarContainerView"
 #define DPDiaWindowBackgroundTile "_TtC15WindowTreatment24WindowBackgroundBaseView"
 #define DPDiaNewTabPage         "NewTabPage.NewTabPageContentView"
@@ -35,7 +34,6 @@
 #define DPDiaWebContents        "ArcWebContents"
 #define DPDiaNavigationController "ArcWebContentsNavigationController"
 #define DPDiaTabGroupProperties "ArcTabGroupProperties"
-#define DPDiaToasts             "_TtC11DiaToastsV210ToastPanel"  // Dia 1.56 shows "Copied Current URL" with these.
 #define DPDiaTabSwitcher        "_TtC10RecentTabs26RecentTabsWindowController"
 #define DPDiaTabSwitcherList    "_TtC10RecentTabs24RecentTabsViewController"
 #define DPDiaSettingsController "_TtC11Preferences38SidebarPreferencesWindowViewController"
@@ -48,6 +46,7 @@
 #define DPDiaSettingsSidebarCell "_TtC11PreferencesP33_4E27E2219272DF78406B73092738280415SidebarCellView"
 #define DPDiaPopover            "_TtCC14DynamicPopover28DynamicPopoverViewControllerP33_AB0357A1429F4D6D7F128058B713C93F8RootView"
 #define DPDiaAssistantPanel     "_TtC20AssistantPanelUIBase22AssistantPanelRootView"
+#define DPDiaChatHeader         "_TtC14AssistantPanel24AssistantPanelHeaderView"
 #define DPDiaCommandBar         "_TtC15BoostCommandBar8RootView"
 #define DPDiaCommandBarInput    "_TtC15BoostCommandBar18InputContainerView"
 #define DPDiaCommandBarText     "_TtC15BoostCommandBar17TextContainerView"
@@ -80,7 +79,6 @@
 #define DPDiaTabList            "_TtC7TabList11TabListView"
 #define DPDiaTabListSeparator   "_TtC7TabList20TabListSeparatorView"
 #define DPDiaTabListCollection  "_TtCC7TabList11TabListView14CollectionView"
-#define DPDiaTabContentView     "_TtC5TabUI14TabContentView"
 #define DPDiaFeatheredLabel     "_TtC5ARCUI24FeatheredTruncatingLabel"
 #define DPDiaTransitioningLabel "_TtC5ARCUI27FeatheredTransitioningLabel"
 #define DPDiaTabListLayout      "_TtC7TabList27TabListCollectionViewLayout"

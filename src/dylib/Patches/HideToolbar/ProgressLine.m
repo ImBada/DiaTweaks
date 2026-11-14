@@ -1,6 +1,6 @@
 #import "HideToolbar.h"
 
-static const CGFloat DPGlowHeight = 24, DPLineHeight = 1;  // Dia's glow fades over its address field's height.
+static const CGFloat DPGlowHeight = 24, DPLineHeight = 1;
 static const NSTimeInterval DPLineFade = 0.3, DPCycle = 2;
 static char DPLineKey;
 
@@ -19,7 +19,7 @@ static char DPLineKey;
     self.wantsLayer = YES;
     self.glow = DPProgressShaderLayer();
     if (self.glow) {
-        self.glow.transform = CATransform3DMakeScale(1, -1, 1);  // Dia's glow rises from the bottom edge; this one hangs from the top.
+        self.glow.transform = CATransform3DMakeScale(1, -1, 1);
         CAGradientLayer *fade = [CAGradientLayer layer];
         fade.colors = @[(id)NSColor.blackColor.CGColor, (id)NSColor.clearColor.CGColor];
         fade.startPoint = CGPointMake(0.5, 0.35);
@@ -27,7 +27,7 @@ static char DPLineKey;
         self.glow.mask = fade;
         [self.layer addSublayer:self.glow];
     } else {
-        self.fill = [CALayer layer];  // Not a view's own layer, so frame changes animate.
+        self.fill = [CALayer layer];
         [self.layer addSublayer:self.fill];
     }
     return self;

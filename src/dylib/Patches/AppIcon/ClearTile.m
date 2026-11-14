@@ -1,6 +1,5 @@
 #import "AppIcon.h"
 
-// The icon's alpha shrunk inward by `radius`, one axis at a time.
 static NSData *DPErodedShape(const uint8_t *pixels, size_t size, size_t radius) {
     NSMutableData *across = [NSMutableData dataWithLength:size * size], *eroded = [NSMutableData dataWithLength:size * size];
     uint8_t *a = across.mutableBytes, *e = eroded.mutableBytes;
@@ -17,8 +16,7 @@ static NSData *DPErodedShape(const uint8_t *pixels, size_t size, size_t radius) 
     return eroded;
 }
 
-// A clear icon comes back grey and the Dock blends it into what's behind, but only for icons it draws itself. Measured against
-// real clear tiles, that blend is white at an opacity that rises from nearly nothing at the icon's body level.
+// Opacities and gains are measured against real clear Dock tiles.
 NSImage *DPClearTile(NSImage *icon, BOOL dark) {
     NSRect rect = NSMakeRect(0, 0, 512, 512);
     CGImageRef source = [icon CGImageForProposedRect:&rect context:nil hints:nil];
@@ -36,12 +34,12 @@ NSImage *DPClearTile(NSImage *icon, BOOL dark) {
     for (size_t y = 0; y < size; y++) for (size_t x = 0; x < size; x++) {
         uint8_t *pixel = pixels + (y * size + x) * 4;
         double shape = pixel[3] / 255.0, value = shape > 0 ? pixel[0] / 255.0 / shape : 0;
-        if (shape > 0 && eroded[y * size + x] < 128) {  // the thin dark edge of a clear tile
+        if (shape > 0 && eroded[y * size + x] < 128) {
             pixel[0] = pixel[1] = pixel[2] = 0;
             pixel[3] = (uint8_t)(0.85 * shape * 255);
             continue;
         }
-        double sheen = 0.15 * MAX(0, 0.45 - (double)y / size) / 0.45;  // clear tiles are brighter toward the top
+        double sheen = 0.15 * MAX(0, 0.45 - (double)y / size) / 0.45;
         double opacity = 0.20 + sheen + gain * (value - level) / MAX(1 - level, 0.01);
         pixel[0] = pixel[1] = pixel[2] = pixel[3] = (uint8_t)(MIN(MAX(opacity, 0), 1) * shape * 255);
     }

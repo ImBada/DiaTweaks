@@ -29,22 +29,16 @@
 - (void)viewDidMoveToWindow {
     [super viewDidMoveToWindow];
     NSNotificationCenter *center = NSNotificationCenter.defaultCenter;
-    for (NSString *name in @[NSWindowDidBecomeKeyNotification, NSWindowDidResignKeyNotification,
-         NSWindowDidBecomeMainNotification, NSWindowDidResignMainNotification,
-         NSApplicationDidBecomeActiveNotification, NSApplicationDidResignActiveNotification])
-        [center removeObserver:self name:name object:nil];
-    if (self.window && self.tracksWindowActivity) {
-        [center addObserver:self selector:@selector(refreshActivity:) name:NSWindowDidBecomeKeyNotification object:self.window];
-        [center addObserver:self selector:@selector(refreshActivity:) name:NSWindowDidResignKeyNotification object:self.window];
-        [center addObserver:self selector:@selector(refreshActivity:) name:NSWindowDidBecomeMainNotification object:self.window];
-        [center addObserver:self selector:@selector(refreshActivity:) name:NSWindowDidResignMainNotification object:self.window];
-        [center addObserver:self selector:@selector(refreshActivity:) name:NSApplicationDidBecomeActiveNotification object:NSApp];
-        [center addObserver:self selector:@selector(refreshActivity:) name:NSApplicationDidResignActiveNotification object:NSApp];
-        [self refreshActivity:nil];
-    }
+    NSArray<NSNotificationName> *windowNames = @[NSWindowDidBecomeKeyNotification, NSWindowDidResignKeyNotification,
+                                                 NSWindowDidBecomeMainNotification, NSWindowDidResignMainNotification];
+    NSArray<NSNotificationName> *appNames = @[NSApplicationDidBecomeActiveNotification, NSApplicationDidResignActiveNotification];
+    for (NSNotificationName name in [windowNames arrayByAddingObjectsFromArray:appNames]) [center removeObserver:self name:name object:nil];
+    if (!self.window || !self.tracksWindowActivity) return;
+    for (NSNotificationName name in windowNames) [center addObserver:self selector:@selector(refreshActivity:) name:name object:self.window];
+    for (NSNotificationName name in appNames) [center addObserver:self selector:@selector(refreshActivity:) name:name object:NSApp];
+    [self refreshActivity:nil];
 }
 
-// Takes the settings of the profile this view's sidebar or strip is showing.
 - (void)reloadSettings {
     _space = DPGrainSpaceOf(self.superview);
     [self setGrainAmount:DPGrainShown(_space) ? DPGrainAmount(_space) : 0 softness:DPGrainSoftness(_space) scale:DPGrainScale(_space)];
@@ -64,8 +58,6 @@
     [self refreshActivity:nil];
 }
 
-// Fine's black and white specks go over the page rather than into it, so they take less opacity for the same contrast.
-// A sharp tile mixed with a soft one has less contrast than either, as they only partly agree, so the mix is boosted.
 - (void)setGrainAmount:(double)amount softness:(double)softness scale:(double)scale {
     NSString *material = DPGrainMaterial(_space);
     if (![DPGrainMaterialKeys() containsObject:material]) material = @"sand";

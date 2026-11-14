@@ -2,9 +2,7 @@
 
 extern DPPatch DPDockClickWindow;
 
-// With "When switching to an application, switch to a Space with open windows for the application" off, macOS shows
-// no window for the app on this Space whatever we order front, so the Dock click would do nothing. Stock Dia's new window
-// is better then. The setting is on unless the Dock says otherwise.
+// With the Dock's switch-to-Space setting off, ordering a window front shows nothing, so Dia's own new window is left to open.
 static BOOL DPSwitchesToWindows(void) {
     CFPropertyListRef value = CFPreferencesCopyAppValue(CFSTR("workspaces-auto-swoosh"), CFSTR("com.apple.dock"));
     BOOL on = !value || CFEqual(value, kCFBooleanTrue) || ([(__bridge id)value respondsToSelector:@selector(boolValue)] && [(__bridge id)value boolValue]);
@@ -12,8 +10,6 @@ static BOOL DPSwitchesToWindows(void) {
     return on;
 }
 
-// The browser window used last: the front one, then the rest as the Space order has them. A minimized one is left to
-// Dia, and so is a window that isn't open.
 static NSWindow *DPWindowToShow(void) {
     NSMutableArray<NSWindow *> *windows = [NSApp.orderedWindows mutableCopy];
     for (NSWindow *window in NSApp.windows) if (![windows containsObject:window]) [windows addObject:window];
@@ -22,8 +18,6 @@ static NSWindow *DPWindowToShow(void) {
     return nil;
 }
 
-// Dia opens a window when the app has none on the Space you're on, which is what a Dock click from another Desktop
-// looks like. Bring the window it already has forward instead: macOS goes to that window's Desktop.
 static BOOL DPApp_shouldHandleReopen(id self, SEL _cmd, NSApplication *app, BOOL hasVisibleWindows) {
     NSWindow *window = DPDockClickWindow.on && !hasVisibleWindows && DPSwitchesToWindows() ? DPWindowToShow() : nil;
     if (!window) return DPCallOriginal(DPApp_shouldHandleReopen, self, app, hasVisibleWindows);

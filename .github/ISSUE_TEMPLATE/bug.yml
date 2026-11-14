@@ -25,8 +25,6 @@ body:
         - Show Toolbar on New Tabs
         - Show Toolbar with Sidebar
         - Show Loading Progress
-        - Show Toast When Copying URL
-        - Show Toolbar When Copying URL
         - Hide Site Color in Tab Bar
         - Always Show Address Field
         - Hide Sidebar Button
@@ -72,6 +70,7 @@ body:
         - App Icon
         - Hide Window Controls
         - Allow 1Password
+        - Allow Bitwarden
         - Allow iCloud Passkeys
         - Allow iCloud Passwords
         - Group Tabs by Domain

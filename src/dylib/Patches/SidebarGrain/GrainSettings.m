@@ -11,7 +11,6 @@ NSUserDefaults *DPGrainDefaults(void) {
     return defaults;
 }
 
-// A profile's own values, by space ID, under the same keys as the global ones. Whatever it lacks comes from the global value.
 static NSString *const DPGrainProfilesKey = @"sidebarGrainProfiles";
 
 static NSDictionary *DPGrainProfile(NSString *space) {
@@ -56,7 +55,6 @@ BOOL DPGrainShown(NSString *space) {
     return ![DPGrainProfile(space)[DPSidebarGrain.key] isEqual:@NO];
 }
 
-// The profile a sidebar or tab strip is showing: the selected dot in the sidebar, the focused one at the top.
 NSString *DPGrainSpaceOf(NSView *host) {
     __block NSString *space = nil;
     DPFindView(host, ^BOOL(NSView *view) {

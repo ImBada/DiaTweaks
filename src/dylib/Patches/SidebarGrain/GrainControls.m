@@ -1,11 +1,12 @@
 #import "GrainSettings.h"
 
 static const DPGrainSetting *const DPGrainSettings[] = { &DPGrainAmountSetting, &DPGrainSoftnessSetting, &DPGrainScaleSetting };
+#define DPGrainSettingCount (sizeof DPGrainSettings / sizeof *DPGrainSettings)
 static NSHashTable<NSView *> *DPGrainSliders;
 
 @interface DPGrainSliderRow : NSStackView <NSTextFieldDelegate>
 @property const DPGrainSetting *setting;
-@property (nonatomic) NSString *space;  // The profile it edits; nil edits the global values.
+@property (nonatomic) NSString *space;
 @property NSSlider *slider;
 @property NSTextField *field;
 @end
@@ -77,7 +78,7 @@ static NSView *DPGrainSliderRowFor(const DPGrainSetting *setting) {
 
 - (void)reset:(NSButton *)button {
     if (self.space) DPGrainClear(self.space);
-    else for (NSUInteger i = 0; i < 3; i++) [DPGrainDefaults() removeObjectForKey:DPGrainSettings[i]->key];
+    else for (NSUInteger i = 0; i < DPGrainSettingCount; i++) [DPGrainDefaults() removeObjectForKey:DPGrainSettings[i]->key];
     for (DPGrainSliderRow *row in DPGrainSliders) [row sync];
     DPRefreshSidebarGrain();
     if (self.afterReset) self.afterReset();
@@ -95,12 +96,11 @@ NSArray<NSView *> *DPGrainRows(void) {
     reset.distribution = NSStackViewDistributionFill;
     [reset setViews:@[ reset.label, button ] inGravity:NSStackViewGravityLeading];
     NSMutableArray<NSView *> *rows = [NSMutableArray new];
-    for (NSUInteger i = 0; i < 3; i++) [rows addObject:DPGrainSliderRowFor(DPGrainSettings[i])];
+    for (NSUInteger i = 0; i < DPGrainSettingCount; i++) [rows addObject:DPGrainSliderRowFor(DPGrainSettings[i])];
     [rows addObject:reset];
     return rows;
 }
 
-// Points the rows at a profile, or at the global values with a nil space. `reset` runs after the reset button.
 void DPGrainRowsFor(NSArray<NSView *> *rows, NSString *space, void (^reset)(void)) {
     for (NSView *row in rows) {
         if ([row isKindOfClass:DPGrainSliderRow.class]) ((DPGrainSliderRow *)row).space = space;

@@ -1,18 +1,19 @@
 #import "AppIcon.h"
 #import "IconCatalog.h"
 
-// "AppIcon" is the tweak's name for Dia's own icon, which isn't always called that: Dia's beta builds use AppIconBeta.
+// Dia's own icon isn't always named AppIcon (beta builds use AppIconBeta).
 static NSString *const DPIconAlias = @"DiaChosenIcon", *const DPDefaultChoice = @"AppIcon", *const DPOwnIconKey = @"DiaTweaksOwnIcon";
 
+static NSString *DPInfoPath(NSString *app) { return [app stringByAppendingPathComponent:@"Contents/Info.plist"]; }
+
 static NSString *DPOwnIcon(NSString *app) {
-    NSDictionary *info = [NSDictionary dictionaryWithContentsOfFile:[app stringByAppendingPathComponent:@"Contents/Info.plist"]];
+    NSDictionary *info = [NSDictionary dictionaryWithContentsOfFile:DPInfoPath(app)];
     NSString *name = info[DPOwnIconKey] ?: info[@"CFBundleIconName"];
     return name && ![name isEqual:DPIconAlias] ? name : DPDefaultChoice;
 }
 
 static NSString *DPIconsFolder(NSString *app, NSString *home) {
-    NSString *info = [app stringByAppendingPathComponent:@"Contents/Info.plist"];
-    NSString *build = [NSDictionary dictionaryWithContentsOfFile:info][@"CFBundleVersion"];
+    NSString *build = [NSDictionary dictionaryWithContentsOfFile:DPInfoPath(app)][@"CFBundleVersion"];
     return build ? [home stringByAppendingPathComponent:[@"icons/builds" stringByAppendingPathComponent:build]] : nil;
 }
 
@@ -40,7 +41,7 @@ static NSString *DPAddAlias(NSString *path, NSString *icon) {
     return [catalog writeToDiskAndCompact:YES] ? nil : @"couldn't write the catalog";
 }
 
-// Dia keeps reading the old file until it next opens the catalog; the rename makes the switch all or nothing.
+// Write beside and rename: Dia keeps reading the old file until it reopens the catalog.
 static NSString *DPWriteCurrent(NSString *app, NSString *folder) {
     NSFileManager *files = NSFileManager.defaultManager;
     NSString *base = [folder stringByAppendingPathComponent:@"base.car"], *current = [folder stringByAppendingPathComponent:@"current.car"];
@@ -62,7 +63,6 @@ static NSArray<NSString *> *DPMissingIcons(NSString *catalog, NSString *home) {
     return missing;
 }
 
-// nil on success. Every .car in icons/ that `catalog` lacks joins it.
 static NSString *DPWriteBase(NSString *catalog, NSString *folder, NSString *home) {
     NSFileManager *files = NSFileManager.defaultManager;
     NSString *base = [folder stringByAppendingPathComponent:@"base.car"], *incoming = [base stringByAppendingString:@".new"];
@@ -97,7 +97,7 @@ NSString *DPPrepareIcons(NSString *app, NSString *installed, NSString *home) {
     NSString *current = [folder stringByAppendingPathComponent:@"current.car"];
     if (![files createSymbolicLinkAtPath:link withDestinationPath:current error:NULL] || rename(link.fileSystemRepresentation, catalog.fileSystemRepresentation) != 0)
         return @"kept Dia's icons: couldn't link the catalog";
-    NSURL *url = [NSURL fileURLWithPath:[app stringByAppendingPathComponent:@"Contents/Info.plist"]];
+    NSURL *url = [NSURL fileURLWithPath:DPInfoPath(app)];
     NSMutableDictionary *info = [[NSMutableDictionary alloc] initWithContentsOfURL:url error:NULL];
     info[DPOwnIconKey] = DPOwnIcon(app);
     info[@"CFBundleIconName"] = DPIconAlias;
@@ -109,7 +109,6 @@ NSString *DPPrepareIcons(NSString *app, NSString *installed, NSString *home) {
 NSString *DPSwitchIcon(NSString *app, NSString *home) {
     NSString *folder = DPIconsFolder(app, home), *base = [folder stringByAppendingPathComponent:@"base.car"];
     if (!folder || ![NSFileManager.defaultManager fileExistsAtPath:base]) return @"this Dia wasn't built for icon switching; run `diapatch install`";
-    // An icon added since Dia was built joins here, so it needs no rebuild.
     NSString *problem = (DPMissingIcons(base, home).count ? DPWriteBase(base, folder, home) : nil) ?: DPWriteCurrent(app, folder);
     if (problem) return problem;
     // IconServices caches by the bundle's date.

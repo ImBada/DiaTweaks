@@ -3,15 +3,13 @@ DYLIB_SOURCES := $(shell find src/dylib -name '*.[hm]')
 DYLIB_SWIFT := $(shell find src/dylib -name '*.swift')
 SDK := $(shell xcrun --show-sdk-path)
 SWIFT_LIB := $(SDK)/usr/lib/swift
-# FoundationModels only exists on macOS 26+, so it's weak-linked and Swift's automatic link to it is turned off. An
-# older SDK has no FoundationModels at all; Tidy Tabs then builds without it and says so when used.
+# FoundationModels is macOS 26+ only: weak-link it, stop Swift auto-linking it, and skip it when the SDK lacks it.
 FOUNDATION_MODELS := $(if $(wildcard $(SDK)/System/Library/Frameworks/FoundationModels.framework),-weak_framework FoundationModels)
 SWIFTFLAGS := -target arm64-apple-macos14.0 -O -parse-as-library -wmo -module-name DiaPatchesSwift \
 	-Xfrontend -disable-autolink-framework -Xfrontend FoundationModels
 PASSKEYS := src/dylib/Patches/Passkeys/extension
 EXTENSION := $(foreach file,manifest.json page.js bridge.js worker.js,-Wl,-sectcreate,__TEXT,__pk_$(basename $(file)),$(PASSKEYS)/$(file))
 
-# diapatch records the commit it was built from, to tell a source build that is newer than the latest release from one that isn't.
 COMMIT := $(shell git rev-parse HEAD 2>/dev/null)
 
 all: build/diapatch build/DiaPatches.dylib build/patches.json
@@ -31,7 +29,7 @@ build/DiaPatches.dylib: $(DYLIB_SOURCES) build/DiaPatchesSwift.o $(wildcard $(PA
 	clang $(CFLAGS) -Isrc/dylib -dynamiclib $(EXTENSION) -framework AppKit -framework QuartzCore -framework Metal -framework AVFoundation -framework VideoToolbox -framework CoreMedia -framework CoreVideo \
 		-L$(SWIFT_LIB) -Wl,-rpath,/usr/lib/swift $(FOUNDATION_MODELS) -o $@ $(filter %.m %.o,$^)
 
-# The patch list for diatweaks. With DIAPATCH_MANIFEST set, the dylib writes it and exits as it loads, so diapatch never runs.
+# With DIAPATCH_MANIFEST set, the dylib writes the patch list and exits as it loads, so diapatch never runs.
 build/patches.json: build/DiaPatches.dylib build/diapatch
 	DIAPATCH_MANIFEST=$@ DYLD_INSERT_LIBRARIES=$< build/diapatch
 
@@ -55,7 +53,6 @@ build/split-client-hello: tests/split-client-hello.m $(wildcard $(SPLIT)/Split.[
 build/vertical-tab-glow: tests/vertical-tab-glow.m $(wildcard src/dylib/Patches/HideVerticalTabGlow/*.[hm]) | build
 	clang $(CFLAGS) -Isrc/dylib -framework AppKit -framework QuartzCore -o $@ $<
 
-# Checks that need no Dia: grouping, the DiaTweaks update decision, mouse navigation, Hide Vertical Tab Glow, ClientHello splitting, the Sidebar Grain textures, and that Settings shows each tweak like its neighbours.
 check: build/diapatch build/group-tabs build/mouse-back-forward build/vertical-tab-glow build/split-client-hello build/patches.json
 	tests/tweaks-update
 	build/group-tabs
@@ -68,7 +65,6 @@ check: build/diapatch build/group-tabs build/mouse-back-forward build/vertical-t
 test: build/DiaPatches.dylib
 	./test.sh
 
-# make patch NAME=HideFooButton starts a new patch in src/dylib/Patches/HideFooButton.
 patch:
 	@scripts/new-patch "$(NAME)"
 

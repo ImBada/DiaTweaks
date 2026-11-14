@@ -3,8 +3,6 @@
 static const CGFloat DPCommandBarSpacing = 14;
 static char DPCompactedKey;
 
-// Leaves as much space under the input, or the suggestions once there are some, as above the input, and none for the
-// suggestions Turn Off AI hides.
 NSSize DPCompactSize(NSView *container, NSSize size) {
     NSView *commandBar = DPCommandBarPart(container, DPDiaCommandBar), *toolbar = DPCompactToolbar(commandBar);
     NSView *input = DPCommandBarPart(commandBar, DPDiaCommandBarInput), *suggestions = DPCommandBarPart(commandBar, DPDiaCommandBarSuggestions);
@@ -22,7 +20,7 @@ static void DPPopover_setFrameSize(NSView *self, SEL _cmd, NSSize size) {
     DPCallOriginal(DPPopover_setFrameSize, self, compact);
 }
 
-// Shrunk with its container, the command bar would squeeze the suggestions to keep the row, so the container clips the row instead.
+// Shrunk with its container the bar would squeeze the suggestions to keep the row, so the container clips the row.
 static void DPCommandBar_setFrameSize(NSView *self, SEL _cmd, NSSize size) {
     CGFloat trim = 0;
     for (NSView *view = self.superview; view && !trim; view = view.superview) trim = DPTrim(view);
@@ -35,7 +33,7 @@ static void DPPopover_setFrameOrigin(NSView *self, SEL _cmd, NSPoint origin) {
     if (DPCompactToolbar(commandBar)) commandBar.needsLayout = YES;
 }
 
-// Dia sizes the popover or panel only when it wants a new size, so one whose command bar settles later is trimmed again.
+// Dia sizes the popover or panel only when it wants a new size, so one whose bar settles later is trimmed again.
 static void DPRefit(NSView *commandBar) {
     NSView *box = commandBar.superview;
     while (box && !DPIsKind(box, DPDiaPopover) && !(DPIsKind(box, DPDiaAssistantPanel) && DPTrimsPanel(box))) box = box.superview;
@@ -48,23 +46,21 @@ static void DPRefit(NSView *commandBar) {
     box.superview.superview.needsLayout = YES;  // Moves the new tab page's chat usage banner under the panel.
 }
 
-// The popover can run past the window's top, so Go centers in the part that shows.
 static void DPCommandBar_layout(NSView *self, SEL _cmd) {
     DPCallOriginal(DPCommandBar_layout, self);
     DPRefit(self);
     NSView *toolbar = DPCommandBarPart(self, DPDiaCommandBarToolbar), *suggestions = DPCommandBarPart(self, DPDiaCommandBarSuggestions);
     CGFloat hidden = DPHiddenSuggestionsHeight(suggestions);
-    if (hidden && toolbar && !DPCompactToolbar(self)) {
+    BOOL compact = DPCompactToolbar(self) != nil;
+    if (hidden && toolbar && !compact) {
         NSRect frame = toolbar.frame;
         frame.origin.y = NSMaxY(suggestions.frame) - hidden;
         toolbar.frame = frame;
     }
     NSStackView *stack = toolbar.subviews.firstObject;
     if (![stack isKindOfClass:NSStackView.class]) return;
-    BOOL compact = DPCompactToolbar(self) != nil;
     if (!compact && !DPGet(stack, &DPCompactedKey)) return;
     DPSet(stack, &DPCompactedKey, compact ? @YES : nil);
-    // Faded, not hidden: the add tabs button stretches to push Go to the trailing edge.
     for (NSView *view in stack.views)
         if (view != DPGoButton(toolbar)) view.alphaValue = !compact;
     NSView *input = DPCommandBarPart(self, DPDiaCommandBarInput);
@@ -76,16 +72,29 @@ static void DPCommandBar_layout(NSView *self, SEL _cmd) {
     toolbar.frame = frame;
 }
 
+// Dia's buttons have no intrinsic width, so Go's frame is the only measure.
+static CGFloat DPTextWidth(NSView *input, NSView *text, NSView *go) {
+    return MAX(0, NSWidth(input.bounds) - NSMinX(text.frame) - NSWidth(go.frame) - 2 * DPCommandBarSpacing);
+}
+
 static void DPCommandBarInput_layout(NSView *self, SEL _cmd) {
     DPCallOriginal(DPCommandBarInput_layout, self);
     NSView *go = DPGoButton(DPCompactToolbar(self.superview)), *text = DPCommandBarPart(self, DPDiaCommandBarText);
     if (!go || !text) return;
     NSRect frame = text.frame;
-    frame.size.width = MAX(0, NSWidth(self.bounds) - NSMinX(frame) - go.intrinsicContentSize.width - 2 * DPCommandBarSpacing);
+    frame.size.width = DPTextWidth(self, text, go);
     text.frame = frame;
 }
 
-// Labels arrive after the first layout, so a label that changes the verdict lays the command bar out again.
+// The toolbar lays Go out after the input, and Go widens to "Go ↵" as you type a URL.
+static void DPCommandBarButton_layout(NSView *self, SEL _cmd) {
+    DPCallOriginal(DPCommandBarButton_layout, self);
+    NSView *commandBar = self;
+    while (commandBar && !DPIsKind(commandBar, DPDiaCommandBar)) commandBar = commandBar.superview;
+    NSView *input = DPCommandBarPart(commandBar, DPDiaCommandBarInput), *text = DPCommandBarPart(input, DPDiaCommandBarText);
+    if (text && self == DPGoButton(DPCompactToolbar(commandBar)) && fabs(NSWidth(text.frame) - DPTextWidth(input, text, self)) > 0.5) input.needsLayout = YES;
+}
+
 static void DPCommandBarButton_setAccessibilityLabel(NSView *self, SEL _cmd, NSString *label) {
     DPCallOriginal(DPCommandBarButton_setAccessibilityLabel, self, label);
     NSView *commandBar = self;
@@ -98,7 +107,6 @@ static void DPCommandBarButton_setAccessibilityLabel(NSView *self, SEL _cmd, NSS
     for (NSView *view = commandBar; view; view = view.superview) view.needsLayout = YES;
 }
 
-// The row lies over the input, so only Go takes clicks.
 static NSView *DPCommandBarToolbar_hitTest(NSView *self, SEL _cmd, NSPoint point) {
     NSView *hit = DPCallOriginal(DPCommandBarToolbar_hitTest, self, point), *commandBar = self.superview.superview;
     if (!hit || !DPIsKind(commandBar, DPDiaCommandBar) || !DPCompactToolbar(commandBar)) return hit;
@@ -112,6 +120,7 @@ void DPInstallCommandBarLayout(void) {
     DPHook(DPDiaCommandBar, @selector(setFrameSize:), (IMP)DPCommandBar_setFrameSize);
     DPHook(DPDiaCommandBar, @selector(layout), (IMP)DPCommandBar_layout);
     DPHook(DPDiaCommandBarButton, @selector(setAccessibilityLabel:), (IMP)DPCommandBarButton_setAccessibilityLabel);
+    DPHook(DPDiaCommandBarButton, @selector(layout), (IMP)DPCommandBarButton_layout);
     DPHook(DPDiaCommandBarInput, @selector(layout), (IMP)DPCommandBarInput_layout);
     DPHook(DPDiaCommandBarToolbar, @selector(hitTest:), (IMP)DPCommandBarToolbar_hitTest);
 }

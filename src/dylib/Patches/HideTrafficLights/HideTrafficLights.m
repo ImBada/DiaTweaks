@@ -8,8 +8,7 @@ static BOOL DPIsTrafficLights(NSView *view) { return DPIsKind(view, DPDiaTraffic
 
 static NSRect DPLaidOutStack(NSView *stack) { return [DPDiaValue(stack, &DPStackFrameKey, @(stack.frame)) rectValue]; }
 
-// The header's stack keeps room for hidden views. Out of the stack, the lights aren't subviews, so the header holds them.
-// Without the lights the profile button lines up with the pinned tabs, keeping its right edge.
+// Out of the stack the lights aren't subviews, so the header holds them.
 static void DPSidebarHeader_layout(NSView *self, SEL _cmd) {
     NSView *lights = DPFindView(self, ^BOOL(NSView *view) { return DPIsTrafficLights(view); });
     if (lights) DPSet(self, &DPLightsKey, @[ lights, lights.superview ]);

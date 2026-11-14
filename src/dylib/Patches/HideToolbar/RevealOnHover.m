@@ -1,7 +1,5 @@
 #import "HideToolbar.h"
 
-static void DPApplyReveal(DPPatch *patch) { DPRelayoutPanes(); }
-
 static NSString *DPVerifyRevealToolbar(DPPatch *patch) {
     for (NSView *pane in DPFindViews(DPDiaContentPane)) {
         DPToolbarHover *hover = [DPToolbarHover forPane:pane];
@@ -22,6 +20,6 @@ DP_PATCH(DPRevealToolbarOnHover) {
     .tint = @"systemIndigoColor",
     .requires = @"hideToolbar",
     .section = @"Showing the Toolbar",
-    .apply = DPApplyReveal,
+    .apply = DPApplyRelayoutPanes,
     .verify = DPVerifyRevealToolbar,
 };

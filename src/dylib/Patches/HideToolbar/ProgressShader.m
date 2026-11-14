@@ -7,7 +7,6 @@ static id<MTLRenderPipelineState> DPPipeline;
 static id<MTLCommandQueue> DPQueue;
 static NSUInteger DPSlots[DPInputCount];
 
-// Inputs are found by name, so a reordered shader still works and a changed one falls back to a plain line.
 static BOOL DPLoadShader(void) {
     static dispatch_once_t once;
     dispatch_once(&once, ^{
@@ -21,7 +20,7 @@ static BOOL DPLoadShader(void) {
         if (!descriptor.vertexFunction || !descriptor.fragmentFunction) return;
         MTLRenderPipelineColorAttachmentDescriptor *color = descriptor.colorAttachments[0];
         color.pixelFormat = MTLPixelFormatBGRA8Unorm;
-        color.blendingEnabled = YES;  // It writes premultiplied color over a clear layer.
+        color.blendingEnabled = YES;
         color.sourceRGBBlendFactor = color.sourceAlphaBlendFactor = MTLBlendFactorOne;
         color.destinationRGBBlendFactor = color.destinationAlphaBlendFactor = MTLBlendFactorOneMinusSourceAlpha;
         MTLRenderPipelineReflection *reflection;

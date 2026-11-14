@@ -23,8 +23,6 @@ static BOOL DPIsNewGroupTitle(NSString *title) {
     return [title hasPrefix:@"New Group with "] && ([title hasSuffix:@" Tab"] || [title hasSuffix:@" Tabs"]);
 }
 
-extern DPPatch DPGroupTabs;
-
 static NSMenuItem *DPCommandItem(NSString *title, NSInteger tag, NSString *symbol, void (^action)(void)) {
     NSMenuItem *item = DPMenuItem(title, action);
     item.tag = tag;
@@ -54,8 +52,7 @@ static NSInteger DPFollowersInPlace(NSMenu *menu, NSInteger index) {
     return n;
 }
 
-// Dia rebuilds the Tabs menu by adding tagged copies and later removes them itself, so keep the last item with a tag:
-// dropping Dia's copy crashes Dia when it removes it.
+// Dia removes the tagged copies it added, so keep the last item with a tag: dropping Dia's copy crashes Dia.
 static void DPPlaceFollowerItems(NSMenu *menu) {
     if (DPInserting || !menu) return;
     NSInteger group = NSNotFound, count = 0;

@@ -38,7 +38,6 @@ CGFloat DPBaseCornerRadius(NSView *container) {
     return radius ? [DPDiaValue(container, &DPRadiusKey, @(*radius)) doubleValue] : 0;
 }
 
-// Grown with the page and the window's corners to stay concentric with the window's.
 static void DPSetCornerRadius(NSView *container, CGFloat inset) {
     CGFloat *radius = DPIvar(container, "cornerRadius");
     if (!radius) return;

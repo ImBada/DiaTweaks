@@ -1,6 +1,5 @@
 #import "StdPatch/StdPatch.h"
 
-// Dia uses the same button elsewhere.
 static BOOL DPIsNewTabLogo(NSView *view) {
     if (!DPIsKind(view, DPDiaNewTabLogo) && !DPIsKind(view, DPDiaNewTabLogoParticles)) return NO;
     for (NSView *up = view.superview; up; up = up.superview)

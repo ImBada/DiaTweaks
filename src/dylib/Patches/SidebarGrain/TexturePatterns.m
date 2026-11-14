@@ -2,7 +2,6 @@
 #import "GrainView.h"
 
 static float DPSandCell(NSInteger x, NSInteger y) {
-    // Variable cell density avoids a visible grid in the mineral pattern.
     NSInteger gx = x / 4, gy = y / 4;
     float first = FLT_MAX, second = FLT_MAX, tone = 0;
     for (NSInteger dy = -2; dy <= 2; dy++) for (NSInteger dx = -2; dx <= 2; dx++) {

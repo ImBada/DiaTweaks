@@ -3,17 +3,15 @@
 
 static char DPLittleKey, DPPageKey, DPChromeKey, DPSourceKey, DPPromotedKey;
 
-// Links on their way, oldest first: each {frame, missed}. Chromium makes their windows, and hands over their pages, in
-// the order it was asked, so the first window or page to arrive belongs to the first link still waiting.
 static NSMutableArray<NSDictionary *> *DPExpected;
-static NSMutableArray *DPPendingPages;                     // Pages that came before their window.
-static NSPointerArray *DPWindowsAwaitingPage;              // Windows that came before their page.
+static NSMutableArray *DPPendingPages;
+static NSPointerArray *DPWindowsAwaitingPage;
 
-void DPExpectLittleDiaWindow(NSRect frame, void (^missed)(void), void (^claimed)(NSWindow *window)) {
-    NSMutableDictionary *link = [@{@"frame" : [NSValue valueWithRect:frame], @"missed" : [missed copy]} mutableCopy];
+void DPExpectLittleDiaWindow(NSRect frame, NSDictionary *noted, void (^missed)(void), void (^claimed)(NSWindow *window)) {
+    NSMutableDictionary *link = [@{@"frame" : [NSValue valueWithRect:frame], @"noted" : noted, @"missed" : [missed copy]} mutableCopy];
     if (claimed) link[@"claimed"] = [claimed copy];
     [DPExpected addObject:link];
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, DPLittleDiaWait * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
         if ([DPExpected indexOfObjectIdenticalTo:link] == NSNotFound) return;
         [DPExpected removeObjectIdenticalTo:link];
         if (!DPExpected.count) [DPPendingPages removeAllObjects];
@@ -23,20 +21,25 @@ void DPExpectLittleDiaWindow(NSRect frame, void (^missed)(void), void (^claimed)
 
 BOOL DPIsLittleDiaWindow(NSWindow *window) { return window && [DPGet(window, &DPLittleKey) boolValue]; }
 
-id DPLittleDiaPage(NSWindow *window) { return DPGet(window, &DPPageKey); }
+id DPLittleDiaPage(NSWindow *window) {
+    id page = DPGet(window, &DPPageKey);
+    BOOL usable = [page respondsToSelector:@selector(url)] && [page respondsToSelector:@selector(title)]
+        && [page respondsToSelector:@selector(canGoBack)] && [page respondsToSelector:@selector(canGoForward)];
+    return usable ? page : nil;
+}
 
-// Takes away the title bar: the content runs under it, so Dia's popup bar, pinned to the top, is the top of the window.
 static void DPSetChrome(NSWindow *window, BOOL little) {
     NSView *titlebar = [window standardWindowButton:NSWindowCloseButton].superview.superview;
-    if (little && !DPGet(window, &DPChromeKey)) {
+    NSDictionary *saved = DPGet(window, &DPChromeKey);
+    if (little == (saved != nil)) return;
+    if (little) {
         DPSet(window, &DPChromeKey, @{@"mask" : @(window.styleMask), @"movable" : @(window.movableByWindowBackground)});
         window.styleMask |= NSWindowStyleMaskFullSizeContentView;
-    } else if (!little && DPGet(window, &DPChromeKey)) {
-        NSDictionary *saved = DPGet(window, &DPChromeKey);
+    } else {
         DPSet(window, &DPChromeKey, nil);
         window.styleMask = [saved[@"mask"] unsignedIntegerValue];
         window.movableByWindowBackground = [saved[@"movable"] boolValue];
-    } else return;
+    }
     window.titlebarAppearsTransparent = little;
     window.titleVisibility = little ? NSWindowTitleHidden : NSWindowTitleVisible;
     if (little) window.movableByWindowBackground = YES;
@@ -44,35 +47,34 @@ static void DPSetChrome(NSWindow *window, BOOL little) {
     titlebar.hidden = little;
 }
 
-// Claims a popup that appears while a link is on its way. Pages open popups too, but rarely in the same second.
 static void DPClaim(NSWindow *window) {
     if (!window || !DPIsKind(window, DPDiaPopupWindow) || DPGet(window, &DPLittleKey) || !DPExpected.count) return;
-    NSDictionary *link = DPExpected.firstObject;
+    NSDictionary *link = DPExpected.firstObject, *noted = link[@"noted"];
     [DPExpected removeObjectAtIndex:0];
     DPSet(window, &DPLittleKey, @YES);
-    if (DPLinkSource()) DPSet(window, &DPSourceKey, @(DPLinkSource()));
+    if ([noted[@"source"] intValue]) DPSet(window, &DPSourceKey, noted[@"source"]);
     if (DPPendingPages.count) {
         DPSet(window, &DPPageKey, DPPendingPages.firstObject);
         [DPPendingPages removeObjectAtIndex:0];
     } else [DPWindowsAwaitingPage addPointer:(__bridge void *)window];
+    // With no link left a waiting page is some other popup's; kept, later windows would each take the wrong page.
+    if (!DPExpected.count) [DPPendingPages removeAllObjects];
     // Chromium adds its title bar to the size it's given, and the title bar is gone here.
     NSRect frame = [link[@"frame"] rectValue];
     [window setFrame:frame display:YES];
     [window makeKeyAndOrderFront:nil];
     [NSApp activateIgnoringOtherApps:YES];
-    DPRestoreStack(window);
+    DPRestoreStack(window, noted);
     // Chromium sizes and focuses the new window again a moment later, which can bring Dia's windows forward again.
     __weak NSWindow *weakWindow = window;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 300 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
         [weakWindow setFrame:frame display:YES];
-        DPRestoreStack(weakWindow);
-        DPFinishStack();
+        DPRestoreStack(weakWindow, noted);
     });
     DPRefreshLittleDiaWindows();
     if (link[@"claimed"]) ((void (^)(NSWindow *))link[@"claimed"])(window);
 }
 
-// Chromium hands Dia each popup's page here, with the popup's own browser.
 static void DPBrowser_didCreate(id self, SEL _cmd, id browser, id page, BOOL active) {
     DPCallOriginal(DPBrowser_didCreate, self, browser, page, active);
     long (*type)(id, SEL) = (void *)objc_msgSend;
@@ -91,9 +93,7 @@ static void DPPopupBar_viewDidMoveToWindow(NSView *self, SEL _cmd) {
     DPClaim(self.window);
 }
 
-// A link that opens a new tab, from a small window's page, opens in that window instead: tabs here would be out of
-// sight, and one in the main window brings it forward. ⌘-click still opens a tab behind, and popups a page opens with a
-// size are still popups, since sign-in windows talk back to the page that opened them.
+// Only plain new-tab links stay: sized popups keep their opener, which sign-in windows talk back to.
 enum { DPCurrentTab = 1, DPForegroundTab = 2 };
 
 static BOOL DPStaysInLittleDia(id page, NSInteger disposition) {
@@ -103,7 +103,6 @@ static BOOL DPStaysInLittleDia(id page, NSInteger disposition) {
     return NO;
 }
 
-// The same link, as if it stayed in its page.
 @interface DPStayingLink : NSProxy
 @property (nonatomic, strong) id action;
 @end
@@ -114,8 +113,6 @@ static BOOL DPStaysInLittleDia(id page, NSInteger disposition) {
 - (void)forwardInvocation:(NSInvocation *)invocation { [invocation invokeWithTarget:self.action]; }
 @end
 
-// Links and window.open: Dia, and any tweak that looks at links before it, are asked as if the link stayed, so no
-// other page is made.
 static NSInteger DPPage_decidePolicy(id self, SEL _cmd, id page, id action) {
     if (!DPStaysInLittleDia(page, [[action valueForKey:@"navigationDisposition"] integerValue]))
         return DPCallOriginal(DPPage_decidePolicy, self, page, action);
@@ -141,6 +138,18 @@ void DPRefreshLittleDiaWindows(void) {
     DPRelayoutLittleDiaBars();
 }
 
+static void DPWindowWillClose(NSWindow *window) {
+    if (!DPLittleDia.on || !DPIsLittleDiaWindow(window)) return;
+    pid_t source = [DPGet(window, &DPSourceKey) intValue];
+    BOOL key = window.isKeyWindow, promoted = [DPGet(window, &DPPromotedKey) boolValue];
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (promoted) {
+            DPBringBackPutAway(nil);
+            DPShowMainWindow();
+        } else if (!DPHideAgain() && key && source) DPReturnToSource(source);
+    });
+}
+
 void DPInstallLittleDiaWindows(void) {
     DPExpected = [NSMutableArray array];
     DPPendingPages = [NSMutableArray array];
@@ -150,25 +159,9 @@ void DPInstallLittleDiaWindows(void) {
     DPOnLaunch(^{
         DPHook(DPDiaWebContent, @selector(webContents:decidePolicyForNavigationAction:), (IMP)DPPage_decidePolicy);
     });
-    [NSNotificationCenter.defaultCenter addObserverForName:NSWindowDidBecomeKeyNotification object:nil queue:nil
-                                                usingBlock:^(NSNotification *note) { DPClaim(note.object); }];
-    // Open in Dia goes to the main window. Otherwise, closed while in front, by ✕, ⌘W or Escape: back to the app the
-    // link came from.
-    [NSNotificationCenter.defaultCenter addObserverForName:NSWindowWillCloseNotification object:nil queue:nil
-                                                usingBlock:^(NSNotification *note) {
-                                                    NSWindow *window = note.object;
-                                                    if (!DPLittleDia.on || !DPIsLittleDiaWindow(window)) return;
-                                                    pid_t source = [DPGet(window, &DPSourceKey) intValue];
-                                                    BOOL key = window.isKeyWindow;
-                                                    if ([DPGet(window, &DPPromotedKey) boolValue])
-                                                        dispatch_async(dispatch_get_main_queue(), ^{
-                                                            DPBringBackPutAway(nil);
-                                                            DPShowMainWindow();
-                                                        });
-                                                    else dispatch_async(dispatch_get_main_queue(), ^{
-                                                        if (!DPHideAgain() && key && source) DPReturnToSource(source);
-                                                    });
-                                                }];
+    NSNotificationCenter *center = NSNotificationCenter.defaultCenter;
+    [center addObserverForName:NSWindowDidBecomeKeyNotification object:nil queue:nil usingBlock:^(NSNotification *note) { DPClaim(note.object); }];
+    [center addObserverForName:NSWindowWillCloseNotification object:nil queue:nil usingBlock:^(NSNotification *note) { DPWindowWillClose(note.object); }];
     DPInstallLittleDiaBar();
     DPInstallLittleDiaStack();
 }

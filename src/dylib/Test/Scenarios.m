@@ -22,7 +22,6 @@ NSString *DPBits(const int8_t *state) {
 
 static NSUInteger DPPair(NSUInteger i, BOOL a, NSUInteger j, BOOL b) { return ((i * DPPatchCount + j) * 2 + a) * 2 + b; }
 
-// state -1: undecided.
 static int DPGain(const int8_t *state, const BOOL *uncovered, NSUInteger k, BOOL on) {
     int gain = 0;
     for (NSUInteger m = 0; m < DPPatchCount; m++)
@@ -61,7 +60,6 @@ NSMutableArray<NSArray<NSString *> *> *DPScenarios(void) {
                 for (int b = 0; b < 2; b++)
                     uncovered[DPPair(i, a, j, b)] = !DPPatches[i]->unavailable && !DPPatches[j]->unavailable
                         && !(a && !b && DPNeeds(DPPatches[i], DPPatches[j])) && !(b && !a && DPNeeds(DPPatches[j], DPPatches[i]));
-    // Greedy: seed with an uncovered pair, then give each other patch the value covering the most uncovered pairs.
     NSUInteger pairwise = 0;
     for (NSUInteger pair = 0; pair < n * n * 4; pair++) {
         if (!uncovered[pair]) continue;

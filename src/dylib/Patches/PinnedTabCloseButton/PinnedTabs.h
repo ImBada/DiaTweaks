@@ -1,8 +1,13 @@
 #import "StdPatch/StdPatch.h"
 
-extern DPPatch DPPinnedTabCloseButton, DPPinnedTabMinusButton;  // The minus button is an option of the close button.
+extern DPPatch DPPinnedTabCloseButton, DPPinnedTabMinusButton;
 
-// The view model's delegate of a TabView (its TabController) or a TabContentView (its TabContentController).
 id DPViewModelDelegate(NSView *view);
 NSView *DPEnclosingTab(NSView *view);
-void DPRelayoutTabContents(void);  // Each tab's page row picks its close button as it's laid out.
+void DPRelayoutTabContents(void);
+
+id DPAttributes(NSView *content);
+BOOL DPIsOpenPinned(NSView *content);  // A TabContentView, not a TabView.
+// NO, without calling `click`, if the tab has no close button style.
+BOOL DPClickKeepingTab(NSView *content, void (^click)(void));
+BOOL DPCloseKeepingTab(NSView *content);

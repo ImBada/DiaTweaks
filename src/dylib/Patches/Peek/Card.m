@@ -3,7 +3,6 @@
 
 static const CGFloat DPPeekShadowRoom = 48;
 
-// A hairline of the page's own light, so a dark card reads against a dark page. On a light page it's white on white and unseen.
 static const CGFloat DPPeekEdgeAlpha = 0.12;
 
 static NSRect DPPeekCardRect(NSRect area) { return NSInsetRect(area, NSWidth(area) * 0.09, MAX(10, NSHeight(area) * 0.012)); }
@@ -18,7 +17,7 @@ static NSRect DPPeekCardRect(NSRect area) { return NSInsetRect(area, NSWidth(are
     CGFloat g = self.grown;
     NSRect frame = NSMakeRect(NSMinX(card) + (NSMinX(page) - NSMinX(card)) * g, NSMinY(card) + (NSMinY(page) - NSMinY(card)) * g,
                               NSWidth(card) + (NSWidth(page) - NSWidth(card)) * g, NSHeight(card) + (NSHeight(page) - NSHeight(card)) * g);
-    // Keep the settled Chromium surface on physical pixels; fractional placement filters its text.
+    // Pixel-aligned: fractional placement blurs Chromium's text.
     return [self backingAlignedRect:frame options:NSAlignAllEdgesNearest];
 }
 
@@ -28,11 +27,9 @@ static NSRect DPPeekCardRect(NSRect area) { return NSInsetRect(area, NSWidth(are
     self.dim.frame = self.bounds;
     self.card.frame = NSInsetRect(card, -DPPeekShadowRoom, -DPPeekShadowRoom);
     self.clip.frame = self.shade.frame = NSInsetRect(self.card.bounds, DPPeekShadowRoom, DPPeekShadowRoom);
-    // Fades out as the card fills the page, which has no edge to mark, so the tab it becomes doesn't lose a border all at once.
     self.clip.layer.borderColor = [NSColor colorWithWhite:1 alpha:DPPeekEdgeAlpha * (1 - self.grown)].CGColor;
     self.controls.frame = (NSRect){{NSMaxX(card) + 12, NSMinY(card) + 4}, self.controls.frame.size};
-    // Outside the sidebar slide's animation. The page redraws at its new size at once, so while the pane moves it covers
-    // both the old and new card and is cropped, rather than leaving a blank strip. And the rebuilt hints would fade in.
+    // Not animated with the sidebar slide: the page redraws at its new size at once, so it must cover both card sizes meanwhile.
     CGFloat bar = DPPeekToolbarInset(self);
     NSSize page = NSMakeSize(NSWidth(self.clip.bounds), MAX(0, NSHeight(self.clip.bounds) - bar));
     if (self.paneMoves) page = NSMakeSize(MAX(page.width, NSWidth(self.host.frame)), MAX(page.height, NSHeight(self.host.frame)));
@@ -91,7 +88,7 @@ static NSRect DPPeekCardRect(NSRect area) { return NSInsetRect(area, NSWidth(are
 - (void)handOver {
     [self stopWatching];
     [self removeFromSuperview];
-    // Off screen before the page detaches, or it flashes blank. A full-size card is swapped for the tab in the same frame.
+    // The card must be off screen before the page detaches, or it flashes blank.
     if (self.grown < 1) [CATransaction flush];
     [self.page detachFromPaneHostView:self.host];
 }
@@ -104,11 +101,19 @@ DPPeekCard *DPPeekCardIn(NSWindow *window) {
     });
 }
 
-static NSView *DPPeekPane(NSWindow *window) {
-    NSView *pane = nil;
-    for (NSView *candidate in DPFindViews(DPDiaContentPane))
-        if (candidate.window == window && NSWidth(candidate.bounds) * NSHeight(candidate.bounds) > NSWidth(pane.bounds) * NSHeight(pane.bounds)) pane = candidate;
-    return pane;
+static NSView *DPPeekPane(NSWindow *window, NSRect area) {
+    NSView *pane = nil, *under = nil;
+    CGFloat overlap = 0;
+    for (NSView *candidate in DPFindViews(DPDiaContentPane)) {
+        if (candidate.window != window) continue;
+        NSRect hit = NSIntersectionRect([window convertRectToScreen:[candidate convertRect:candidate.bounds toView:nil]], area);
+        if (!candidate.isHiddenOrHasHiddenAncestor && NSWidth(hit) * NSHeight(hit) > overlap) {
+            under = candidate;
+            overlap = NSWidth(hit) * NSHeight(hit);
+        }
+        if (NSWidth(candidate.bounds) * NSHeight(candidate.bounds) > NSWidth(pane.bounds) * NSHeight(pane.bounds)) pane = candidate;
+    }
+    return under ?: pane;
 }
 
 static NSView *DPPeekHolder(NSWindow *window, NSView *pane) {
@@ -128,30 +133,38 @@ static BOOL DPIsDigitKey(NSEvent *event) {
     return key.length == 1 && [key characterAtIndex:0] >= '1' && [key characterAtIndex:0] <= '9';
 }
 
-// A focused peek page swallows ⌘S and ⌃1–9 (switch profile), which Dia's tabs pass on to the menu. The keypad's digits count too.
+// Only the app and Window menus; the others act on the tab behind the card.
+static BOOL DPPerformAppShortcut(NSEvent *event, NSEventModifierFlags mods) {
+    if (!(mods & (NSEventModifierFlagCommand | NSEventModifierFlagControl))) return NO;
+    return [NSApp.mainMenu.itemArray.firstObject.submenu performKeyEquivalent:event] || [NSApp.windowsMenu performKeyEquivalent:event];
+}
+
+// A focused Peek page swallows ⌘S and ⌃1–9, which Dia's tabs pass on to the menu.
 static id DPWatchKeys(DPPeekCard *card) {
     __weak DPPeekCard *weak = card;
     return [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskKeyDown handler:^NSEvent *(NSEvent *event) {
         DPPeekCard *peek = weak;
         if (!peek || event.window != peek.window) return event;
         NSEventModifierFlags mods = event.modifierFlags & NSEventModifierFlagDeviceIndependentFlagsMask & ~(NSEventModifierFlagCapsLock | NSEventModifierFlagNumericPad);
-        BOOL command = mods == NSEventModifierFlagCommand, control = mods == NSEventModifierFlagControl, editing = [peek.window.firstResponder isKindOfClass:NSText.class];
-        if (DPPeekCopyURL(peek, event)) return nil;
-        if (command && event.keyCode == kVK_ANSI_O) [peek close:DPPeekTab];
-        // Dia's menu would go back, forward or reload the tab behind the card. Without the toolbar, the card stays stock.
-        else if (command && peek.toolbar && event.keyCode == kVK_ANSI_LeftBracket) DPPeekNavigate(peek.page, DPPeekBack);
-        else if (command && peek.toolbar && event.keyCode == kVK_ANSI_RightBracket) DPPeekNavigate(peek.page, DPPeekForward);
-        else if (command && peek.toolbar && event.keyCode == kVK_ANSI_R) DPPeekNavigate(peek.page, DPPeekReload);
-        else if (command && peek.toolbar && event.keyCode == kVK_ANSI_L) DPPeekEditToolbarAddress(peek);
-        else if ((command && event.keyCode == kVK_ANSI_W) || (!mods && event.keyCode == kVK_Escape && !editing)) [peek close:DPPeekClose];
-        else if (!((command && event.keyCode == kVK_ANSI_S) || (control && DPIsDigitKey(event))) || ![NSApp.mainMenu performKeyEquivalent:event]) return event;
+        // A page's field is not an NSText; Escape there must cancel an input method's composition, not close the card.
+        id responder = peek.window.firstResponder;
+        BOOL command = mods == NSEventModifierFlagCommand, control = mods == NSEventModifierFlagControl;
+        BOOL editing = [responder isKindOfClass:NSText.class] || ([responder conformsToProtocol:@protocol(NSTextInputClient)] && [responder hasMarkedText]);
+        if (DPPeekCopyURL(peek, event) || DPPeekZoomShortcut(peek, event)) return nil;
+        if (command && DPEventIsKey(event, @"o")) [peek close:DPPeekTab];
+        // Dia's menu would navigate the tab behind the card; without the toolbar these stay stock.
+        else if (command && peek.toolbar && DPEventIsKey(event, @"[")) DPPeekNavigate(peek.page, DPPeekBack);
+        else if (command && peek.toolbar && DPEventIsKey(event, @"]")) DPPeekNavigate(peek.page, DPPeekForward);
+        else if (command && peek.toolbar && DPEventIsKey(event, @"r")) DPPeekNavigate(peek.page, DPPeekReload);
+        else if (command && peek.toolbar && DPEventIsKey(event, @"l")) DPPeekEditToolbarAddress(peek);
+        else if ((command && DPEventIsKey(event, @"w")) || (!mods && event.keyCode == kVK_Escape && !editing)) [peek close:DPPeekClose];
+        else if (!DPPerformAppShortcut(event, mods) && !(((command && DPEventIsKey(event, @"s")) || (control && DPIsDigitKey(event))) && [NSApp.mainMenu performKeyEquivalent:event])) return event;
         return nil;
     }];
 }
 
-// Below the page area, so it paints unseen at the card's size.
 NSView *DPPeekWarmHost(NSWindow *window, id<DPPeekPage> page) {
-    NSView *host = [page createPaneHostView], *pane = DPPeekPane(window);
+    NSView *host = [page createPaneHostView], *pane = DPPeekPane(window, (NSRect){NSEvent.mouseLocation, {1, 1}});
     if (!host || !pane) return nil;
     NSView *holder = DPPeekHolder(window, pane);
     NSRect area = [holder convertRect:pane.bounds fromView:pane];
@@ -162,7 +175,7 @@ NSView *DPPeekWarmHost(NSWindow *window, id<DPPeekPage> page) {
 }
 
 DPPeekCard *DPPeekShowCard(NSWindow *window, id<DPPeekPage> page, NSView *warmHost, NSRect screenLink) {
-    NSView *host = warmHost ?: [page createPaneHostView], *pane = DPPeekPane(window);
+    NSView *host = warmHost ?: [page createPaneHostView], *pane = DPPeekPane(window, screenLink);
     if (!window || !host || DPPeekCardIn(window)) return nil;
     NSView *holder = DPPeekHolder(window, pane);
     DPPeekCard *peek = [[DPPeekCard alloc] initWithFrame:pane ? [holder convertRect:pane.bounds fromView:pane] : holder.bounds];
@@ -186,7 +199,6 @@ DPPeekCard *DPPeekShowCard(NSWindow *window, id<DPPeekPage> page, NSView *warmHo
         view.layer.cornerRadius = 10;
         view.layer.cornerCurve = kCACornerCurveContinuous;
     }
-    // Drawn above the page, inside the clip, so it follows the corners and the genie's corner animation.
     peek.clip.layer.borderWidth = 1 / (window.backingScaleFactor ?: 2);
     peek.controls = DPPeekControls(peek, @selector(control:));
     [peek.clip addSubview:host];

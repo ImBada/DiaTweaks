@@ -1,11 +1,12 @@
 #import "StdPatch/StdPatch.h"
+#import "Patches/CompactTabRows/CompactTabRows.h"
 
 extern DPPatch DPCollapsePinned;
 
-static NSString *const DPCollapsedKey = @"collapsedPinned";  // The profiles folded, by space ID.
+static NSString *const DPCollapsedKey = @"collapsedPinned";
 static const CGFloat DPRowHeight = 37, DPHeaderHeight = 28, DPRowInset = 15, DPTitleInset = 36, DPChevronInset = 11, DPGap = 8;
 static NSUserDefaults *DPCollapseDefaults;
-static BOOL DPRaw;  // While measuring, the layout answers as Dia laid it out.
+static BOOL DPRaw;
 static char DPHeaderKey;
 
 static NSString *DPSpaceOf(NSView *list) {
@@ -16,12 +17,17 @@ static NSString *DPSpaceOf(NSView *list) {
 
 static BOOL DPIsCollapsed(NSString *space) { return space && [[DPCollapseDefaults arrayForKey:DPCollapsedKey] containsObject:space]; }
 
+static NSImage *DPSmallSymbol(NSString *name) {
+    NSImageSymbolConfiguration *small = [NSImageSymbolConfiguration configurationWithPointSize:10 weight:NSFontWeightSemibold];
+    return [[NSImage imageWithSystemSymbolName:name accessibilityDescription:nil] imageWithSymbolConfiguration:small];
+}
+
 @interface DPPinnedHeader : NSView
 @property (nonatomic, copy) NSString *space;
 @property (nonatomic) BOOL shown, collapsed, hovered, folding;
 @property (nonatomic, strong) NSDate *springSince;
-@property (nonatomic) NSInteger rows;    // Pinned rows, above Dia's line.
-@property (nonatomic) CGFloat top, end, below;  // Where Dia puts the first of them, its line, and what follows the line.
+@property (nonatomic) NSInteger rows;
+@property (nonatomic) CGFloat top, end, below, row;
 @property (nonatomic, strong) NSImageView *pin, *chevron;
 @property (nonatomic, strong) NSTextField *title;
 @property (nonatomic, strong) CALayer *line;
@@ -34,8 +40,7 @@ static void DPFold(NSString *space, BOOL collapsed);
 - (instancetype)init {
     if (!(self = [super initWithFrame:NSZeroRect])) return nil;
     self.wantsLayer = YES;
-    NSImageSymbolConfiguration *small = [NSImageSymbolConfiguration configurationWithPointSize:10 weight:NSFontWeightSemibold];
-    self.pin = [NSImageView imageViewWithImage:[[NSImage imageWithSystemSymbolName:@"pin.fill" accessibilityDescription:nil] imageWithSymbolConfiguration:small]];
+    self.pin = [NSImageView imageViewWithImage:DPSmallSymbol(@"pin.fill")];
     self.chevron = [NSImageView new];
     self.title = [NSTextField labelWithString:@"Pinned"];
     self.title.font = [NSFont systemFontOfSize:11 weight:NSFontWeightMedium];
@@ -79,12 +84,10 @@ static void DPFold(NSString *space, BOOL collapsed);
     [self restyle];
 }
 
-// Folded, Dia's line sits right below, so one line is enough.
 - (void)setCollapsed:(BOOL)collapsed {
     if (_collapsed == collapsed && self.chevron.image) return;
     _collapsed = collapsed;
-    NSImageSymbolConfiguration *small = [NSImageSymbolConfiguration configurationWithPointSize:10 weight:NSFontWeightSemibold];
-    self.chevron.image = [[NSImage imageWithSystemSymbolName:collapsed ? @"chevron.right" : @"chevron.down" accessibilityDescription:nil] imageWithSymbolConfiguration:small];
+    self.chevron.image = DPSmallSymbol(collapsed ? @"chevron.right" : @"chevron.down");
     self.line.opacity = collapsed ? 0 : 1;
     [self restyle];
 }
@@ -99,9 +102,6 @@ static void DPFold(NSString *space, BOOL collapsed);
 - (void)viewDidChangeEffectiveAppearance { [super viewDidChangeEffectiveAppearance]; [self restyle]; }
 @end
 
-#pragma mark Layout
-
-// Pinned rows sit in the first section, above the short row that draws Dia's line; with no line there's nothing to fold.
 static void DPMeasure(NSCollectionViewLayout *layout) {
     NSCollectionView *list = layout.collectionView;
     if (!DPIsKind(list, DPDiaTabListCollection)) return;
@@ -109,10 +109,17 @@ static void DPMeasure(NSCollectionViewLayout *layout) {
     NSInteger rows = list.numberOfSections ? [list numberOfItemsInSection:0] - 1 : 0;
     BOOL shown = DPCollapsePinned.on && rows > 0;
     NSRect first = NSZeroRect, line = NSZeroRect;
+    CGFloat row = DPRowHeight;
     if (shown) {
         DPRaw = YES;
         first = [layout layoutAttributesForItemAtIndexPath:[NSIndexPath indexPathForItem:0 inSection:0]].frame;
         line = [layout layoutAttributesForItemAtIndexPath:[NSIndexPath indexPathForItem:rows inSection:0]].frame;
+        NSCountedSet<NSNumber *> *heights = [NSCountedSet set];
+        for (NSCollectionViewLayoutAttributes *a in [layout layoutAttributesForElementsInRect:NSMakeRect(-1e5, -1e5, 2e5, 1e7)])
+            if (a.representedElementCategory == NSCollectionElementCategoryItem && NSHeight(a.frame) >= 20) [heights addObject:@(round(NSHeight(a.frame) * 2) / 2)];
+        NSNumber *common = nil;
+        for (NSNumber *each in heights) if (!common || [heights countForObject:each] > [heights countForObject:common]) common = each;
+        if (common) row = common.doubleValue;
         DPRaw = NO;
         shown = NSHeight(line) > 0 && NSHeight(line) < 20;
     }
@@ -134,6 +141,7 @@ static void DPMeasure(NSCollectionViewLayout *layout) {
     header.top = NSMinY(first);
     header.end = NSMinY(line);
     header.below = NSMaxY(line);
+    header.row = row;
     header.frame = NSMakeRect(0, header.top, NSWidth(list.bounds), DPHeaderHeight);
     header.needsLayout = YES;
 }
@@ -143,7 +151,6 @@ static DPPinnedHeader *DPShownHeader(NSCollectionViewLayout *layout) {
     return header.shown ? header : nil;
 }
 
-// Everything moves down to make room for the header; folded, what follows the pinned rows moves up into their space.
 static CGFloat DPShift(DPPinnedHeader *header, BOOL pinned) {
     return pinned || !header.collapsed ? DPHeaderHeight : DPHeaderHeight - (header.end - header.top);
 }
@@ -154,9 +161,7 @@ static NSCollectionViewLayoutAttributes *DPMoved(DPPinnedHeader *header, NSColle
     attributes = [attributes copy];
     NSRect frame = attributes.frame;
     frame.origin.y += DPShift(header, pinned);
-    // Folded rows fade where they are, so none slides under the pointer on the header and stays highlighted.
     if (pinned && header.collapsed) {
-        // A hidden row has no view to animate, so they're only hidden once folding is done.
         attributes.alpha = 0;
         attributes.hidden = !header.folding;
     }
@@ -182,7 +187,7 @@ static NSArray *DPLayout_elements(NSCollectionViewLayout *self, SEL _cmd, NSRect
     NSMutableArray *moved = [NSMutableArray array];
     for (NSCollectionViewLayoutAttributes *attributes in DPCallOriginal(DPLayout_elements, self, NSInsetRect(rect, 0, -reach))) {
         NSCollectionViewLayoutAttributes *each = DPMoved(header, attributes);
-        // The list keeps a view for a hidden row, see-through but still under the pointer, unless the row is left out.
+        // The list keeps a view for a hidden row, still under the pointer, unless the row is left out.
         if (NSIntersectsRect(each.frame, rect) && !each.hidden) [moved addObject:each];
     }
     return moved;
@@ -195,18 +200,13 @@ static NSSize DPLayout_size(NSCollectionViewLayout *self, SEL _cmd) {
     return size;
 }
 
-// The list takes every click inside it, to drag tabs; one on the header goes to the header.
 static NSView *DPList_hitTest(NSView *self, SEL _cmd, NSPoint point) {
     DPPinnedHeader *header = DPGet(self, &DPHeaderKey);
     if (header.shown && !header.hidden && NSPointInRect([self convertPoint:point fromView:self.superview], header.frame)) return header;
     return DPCallOriginal(DPList_hitTest, self, point);
 }
 
-#pragma mark Dragging
-
-// Dia works out where a dragged tab lands from its own layout, so the pointer is moved back to where Dia put that spot;
-// over the header, that's the top of the pinned rows. Dia pins a tab dropped above the middle of the first tab after its
-// line, so while they're folded that band and the header take no drops: nothing gets pinned out of sight.
+// Dia pins a tab dropped above the middle of the first tab after its line, so folded, that band and the header take no drops.
 static BOOL DPDiaPoint(NSCollectionView *list, NSPoint *inWindow) {
     DPPinnedHeader *header = DPGet(list, &DPHeaderKey);
     if (!header.shown || header.hidden) return YES;
@@ -214,42 +214,23 @@ static BOOL DPDiaPoint(NSCollectionView *list, NSPoint *inWindow) {
     BOOL onHeader = point.y >= header.top && point.y < header.top + DPHeaderHeight;
     if (onHeader && !header.collapsed) point.y = header.top;
     else if (point.y >= header.top) point.y -= DPShift(header, NO);
-    if (header.collapsed && (onHeader || (point.y >= header.end && point.y < header.below + DPRowHeight / 2))) return NO;
+    if (header.collapsed && (onHeader || (point.y >= header.end && point.y < header.below + header.row / 2))) return NO;
     *inWindow = [list convertPoint:point toView:nil];
     return YES;
 }
-
-@interface DPDiaDrag : NSProxy
-@property (nonatomic, strong) id<NSDraggingInfo> info;
-@property (nonatomic) NSPoint location;
-@end
-
-@implementation DPDiaDrag
-- (NSPoint)draggingLocation { return self.location; }
-- (NSMethodSignature *)methodSignatureForSelector:(SEL)sel { return [(NSObject *)self.info methodSignatureForSelector:sel]; }
-- (void)forwardInvocation:(NSInvocation *)invocation { [invocation invokeWithTarget:self.info]; }
-- (BOOL)respondsToSelector:(SEL)sel { return [(NSObject *)self.info respondsToSelector:sel]; }
-- (BOOL)conformsToProtocol:(Protocol *)protocol { return [(NSObject *)self.info conformsToProtocol:protocol]; }
-- (BOOL)isKindOfClass:(Class)cls { return [(NSObject *)self.info isKindOfClass:cls]; }
-@end
 
 static NSCollectionView *DPListIn(NSView *tabList) {
     return (NSCollectionView *)DPFindView(tabList, ^BOOL(NSView *view) { return DPIsKind(view, DPDiaTabListCollection); });
 }
 
-// nil where a drop is refused.
 static id<NSDraggingInfo> DPDiaDragOf(NSView *tabList, id<NSDraggingInfo> info) {
     NSCollectionView *list = DPListIn(tabList);
     NSPoint location = info.draggingLocation;
     if (list && !DPDiaPoint(list, &location)) return nil;
     if (NSEqualPoints(location, info.draggingLocation)) return info;
-    DPDiaDrag *drag = [DPDiaDrag alloc];
-    drag.info = info;
-    drag.location = location;
-    return (id<NSDraggingInfo>)drag;
+    return DPDraggingInfoAt(info, location);
 }
 
-// Holding a tab over the folded header unfolds it, like a folder in Finder.
 static void DPSpringOpen(NSView *tabList, id<NSDraggingInfo> info) {
     NSCollectionView *list = DPListIn(tabList);
     DPPinnedHeader *header = DPGet(list, &DPHeaderKey);
@@ -271,7 +252,6 @@ static NSDragOperation DPTabList_entered(NSView *self, SEL _cmd, id<NSDraggingIn
     return dia ? DPCallOriginal(DPTabList_entered, self, dia) : NSDragOperationNone;
 }
 
-// Into a refused band Dia is told the pointer left, so it takes back the gap it opened; out of one, that it came back.
 static NSDragOperation DPTabList_updated(NSView *self, SEL _cmd, id<NSDraggingInfo> info) {
     DPSpringOpen(self, info);
     id<NSDraggingInfo> dia = DPDiaDragOf(self, info);
@@ -295,8 +275,6 @@ static BOOL DPTabList_perform(NSView *self, SEL _cmd, id<NSDraggingInfo> info) {
     return dia && DPCallOriginal(DPTabList_perform, self, dia);
 }
 
-// Dia opens a new tab on two quick clicks on the list's background, and the header isn't one of its rows, so folding and
-// unfolding in a hurry would open one.
 static void DPTabList_backgroundDoubleClick(NSView *self, SEL _cmd, NSGestureRecognizer *click) {
     DPPinnedHeader *header = DPGet(DPListIn(self), &DPHeaderKey);
     if (header.shown && !header.hidden && NSPointInRect([click locationInView:header.superview], header.frame)) return;
@@ -312,7 +290,7 @@ static NSArray<NSCollectionView *> *DPListsOf(NSString *space) {
 static void DPFold(NSString *space, BOOL collapsed) {
     if (!space) return;
     NSArray<NSCollectionView *> *lists = DPListsOf(space);
-    // First the folded rows get views, still unseen where they fold to, so they can move out from there.
+    // The folded rows get views first, unseen where they fold to, so they can animate out from there.
     for (NSCollectionView *list in lists) {
         [DPGet(list, &DPHeaderKey) setFolding:YES];
         [list.collectionViewLayout invalidateLayout];
@@ -365,6 +343,10 @@ static void DPInstallCollapsePinned(void) {
     DPHook(DPDiaTabList, @selector(prepareForDragOperation:), (IMP)DPTabList_prepare);
     DPHook(DPDiaTabList, @selector(performDragOperation:), (IMP)DPTabList_perform);
     DPHook(DPDiaTabList, @selector(handleBackgroundDoubleClick:), (IMP)DPTabList_backgroundDoubleClick);
+    // A minimized window misses a fold made in another window of its profile, so lay it out again on return.
+    [NSNotificationCenter.defaultCenter addObserverForName:NSWindowDidDeminiaturizeNotification object:nil queue:nil usingBlock:^(NSNotification *note) {
+        if (DPCollapsePinned.on) for (NSCollectionView *list in DPListsOf(nil)) [list.collectionViewLayout invalidateLayout];
+    }];
 }
 
 DP_PATCH(DPCollapsePinned) {

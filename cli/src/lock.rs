@@ -7,7 +7,6 @@ use std::{
 
 use anyhow::{bail, Context, Result};
 
-/// The kernel drops the lock when the process ends, however it ends.
 pub struct Lock {
     _file: File,
 }

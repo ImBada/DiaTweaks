@@ -2,7 +2,6 @@ use std::{env, ffi::OsString, path::PathBuf};
 
 use anyhow::{Context, Result};
 
-/// DIATWEAKS_DOMAIN lets tests use their own settings domain.
 pub struct Env {
     pub support: PathBuf,
     pub app: PathBuf,

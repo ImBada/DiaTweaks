@@ -55,7 +55,7 @@ Tweak names work as keys or titles, like `hideToolbar` or `"Hide Toolbar"`, and 
 
 ## Updating
 
-Dia's own updater is switched off. **Settings → Home → Software Update** checks for a new Dia and a new DiaTweaks release, downloads either one, and relaunches Dia to install it, like macOS's Software Update. Under **Automatic Updates**, pick for each of Dia and DiaTweaks: off, just show updates, download them, or download and install them when you quit (the default).
+Dia's own updater is switched off. **Settings → Home → Software Update** checks for a new Dia and a new DiaTweaks release, downloads either one, and relaunches Dia to install it, like macOS's Software Update. Under **Automatic Updates**, pick for each of Dia and DiaTweaks: off, just show updates, download them, or download and install them when you quit (the default). A DiaTweaks you built from source with `install.sh` is never downloaded or replaced automatically: **Update Now** or `diatweaks update` installs the latest release, and automatic updates apply from then on.
 
 - **Dia now:** `diatweaks update-dia`
 - **DiaTweaks now:** `diatweaks update`
@@ -77,6 +77,20 @@ rm -rf /tmp/DiaTweaks && git clone --depth 1 https://github.com/JaceThings/DiaTw
 <summary><strong>Is it safe?</strong></summary>
 
 It's built on your Mac from this code, and it doesn't send anything about you anywhere. It goes online only to check for updates and to load the preview pictures in Settings. A few tweaks look at what's in Dia to work: Group Tabs by Domain reads your tabs' addresses, and Tidy Tabs gives your tab titles and addresses to Apple's on-device model, which runs on your Mac. The password tweaks pass messages between your password manager and its extension without reading them.
+
+</details>
+
+<details>
+<summary><strong>What are the security tradeoffs?</strong></summary>
+
+Patching Dia changes what protects it:
+
+- The patched Dia has no hardened runtime and loads `DiaPatches.dylib` from your Application Support folder, so other software running as you can change what it does.
+- The "DiaPatches Local Signing" certificate stays in your login keychain, and other software running as you can sign with it.
+- DiaTweaks updates are prebuilt downloads from this repo's GitHub releases. They're checked against the digest GitHub lists and aren't signed separately. To stop them installing when Dia quits, switch DiaTweaks away from Download and install on quit under **Automatic Updates**.
+- The Passwords tweaks start the original Dia without windows to reach Apple Passwords and 1Password, which only trust it.
+- Dia's own updater is off. DiaTweaks looks for a new Dia when Dia opens or you open Software Update, so if you rarely quit Dia, security fixes can arrive late.
+- **Restore** puts the original Dia back but keeps the certificate. To remove it, delete "DiaPatches Local Signing" in Keychain Access.
 
 </details>
 

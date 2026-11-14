@@ -1,9 +1,6 @@
 #import "Patches/PinnedTabCloseButton/PinnedTabs.h"
 
-// Dia hides the close button on a pinned tab outside a folder by setting suppressesCloseButton on its tab controller,
-// and reads it again each time the pointer enters the tab. Clearing it first shows the button as on tabs in a folder.
-
-static NSHashTable *DPCleared;  // Tab controllers whose flag this patch cleared.
+static NSHashTable *DPCleared;
 
 static void DPAllowClose(NSView *tab) {
     id controller = DPViewModelDelegate(tab);
@@ -19,31 +16,35 @@ static void DPTracker_mouseEntered(id self, SEL _cmd, NSEvent *event) {
     DPCallOriginal(DPTracker_mouseEntered, self, event);
 }
 
-// Dia sets the flag again when it reconfigures a tab, which lays it out.
 static void DPTab_layout(NSView *self, SEL _cmd) {
     DPCallOriginal(DPTab_layout, self);
     if (DPPinnedTabCloseButton.on) DPAllowClose(self);
 }
 
-// The button follows on the next hover. The minus button option goes with it.
 static void DPApplyPinnedTabCloseButton(DPPatch *patch) {
     DPRelayoutTabContents();
     if (patch->on) {
         for (NSView *tab in DPFindViews(DPDiaTabView)) DPAllowClose(tab);
         return;
     }
+    // A tab unpinned since has Dia's own setting; leave it showing the button.
+    NSMutableSet *unpinned = [NSMutableSet set];
+    for (NSView *content in DPFindViews(DPDiaTabContentView)) {
+        BOOL *pinned = DPIvar(DPAttributes(content), "isInFavoritesOrPinnedContainer");
+        id controller = pinned && !*pinned ? DPViewModelDelegate(DPEnclosingTab(content)) : nil;
+        if (controller) [unpinned addObject:controller];
+    }
     for (id controller in DPCleared.allObjects) {
-        BOOL *suppress = DPIvar(controller, "suppressesCloseButton");
+        BOOL *suppress = [unpinned containsObject:controller] ? NULL : DPIvar(controller, "suppressesCloseButton");
         if (suppress) *suppress = YES;
     }
     [DPCleared removeAllObjects];
 }
 
-// Off, Dia owns the flag again, so only the on state is checked.
 static NSString *DPVerifyPinnedTabCloseButton(DPPatch *patch) {
     for (NSView *tab in DPFindViews(DPDiaTabView)) {
         id controller = DPViewModelDelegate(tab);
-        if (!controller || tab.needsLayout) continue;  // Torn down, or about to be cleared.
+        if (!controller || tab.needsLayout) continue;
         BOOL *suppress = DPIvar(controller, "suppressesCloseButton");
         if (!suppress) return @"tab has no close button setting";
         if (patch->on && *suppress) return @"pinned tab hides its close button";

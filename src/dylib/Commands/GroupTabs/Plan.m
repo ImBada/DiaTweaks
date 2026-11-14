@@ -11,7 +11,6 @@ NSString *DPDomainKey(NSString *urlString) {
     return host.length ? host : nil;
 }
 
-// Keys that capitalise alike (apple.com, apple.org) keep the host so the groups stay apart.
 static NSDictionary<NSString *, NSString *> *DPTitles(NSArray<NSDictionary *> *tabs) {
     NSMutableDictionary<NSString *, NSString *> *friendly = [NSMutableDictionary dictionary];
     for (NSDictionary *tab in tabs) {

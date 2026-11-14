@@ -5,7 +5,6 @@ use serde::Deserialize;
 
 use crate::prefs::Prefs;
 
-/// Patches are in Settings order.
 #[derive(Deserialize)]
 pub struct Manifest {
     version: u32,
@@ -19,9 +18,7 @@ pub struct Patch {
     pub title: String,
     pub detail: String,
     pub default_on: bool,
-    /// Does nothing unless this patch is on.
     pub requires: Option<String>,
-    /// Makes no difference while this patch is on.
     pub disabled_by: Option<String>,
 }
 

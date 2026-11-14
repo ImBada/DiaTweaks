@@ -1,10 +1,9 @@
 #import "HideToolbar.h"
 #import <Metal/Metal.h>
 
-// Dia computes its glow colors in Swift, out of reach, so they're read as it hands them to its shader.
 static char DPDiaColorsKey;
 static __weak id DPDrawing;
-static NSData *DPLastDiaColors;  // For a pane whose field hasn't drawn yet.
+static NSData *DPLastDiaColors;
 
 static NSArray<NSString *> *DPPresetNames(void) { return @[@"Blue", @"Purple", @"Pink", @"Orange", @"Green", @"Graphite", @"Jace"]; }
 

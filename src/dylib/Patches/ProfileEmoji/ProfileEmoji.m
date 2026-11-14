@@ -3,10 +3,10 @@
 extern DPPatch DPProfileEmoji;
 
 static NSString *const DPEmojisKey = @"profileEmojis";
-// The gap is between what's drawn, so emoji and dots sit the same distance apart in any mix.
 static const CGFloat DPSidebarEmojiSize = 13.5, DPSidebarEmojiWidth = 16, DPSidebarDotWidth = 6, DPSidebarGap = 10;
 static NSUserDefaults *DPEmojiDefaults;
-static char DPLabelKey, DPFieldKey;
+static NSHashTable<NSViewController *> *DPProfilePanes;
+static char DPLabelKey, DPRowKey;
 
 static NSString *DPEmoji(NSString *spaceID) {
     return DPProfileEmoji.on && spaceID ? [DPEmojiDefaults dictionaryForKey:DPEmojisKey][spaceID] : nil;
@@ -53,8 +53,7 @@ static CGFloat DPSidebarItemWidth(NSView *item, NSDictionary *views) {
     return (DPEmoji(DPSpaceIDOf(item, views)) ? DPSidebarEmojiWidth : DPSidebarDotWidth) + DPSidebarGap;
 }
 
-// Dia packs items 12 points apart, which crowds emoji, so each item gets its own width and the row stays centered.
-// Dia also places items outside layout, such as after switching profiles.
+// Dia also sets frames outside layout, such as after switching profiles, so layout alone doesn't keep the row spaced.
 static void DPSidebarItem_setFrame(NSView *self, SEL _cmd, NSRect frame) {
     NSView *switcher = self.superview;
     NSDictionary *views = DPSwiftValue(switcher, @"itemViews");
@@ -95,7 +94,7 @@ static void DPTopDot_layout(NSView *self, SEL _cmd) {
     DPShowEmoji(self, self.subviews.firstObject, DPEmoji(spaceID), 8, focused ? 1 : 0.45);
 }
 
-static void DPRefresh(DPPatch *patch) {
+static void DPRefresh(void) {
     for (NSString *name in @[ @DPDiaSpaceSwitcher, @DPDiaSpaceSwitcherItem, @DPDiaPageIndicatorDot ])
         for (NSView *view in DPFindViews(name.UTF8String)) view.needsLayout = YES;
 }
@@ -120,7 +119,7 @@ static void DPRefresh(DPPatch *patch) {
     NSMutableDictionary *emoji = [[DPEmojiDefaults dictionaryForKey:DPEmojisKey] mutableCopy] ?: [NSMutableDictionary dictionary];
     emoji[self.spaceID] = last.length ? last : nil;
     [DPEmojiDefaults setObject:emoji forKey:DPEmojisKey];
-    DPRefresh(&DPProfileEmoji);
+    DPRefresh();
 }
 @end
 
@@ -129,7 +128,7 @@ static void DPAddEmojiRow(NSViewController *pane) {
     NSStackView *rows = (NSStackView *)DPSubview(group, "NSStackView");
     NSTextField *title = (NSTextField *)DPFindView(rows.arrangedSubviews.firstObject, ^BOOL(NSView *view) { return [view isKindOfClass:NSTextField.class]; });
     NSString *spaceID = [DPSwiftValue(pane, @"spaceID") description];
-    if (!rows || !title || !spaceID || DPGet(pane, &DPFieldKey)) return;
+    if (!rows || !title || !spaceID || DPGet(pane, &DPRowKey)) return;
 
     NSTextField *label = [NSTextField labelWithString:@"Emoji"];
     label.font = title.font;
@@ -156,16 +155,31 @@ static void DPAddEmojiRow(NSViewController *pane) {
         [field.trailingAnchor constraintEqualToAnchor:row.trailingAnchor], [field.centerYAnchor constraintEqualToAnchor:row.centerYAnchor],
         [field.widthAnchor constraintEqualToConstant:64],
     ]];
-    DPSet(pane, &DPFieldKey, field);
+    DPSet(pane, &DPRowKey, @[ line, row ]);
+}
+
+static void DPRemoveEmojiRow(NSViewController *pane) {
+    for (NSView *view in DPGet(pane, &DPRowKey)) [view removeFromSuperview];
+    DPSet(pane, &DPRowKey, nil);
+}
+
+static void DPApplyProfileEmoji(DPPatch *patch) {
+    for (NSViewController *pane in DPProfilePanes.allObjects) {
+        if (patch->on) DPAddEmojiRow(pane);
+        else DPRemoveEmojiRow(pane);
+    }
+    DPRefresh();
 }
 
 static void DPProfilePane_viewDidLoad(NSViewController *self, SEL _cmd) {
     DPCallOriginal(DPProfilePane_viewDidLoad, self);
+    [DPProfilePanes addObject:self];
     if (DPProfileEmoji.on) DPAddEmojiRow(self);
 }
 
 static void DPInstallProfileEmoji(void) {
     DPEmojiDefaults = [[NSUserDefaults alloc] initWithSuiteName:@"com.diapatches"];
+    DPProfilePanes = [NSHashTable weakObjectsHashTable];
     DPHookClass(objc_getClass(DPDiaSpaceSwitcherItem), @selector(setFrame:), (IMP)DPSidebarItem_setFrame);
     DPHook(DPDiaSpaceSwitcherItem, @selector(layout), (IMP)DPSidebarItem_layout);
     DPHook(DPDiaSpaceSwitcherItem, @selector(updateLayer), (IMP)DPSidebarItem_updateLayer);
@@ -184,5 +198,5 @@ DP_PATCH(DPProfileEmoji) {
     .section = @"Sidebar & Tab Bar",
     .classes = DPClasses(DPDiaSpaceSwitcher, DPDiaSpaceSwitcherItem, DPDiaPageIndicatorDot, DPDiaProfilePane, DPDiaSettingsFormGroup),
     .install = DPInstallProfileEmoji,
-    .apply = DPRefresh,
+    .apply = DPApplyProfileEmoji,
 };

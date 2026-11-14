@@ -10,7 +10,6 @@ static const CGFloat DPHintHeight = 26, DPHintPadX = 10, DPHintPadY = 5, DPHintL
 @property (nonatomic, strong) CALayer *iconLayer;
 @end
 
-// A view's layer scales from its corner.
 CATransform3D DPPeekScaled(NSView *view, CGFloat scale) {
     CGFloat cx = NSWidth(view.bounds) / 2, cy = NSHeight(view.bounds) / 2;
     return CATransform3DTranslate(CATransform3DScale(CATransform3DMakeTranslation(cx, cy, 0), scale, scale, 1), -cx, -cy, 0);
@@ -178,15 +177,16 @@ static NSView *DPPeekMakeHint(NSString *text, NSArray<NSString *> *keys, CGFloat
 void DPPeekLayoutHints(NSView *controls, CGFloat availableRight) {
     for (DPPeekButton *button in [controls.subviews copy]) {
         if (![button isKindOfClass:DPPeekButton.class]) continue;
+        CGFloat shown = button.pill.alphaValue;
         [button.pill removeFromSuperview];
         NSView *pill = DPPeekMakeHint(button.hintText, button.hintKeys, MAX(40, availableRight - DPHintRightGap - 2 * DPHintPadX));
+        pill.alphaValue = shown;
         pill.frame = NSMakeRect(NSMaxX(button.frame) + DPHintRightGap, NSMidY(button.frame) - NSHeight(pill.frame) / 2, NSWidth(pill.frame), NSHeight(pill.frame));
         button.pill = pill;
         [controls addSubview:pill];
     }
 }
 
-// Not a stack view, which squeezed the circles out of shape.
 NSView *DPPeekControls(id target, SEL action) {
     static const CGFloat side = 28, gap = 8;
     CGFloat scale = NSScreen.mainScreen.backingScaleFactor ?: 2;

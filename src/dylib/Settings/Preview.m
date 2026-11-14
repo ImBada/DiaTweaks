@@ -1,5 +1,6 @@
 #import "Settings.h"
 #import <AVFoundation/AVFoundation.h>
+#import <ImageIO/ImageIO.h>
 #import <VideoToolbox/VideoToolbox.h>
 
 #ifndef DP_PREVIEWS
@@ -8,7 +9,6 @@
 
 static NSNotificationName const DPTabLayoutMayHaveChanged = @"DPTabLayoutMayHaveChanged";
 
-// The sidebar footer only exists with vertical tabs, so its arrival may mean the layout changed.
 static void DPSidebarFooter_viewDidMoveToWindow(NSView *self, SEL _cmd) {
     DPCallOriginal(DPSidebarFooter_viewDidMoveToWindow, self);
     dispatch_async(dispatch_get_main_queue(), ^{
@@ -27,7 +27,6 @@ static NSURL *DPCachedPreview(NSString *name) {
     return [dir URLByAppendingPathComponent:name];
 }
 
-// The layout is passed in: finding it walks every window's views.
 static NSArray<NSString *> *DPPreviewNames(NSString *key, NSString *layout) {
     NSString *other = [layout isEqual:@"vertical"] ? @"horizontal" : @"vertical";
     NSMutableArray<NSString *> *names = [NSMutableArray new];
@@ -36,18 +35,31 @@ static NSArray<NSString *> *DPPreviewNames(NSString *key, NSString *layout) {
     return names;
 }
 
+static BOOL DPIsPreview(NSData *data, NSString *name) {
+    if (data.length < 8) return NO;
+    if ([name hasSuffix:@".mp4"]) return !memcmp((const char *)data.bytes + 4, "ftyp", 4);
+    CGImageSourceRef source = CGImageSourceCreateWithData((__bridge CFDataRef)data, NULL);
+    CGImageRef image = source ? CGImageSourceCreateImageAtIndex(source, 0, NULL) : NULL;
+    BOOL decoded = image != NULL;
+    CGImageRelease(image);
+    if (source) CFRelease(source);
+    return decoded;
+}
+
 static void DPFetchPreview(NSArray<NSString *> *names, void (^done)(NSURL *file, BOOL changed)) {
     if (!names.count) return done(nil, NO);
     NSURL *cached = DPCachedPreview(names[0]);
     NSURL *url = [NSURL URLWithString:[@DP_PREVIEWS stringByAppendingString:names[0]]];
     [[NSURLSession.sharedSession dataTaskWithURL:url completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
         NSInteger status = [(NSHTTPURLResponse *)response statusCode];
+        BOOL preview = status == 200 && DPIsPreview(data, names[0]);
         dispatch_async(dispatch_get_main_queue(), ^{
             if (error || (status != 200 && status != 404)) return done(nil, NO);
             if (status == 404) {
                 [NSFileManager.defaultManager removeItemAtURL:cached error:nil];
                 return DPFetchPreview([names subarrayWithRange:NSMakeRange(1, names.count - 1)], done);
             }
+            if (!preview) return done(nil, NO);
             BOOL changed = ![[NSData dataWithContentsOfURL:cached] isEqualToData:data];
             if (changed) [data writeToURL:cached atomically:YES];
             done(cached, changed);
@@ -129,8 +141,10 @@ static void DPFetchPreview(NSArray<NSString *> *names, void (^done)(NSURL *file,
     if ([file.lastPathComponent hasSuffix:@"-onoff.webp"]) {
         CGImageRef image = [[[NSImage alloc] initWithContentsOfURL:file] CGImageForProposedRect:NULL context:nil hints:nil];
         size_t width = CGImageGetWidth(image), half = CGImageGetHeight(image) / 2;
-        _states = @[ (__bridge_transfer id)CGImageCreateWithImageInRect(image, CGRectMake(0, 0, width, half)),
-                     (__bridge_transfer id)CGImageCreateWithImageInRect(image, CGRectMake(0, half, width, half)) ];
+        id off = (__bridge_transfer id)CGImageCreateWithImageInRect(image, CGRectMake(0, 0, width, half));
+        id on = (__bridge_transfer id)CGImageCreateWithImageInRect(image, CGRectMake(0, half, width, half));
+        if (!off || !on) return [self show:nil];
+        _states = @[ off, on ];
         [self showState];
         [self updatePlayback];
         return;
@@ -161,7 +175,6 @@ static void DPFetchPreview(NSArray<NSString *> *names, void (^done)(NSURL *file,
     [self updatePlayback];
 }
 
-// Keyed to the clock so every preview flips at the same moment.
 - (void)showState {
     [CATransaction begin];
     [CATransaction setDisableActions:YES];

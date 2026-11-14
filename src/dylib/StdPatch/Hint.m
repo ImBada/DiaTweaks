@@ -26,7 +26,7 @@ static char DPHintKey;
         [label.topAnchor constraintEqualToAnchor:content.topAnchor constant:8],
         [label.bottomAnchor constraintEqualToAnchor:content.bottomAnchor constant:-8],
     ]];
-    content.frame = (NSRect){NSZeroPoint, content.fittingSize};  // Sized up front, or the popover opens as a sliver.
+    content.frame = (NSRect){NSZeroPoint, content.fittingSize};
     self.popover = [NSPopover new];
     self.popover.contentViewController = [NSViewController new];
     self.popover.contentViewController.view = content;

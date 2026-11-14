@@ -1,7 +1,7 @@
 #import "StdPatch/StdPatch.h"
 
 extern DPPatch DPHideTabGroupBackground;
-static char DPHiddenKey;  // @[Dia's border width, the shadows this hid]
+static char DPHiddenKey;
 
 static BOOL DPIsGrey(CGColorRef color) {
     NSColor *rgb = [[NSColor colorWithCGColor:color] colorUsingColorSpace:NSColorSpace.sRGBColorSpace];

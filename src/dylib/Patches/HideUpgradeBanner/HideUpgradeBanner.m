@@ -2,7 +2,6 @@
 
 static BOOL DPIsUpgradeBanner(NSView *view) { return DPIsKind(view, DPDiaChatUsage); }
 
-// The command bar is outside the hide hosts.
 static void DPChatUsage_layout(NSView *self, SEL _cmd) {
     [DPHideHosts addObject:self];
     DPEnforceHides(self);

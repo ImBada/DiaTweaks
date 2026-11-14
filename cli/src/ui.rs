@@ -9,7 +9,7 @@ use cliclack::{Theme, ThemeState};
 
 use crate::signals::{self, Cancelled};
 
-/// Output errors are ignored: a closed pipe or terminal must not abort a step halfway.
+/// Output errors are ignored: a closed pipe must not abort a step halfway.
 pub struct Ui {
     pub interactive: bool,
     pub yes: bool,
@@ -111,7 +111,6 @@ impl Ui {
         Spinner { bar, label }
     }
 
-    /// Without a terminal it proceeds: running the command was the request.
     pub fn proceed(&self, question: impl Display) -> Result<bool> {
         if self.yes || !self.interactive {
             return Ok(true);
@@ -134,8 +133,6 @@ impl Ui {
     }
 }
 
-/// cliclack closes a cancelled prompt with "└  Operation cancelled.", which would end the frame
-/// before the menu goes on or diatweaks says what cancelling left behind.
 struct Frame;
 
 impl Theme for Frame {

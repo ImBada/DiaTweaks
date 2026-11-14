@@ -1,10 +1,7 @@
 #import "HideToolbar.h"
 #import <objc/message.h>
 
-// Which panes load comes from their reload buttons; progress comes from ArcWebContents, which don't say which pane
-// they're in, so with several visible pages loading the focused one wins.
-
-typedef NS_ENUM(NSInteger, DPWebContentsVisibility) { DPWebContentsVisible = 2 };  // ArcWebContentsVisibility.h
+typedef NS_ENUM(NSInteger, DPWebContentsVisibility) { DPWebContentsVisible = 2 };
 
 static NSHashTable *DPLoadingContents;
 static NSTimer *DPProgressTimer;
@@ -34,7 +31,7 @@ static BOOL DPToolbarOutOfSight(NSView *pane) {
 
 static void DPRefreshProgress(void) {
     id contents = DPVisibleLoadingContents();
-    CGFloat progress = contents ? [DPGet(contents, &DPProgressKey) doubleValue] : 1;  // 1: done, but the pane hasn't caught up.
+    CGFloat progress = contents ? [DPGet(contents, &DPProgressKey) doubleValue] : 1;
     BOOL loading = NO;
     for (NSView *pane in DPPanes) {
         BOOL inSight = pane.window && !pane.hiddenOrHasHiddenAncestor, paneLoading = inSight && DPPaneLoading(pane);
@@ -43,7 +40,7 @@ static void DPRefreshProgress(void) {
         else DPFinishProgressLine(pane);
         loading = loading || paneLoading;
     }
-    // Reload buttons and reveals change after Chromium's updates, so poll while a page in sight loads.
+    // Reload buttons and reveals change after Chromium's updates, so this polls.
     BOOL watch = DPShowLoadingProgress.on && (loading || contents);
     if (watch && !DPProgressTimer) {
         DPProgressTimer = [NSTimer timerWithTimeInterval:0.1 repeats:YES block:^(NSTimer *timer) { DPRefreshProgress(); }];

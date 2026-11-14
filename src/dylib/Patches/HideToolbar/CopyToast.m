@@ -88,19 +88,3 @@ void DPShowCopyToast(NSView *pane, NSString *message) {
     if (!toast) DPSet(pane, &DPToastKey, toast = [DPCopyToastView new]);
     [toast showMessage:message in:pane];
 }
-
-void DPRemoveCopyToasts(void) {
-    for (NSView *pane in DPPanes) {
-        DPCopyToastView *toast = DPGet(pane, &DPToastKey);
-        [toast.hideTimer invalidate];
-        [toast removeFromSuperview];
-        toast.alphaValue = 0;
-    }
-}
-
-NSString *DPVerifyNoCopyToast(DPPatch *patch) {
-    for (NSView *pane in DPFindViews(DPDiaContentPane))
-        for (NSView *view in pane.subviews)
-            if ([view isKindOfClass:DPCopyToastView.class] && !patch->on) return @"toast left on the page";
-    return nil;
-}

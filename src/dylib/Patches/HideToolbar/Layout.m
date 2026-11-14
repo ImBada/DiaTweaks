@@ -22,14 +22,12 @@ NSView *DPBookmarksUnder(NSView *pane, NSView *bar) {
     return nil;
 }
 
-// Only a docked sidebar moves the content container; one floating at the window's edge leaves it.
 static BOOL DPSidebarDocked(NSView *pane) {
     for (NSView *view = pane.superview; view; view = view.superview)
         if (DPIsKind(view, DPDiaContentContainer)) return DPBesideSidebar(view);
     return NO;
 }
 
-// The new tab page sits in the pane inside a swipe-handling view.
 static BOOL DPShowsNewTab(NSView *pane) {
     for (NSView *sub in pane.subviews)
         for (NSView *page in sub.subviews)
@@ -37,8 +35,14 @@ static BOOL DPShowsNewTab(NSView *pane) {
     return NO;
 }
 
+// Only the sidebar layout has a footer, even with the sidebar hidden.
+static BOOL DPTabsAtTop(NSView *pane) {
+    return pane.window && !DPFindView(pane.window.contentView, ^BOOL(NSView *view) { return DPIsKind(view, DPDiaSidebarFooter); });
+}
+
 BOOL DPKeptInPlace(NSView *pane) {
-    return (DPShowToolbarWithSidebar.on && DPSidebarDocked(pane)) || (DPShowToolbarOnNewTab.on && DPShowsNewTab(pane));
+    return (DPShowToolbarWithSidebar.on && DPSidebarDocked(pane)) || (DPShowToolbarOnNewTab.on && DPShowsNewTab(pane)) ||
+           (DPShowToolbarWithTopTabs.on && DPTabsAtTop(pane));
 }
 
 NSString *DPVerifyKeptInPlace(DPPatch *patch) {
@@ -106,7 +110,6 @@ void DPApplyToolbar(NSView *pane) {
         if (pane.isFlipped) frame.origin.y -= shift;
         else if (!reachesBottom) frame.origin.y += shift;
         DPAssignFrame(view, laidOut, frame);
-        // Dia sizes the web view once instead of autoresizing it.
         for (NSView *child in view.subviews) {
             if (!DPGet(child, &DPFillsKey)) {
                 if (!NSEqualRects(child.frame, (NSRect){NSZeroPoint, laidOut.size})) continue;
@@ -117,6 +120,6 @@ void DPApplyToolbar(NSView *pane) {
     }
 }
 
-void DPRelayoutPanes(void) {
-    DPRelayoutViews(DPPanes);
-}
+void DPRelayoutPanes(void) { DPRelayoutViews(DPPanes); }
+
+void DPApplyRelayoutPanes(DPPatch *patch) { DPRelayoutPanes(); }

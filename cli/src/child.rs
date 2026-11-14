@@ -16,12 +16,9 @@ use crate::{
     ui::Spinner,
 };
 
-/// Children get their own process group, so the terminal's Ctrl-C reaches only diatweaks.
 pub enum OnInterrupt {
-    /// Stop it: it only writes inside our temporary checkout.
     Stop,
-    /// Stop only its downloads; diapatch cleans up after a failed download and exits. Everything
-    /// else it does finishes, because it moves whole app bundles.
+    /// Only downloads stop: diapatch moves whole app bundles, which must finish.
     StopDownloads,
     Finish(&'static str),
 }
@@ -45,7 +42,7 @@ impl Finished {
     }
 }
 
-/// Output goes to an unlinked file, not a pipe, so the child can't die of SIGPIPE if diatweaks is killed.
+/// An unlinked file, not a pipe: the child must not die of SIGPIPE if diatweaks is killed.
 pub fn run(
     command: &mut Command,
     on_interrupt: OnInterrupt,

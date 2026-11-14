@@ -1,5 +1,3 @@
-// Each subprocess of the original Dia runs this: the first takes the host's stdio and becomes the password helper, the rest
-// find the host has stopped listening and quit.
 #import <sys/socket.h>
 #import <sys/un.h>
 #import "Passwords.h"

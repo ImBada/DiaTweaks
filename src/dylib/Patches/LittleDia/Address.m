@@ -1,13 +1,11 @@
 #import "LittleDia.h"
 #import <objc/message.h>
 
-// Dia's address, drawn like the one in its main window: "site / Page Title", and "site/path" in a soft field under the
-// pointer. A click, or ⌘L, edits the whole URL; Return goes, Escape doesn't.
 @interface DPAddressView : NSView <NSTextFieldDelegate>
 @property (nonatomic, weak) NSView *title;
 @property (nonatomic) NSTextField *label, *field;
 @property (nonatomic) BOOL hovered, beginning, ending;
-@property (nonatomic, copy) NSString *notice;  // Shown in place of the address for a moment, as "Copied current URL".
+@property (nonatomic, copy) NSString *notice;
 @property (nonatomic) NSUInteger notices;
 @end
 
@@ -26,7 +24,6 @@
 
 - (BOOL)acceptsFirstMouse:(NSEvent *)event { return YES; }
 
-// The label inside would take the click for itself; while editing, the field gets it.
 - (NSView *)hitTest:(NSPoint)point {
     NSView *hit = [super hitTest:point];
     if (!hit) return nil;
@@ -49,8 +46,11 @@
 - (void)mouseExited:(NSEvent *)event { self.hovered = NO; [self refresh]; }
 
 - (BOOL)performKeyEquivalent:(NSEvent *)event {
-    NSEventModifierFlags mods = event.modifierFlags & NSEventModifierFlagDeviceIndependentFlagsMask;
-    if (mods != NSEventModifierFlagCommand || ![event.charactersIgnoringModifiers isEqual:@"l"] || self.window != NSApp.keyWindow) return NO;
+    NSEventModifierFlags mods = event.modifierFlags & NSEventModifierFlagDeviceIndependentFlagsMask & ~(NSEventModifierFlagCapsLock | NSEventModifierFlagNumericPad | NSEventModifierFlagFunction);
+    NSString *key = event.charactersIgnoringModifiers;
+    // Without a Latin L on the layout, the key in L's place (code 37) is ⌘L.
+    BOOL isL = [key caseInsensitiveCompare:@"l"] == NSOrderedSame || (event.keyCode == 37 && !(key.length == 1 && [key characterAtIndex:0] < 128 && isalpha([key characterAtIndex:0])));
+    if (mods != NSEventModifierFlagCommand || !isL || self.window != NSApp.keyWindow) return NO;
     [self begin];
     return YES;
 }
@@ -98,13 +98,12 @@
     [self refresh];
 }
 
-#pragma mark Typing another address
 - (void)begin {
     if (self.field) {
         [self.window makeFirstResponder:self.field];
         return;
     }
-    self.notice = nil;  // A notice in the label isn't an address to edit.
+    self.notice = nil;
     [self refresh];
     NSString *shown = [self.url.absoluteString isEqual:@"about:blank"] ? @"" : self.url.absoluteString;
     NSTextField *field = [NSTextField textFieldWithString:shown ?: self.label.stringValue];
@@ -122,7 +121,7 @@
     self.field = field;
     self.label.hidden = YES;
     [self refresh];
-    // selectText: focuses the field itself; focusing it first would have it end that editing straight away.
+    // selectText: focuses the field itself; focusing it first ends the editing straight away.
     self.beginning = YES;
     [field selectText:nil];
     self.beginning = NO;
@@ -134,7 +133,8 @@
     [self.field removeFromSuperview];
     self.field = nil;
     self.label.hidden = NO;
-    [self.window makeFirstResponder:nil];
+    NSView *page = DPFindView(self.window.contentView, ^BOOL(NSView *view) { return DPIsKind(view, "WebContentsHostView") && !view.isHiddenOrHasHiddenAncestor; });
+    [self.window makeFirstResponder:DPFindView(page, ^BOOL(NSView *view) { return view.acceptsFirstResponder; })];
     self.ending = NO;
     [self refresh];
 }
@@ -166,11 +166,14 @@ void DPRefreshAddressView(NSView *view) {
     if ([view isKindOfClass:DPAddressView.class]) [(DPAddressView *)view refresh];
 }
 
-// Chromium focuses the new window's page a moment after it opens, which would end the typing, so this starts after that,
-// and waits for the bar to be laid out.
+static DPAddressView *DPAddressIn(NSWindow *window) {
+    return (DPAddressView *)DPFindView(window.contentView.superview, ^BOOL(NSView *view) { return [view isKindOfClass:DPAddressView.class]; });
+}
+
+// Chromium focuses the new window's page a moment after it opens, which would end the typing.
 static void DPEditAddressSoon(NSWindow *window, int tries) {
-    NSView *address = DPFindView(window.contentView.superview, ^BOOL(NSView *view) { return [view isKindOfClass:DPAddressView.class]; });
-    if (address && window.isKeyWindow) return [(DPAddressView *)address begin];
+    DPAddressView *address = DPAddressIn(window);
+    if (address && window.isKeyWindow) return [address begin];
     if (tries > 0 && window.visible)
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 100 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{ DPEditAddressSoon(window, tries - 1); });
 }
@@ -181,7 +184,7 @@ void DPEditLittleDiaAddress(NSWindow *window) {
 }
 
 void DPShowLittleDiaNotice(NSWindow *window, NSString *message) {
-    DPAddressView *address = (DPAddressView *)DPFindView(window.contentView.superview, ^BOOL(NSView *view) { return [view isKindOfClass:DPAddressView.class]; });
+    DPAddressView *address = DPAddressIn(window);
     if (!address || address.field) return;
     address.notice = message;
     NSUInteger notice = ++address.notices;

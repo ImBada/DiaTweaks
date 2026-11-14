@@ -1,16 +1,12 @@
 #import "Patches/Peek/Peek.h"
 #import "Patches/HideToolbar/HideToolbar.h"
 
-// Peek's toolbar follows Hide Toolbar and its options, the way Dia's toolbar does in the pane behind the card: hidden
-// with it, its shortcut included, kept in place where an option keeps Dia's, slid in over the page on hover, and
-// replaced by the loading glow while it's out of sight.
-
-static const CGFloat DPPeekHotEdge = 8;  // Hide Toolbar's hover strip.
+static const CGFloat DPPeekHotEdge = 8;
 static const NSTimeInterval DPPeekHideDelay = 0.4, DPPeekSlide = 0.2;
 
 @interface DPPeekBarZone : NSView
 @property (nonatomic, weak) DPPeekCard *peek;
-@property (nonatomic) CGFloat reveal;  // 0 hidden, 1 slid in over the page.
+@property (nonatomic) CGFloat reveal;
 @property (nonatomic) BOOL revealed, pinned, hovering;
 @property (nonatomic, strong) NSTimer *ease, *hide, *watch;
 @property (nonatomic, strong) id patches;
@@ -21,7 +17,7 @@ static BOOL DPPeekEditing(DPPeekBarZone *zone) { return DPPeekEditingAddress(DPP
 static BOOL DPPeekCanReveal(DPPeekBarZone *zone) { return DPHideToolbar.on && DPRevealToolbarOnHover.on && !zone.pinned; }
 
 @implementation DPPeekBarZone
-- (NSView *)hitTest:(NSPoint)point { return nil; }  // Only watches the pointer; clicks reach the bar and page.
+- (NSView *)hitTest:(NSPoint)point { return nil; }
 
 - (void)updateTrackingAreas {
     [super updateTrackingAreas];
@@ -69,7 +65,6 @@ static BOOL DPPeekCanReveal(DPPeekBarZone *zone) { return DPHideToolbar.on && DP
     }];
 }
 
-// Sidebar and new-tab options change without a notification, and the glow follows the page's progress.
 - (void)check {
     DPPeekCard *peek = self.peek;
     BOOL pinned = DPPeekBarPinned(peek);
@@ -77,11 +72,11 @@ static BOOL DPPeekCanReveal(DPPeekBarZone *zone) { return DPHideToolbar.on && DP
         self.pinned = pinned;
         peek.needsLayout = YES;
     }
-    if (self.hidden != (!DPPeekCanReveal(self) || peek.grown > 0)) peek.needsLayout = YES;  // Hover to reveal was switched.
-    // Revealed for ⌘L stays until the typing ends, then hides unless the pointer is over it.
+    BOOL canReveal = DPPeekCanReveal(self);
+    if (self.hidden != (!canReveal || peek.grown > 0)) peek.needsLayout = YES;
     BOOL editing = DPPeekEditing(self);
     if (editing && !pinned) self.revealed = YES;
-    else if (self.revealed && !editing && (!DPPeekCanReveal(self) || !self.hovering) && !self.hide) self.revealed = NO;
+    else if (self.revealed && !editing && (!canReveal || !self.hovering) && !self.hide) self.revealed = NO;
     NSObject *page = (NSObject *)peek.page;
     BOOL outOfSight = !pinned && self.reveal == 0 && DPHideToolbar.progress == 1;
     if (!DPShowLoadingProgress.on || !outOfSight || peek.closing || !page) DPRemoveProgressLine(peek.clip);
@@ -116,13 +111,11 @@ void DPPeekAddToolbar(DPPeekCard *peek) {
     [peek.clip addSubview:zone];
 }
 
-// How far the page sits below the bar: its full height kept in place, none while it hides or slides over the page.
 CGFloat DPPeekToolbarInset(DPPeekCard *peek) {
     DPPeekBarZone *zone = (DPPeekBarZone *)peek.toolbarZone;
     return peek.toolbar && zone.pinned ? round(DPPeekToolbarHeight * (1 - peek.grown)) : 0;
 }
 
-// The toolbar shrinks away as the card grows into a tab, so the page lands where the tab shows it.
 void DPPeekPlaceToolbar(DPPeekCard *peek) {
     DPPeekBarZone *zone = (DPPeekBarZone *)peek.toolbarZone;
     NSView *bar = peek.toolbar;

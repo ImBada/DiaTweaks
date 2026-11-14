@@ -2,7 +2,6 @@
 
 static BOOL DPIsLinkAddress(NSView *view) { return DPIsKind(view, DPDiaStatusText); }
 
-// The bubble is outside the hide hosts.
 static void DPStatusText_layout(NSView *self, SEL _cmd) {
     [DPHideHosts addObject:self];
     DPEnforceHides(self);

@@ -1,32 +1,10 @@
 #import "Patches/PinnedTabCloseButton/PinnedTabs.h"
 
-// Dia gives an open tab under a folded pinned folder a minus button that closes its page and keeps the tab. This gives
-// every open pinned tab one. A click is sent as Dia's closeKeepingTab style, which does the same for any pinned tab.
-// An option of the close button, which already shows the button on pinned tabs outside a folder.
-
-enum { DPCloseKeepingTab = 1, DPDismiss = 2 };  // TabUI.TabCloseButtonStyle.
+enum { DPDismiss = 2 };  // TabUI.TabCloseButtonStyle.
 
 static NSImage *DPMinus;
 static char DPDiaImageKey;
 
-// The page's attributes, while the tab shows a web page: the controller holds an enum whose other cases set top bits.
-static id DPAttributes(NSView *content) {
-    void **slot = DPIvar(DPViewModelDelegate(content), "attributesController");
-    uintptr_t raw = slot ? (uintptr_t)*slot : 0;
-    if (!raw || (raw & 0xF000000000000007)) return nil;
-    id attributes = (__bridge id)(void *)raw;
-    return DPIsKind(attributes, DPDiaTabPageAttributes) ? attributes : nil;
-}
-
-// Dia keeps activeURL while a pinned tab has its page, and clears it when the tab closes.
-static BOOL DPIsOpenPinned(NSView *content) {
-    id attributes = DPAttributes(content);
-    BOOL *pinned = DPIvar(attributes, "isInFavoritesOrPinnedContainer");
-    void **activeURL = DPIvar(attributes, "activeURL");
-    return pinned && *pinned && activeURL && *activeURL;
-}
-
-// The tab controller of an open pinned tab with one page, unless Dia already gives it a minus button.
 static id DPMinusController(NSView *content) {
     NSView *tab = DPEnclosingTab(content);
     if (!tab || !DPIsOpenPinned(content) || [DPSwiftValue(tab, @"contentViews") count] != 1) return nil;
@@ -49,24 +27,15 @@ static void DPContent_layout(NSView *self, SEL _cmd) {
     if (!dia) return;
     BOOL minus = DPMinusOn() && DPMinusController(self);
     if (minus) DPOverride(button, &DPDiaImageKey, dia, DPMinus);
-    if (button.image != (minus ? DPMinus : dia)) button.image = minus ? DPMinus : dia;
+    NSImage *shown = minus ? DPMinus : dia;
+    if (button.image != shown) button.image = shown;
 }
 
-// The button's icon decides, so a click does what it showed. Keeping the tab is the safe guess if the tab changed since.
+// The icon decides, so a click does what it showed; a stale icon keeps the tab rather than removing the pin.
 static void DPContent_closeButtonClicked(NSView *self, SEL _cmd) {
     BOOL minus = DPMinusOn() && DPCloseButton(self).image == DPMinus;
-    uint8_t *style = minus ? DPIvar(DPViewModelDelegate(DPEnclosingTab(self)), "requestedCloseButtonStyle") : NULL;
-    if (!style) {
+    if (!(minus && DPClickKeepingTab(self, ^{ DPCallOriginal(DPContent_closeButtonClicked, self); })))
         DPCallOriginal(DPContent_closeButtonClicked, self);
-        return;
-    }
-    uint8_t dia = *style;
-    *style = DPCloseKeepingTab;  // Dia reads it before the click returns.
-    DPCallOriginal(DPContent_closeButtonClicked, self);
-    *style = dia;
-    // The pointer is still on the tab, whose page is closing, so Dia doesn't lay it out again and the minus would stay.
-    __weak NSView *content = self;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 4), dispatch_get_main_queue(), ^{ content.needsLayout = YES; });
 }
 
 static void DPApplyPinnedTabMinusButton(DPPatch *patch) { DPRelayoutTabContents(); }

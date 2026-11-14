@@ -1,6 +1,5 @@
 #import <Foundation/Foundation.h>
 
-// Periodic, deterministic noise. No image assets, file access or ongoing work.
 static inline float DPTextureNoise(NSInteger x, NSInteger y, NSUInteger seed) {
     x = (x % 200 + 200) % 200;
     y = (y % 200 + 200) % 200;

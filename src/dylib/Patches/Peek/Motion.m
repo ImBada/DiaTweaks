@@ -1,8 +1,6 @@
 #import "Patches/Peek/Peek.h"
 #import <objc/message.h>
 
-// Springs and row timing follow iOS's app open, from github.com/pausedstudio/app-open-teardown (EQUATIONS.md).
-
 static const CAFrameRateRange DPPeekFrameRate = {80, 120, 120};  // Without it, ProMotion starts these at 60 Hz.
 
 CASpringAnimation *DPPeekSpring(NSString *keyPath, CFTimeInterval response, CGFloat dampingRatio) {
@@ -14,14 +12,12 @@ CASpringAnimation *DPPeekSpring(NSString *keyPath, CFTimeInterval response, CGFl
     return spring;
 }
 
-// How far a critically damped spring has left to go.
 static CGFloat DPPeekRemaining(CFTimeInterval t, CFTimeInterval response) {
     if (t <= 0) return 1;
     CGFloat w = 2 * M_PI / response;
     return (1 + w * t) * exp(-w * t);
 }
 
-// CAMeshTransform is private API, present in QuartzCore since 10.9.
 typedef struct { CGFloat x, y, z; } DPPoint3D;
 typedef struct { CGPoint from; DPPoint3D to; } DPMeshVertex;
 typedef struct { unsigned int indices[4]; float w[4]; } DPMeshFace;
@@ -50,7 +46,6 @@ static CAKeyframeAnimation *DPPeekKeyframes(NSString *keyPath, NSArray *values, 
     return animation;
 }
 
-// Each row of the 3×3 mesh rides its own spring: the genie.
 static void DPPeekTravel(DPPeekCard *peek, BOOL opening) {
     CFTimeInterval response = DPPeekResponse(), duration = 0, rows[3];
     CGFloat ay = 2 * MIN(1, MAX(0, NSMidY(peek.link) / MAX(1, NSHeight(peek.bounds)))) - 1;
@@ -61,7 +56,6 @@ static void DPPeekTravel(DPPeekCard *peek, BOOL opening) {
         rows[r] = response * (1 - 0.5 * g + g * n);
         duration = MAX(duration, DPPeekSpring(@"meshTransform", rows[r], 1).settlingDuration);
     }
-    // Unit squares: the link within the card, and the card within its view, which has room for the shadow.
     NSRect card = peek.cardFrame, outer = peek.card.frame, link = peek.link;
     NSRect source = NSMakeRect((NSMinX(link) - NSMinX(card)) / NSWidth(card), (NSMinY(link) - NSMinY(card)) / NSHeight(card),
                                NSWidth(link) / NSWidth(card), NSHeight(link) / NSHeight(card));
@@ -197,7 +191,7 @@ static char DPGrowthKey;
 - (void)animateOut:(void (^)(void))completion {
     [CATransaction begin];
     [CATransaction setCompletionBlock:completion];
-    if (self.card.alphaValue > 0) {  // Closed before it was shown.
+    if (self.card.alphaValue > 0) {
         [self.dim.layer addAnimation:DPPeekDim(NO) forKey:@"peek"];
         DPPeekTravel(self, NO);
     }

@@ -2,13 +2,12 @@
 
 extern DPPatch DPPullRequestRepo;
 
-// Subtitle.m: the line under a pull request's title.
 BOOL DPIsPRSubtitle(NSView *label);
-NSDictionary *DPPullRequestOf(NSView *view);  // @{repo: "hello-world #42 · Open", state, author, tab}, or nil.
+NSView *DPEnclosingView(NSView *view, const char *className);
+NSDictionary *DPPullRequestOf(NSView *view);
 void DPRefreshPRSubtitles(void);
 void DPInstallPRSubtitles(void);
 
-// Rows.m: the review status's own line, and the taller row it needs.
 @interface DPPRStatusLine : NSTextField
 @end
 void DPSetPRStatus(NSView *subtitle, NSString *tab, NSString *status);

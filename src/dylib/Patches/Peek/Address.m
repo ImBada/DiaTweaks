@@ -1,24 +1,10 @@
 #import "Patches/Peek/Peek.h"
 
-// The Peek's address, as Little Dia draws its own: "site / Page Title", and "site/path" in a soft field under the
-// pointer. A click, or ⌘L, edits the whole URL; Return loads it in the Peek, Escape doesn't. Dia's own address field
-// belongs to the tab behind the card, so it can't show or change the Peek's page.
 @interface DPPeekAddress : NSView <NSTextFieldDelegate>
 @property (nonatomic, weak) id page;
 @property (nonatomic) NSTextField *label, *field;
 @property (nonatomic) BOOL hovered, beginning, ending;
 @end
-
-// Anything with a scheme, or a host like example.com or localhost:3000. Else nil: a search.
-static NSURL *DPPeekTypedURL(NSString *text) {
-    if (!text.length || [text rangeOfCharacterFromSet:NSCharacterSet.whitespaceCharacterSet].location != NSNotFound) return nil;
-    NSURL *url = [NSURL URLWithString:text];
-    NSString *scheme = url.scheme.lowercaseString;
-    if (scheme && ([text containsString:@"://"] || [@[ @"about", @"chrome", @"data", @"mailto" ] containsObject:scheme])) return url;
-    if ([text hasPrefix:@"localhost"]) return [NSURL URLWithString:[@"http://" stringByAppendingString:text]];
-    if ([text containsString:@"."]) return [NSURL URLWithString:[@"https://" stringByAppendingString:text]];
-    return nil;
-}
 
 @implementation DPPeekAddress
 
@@ -36,7 +22,6 @@ static NSURL *DPPeekTypedURL(NSString *text) {
 
 - (BOOL)acceptsFirstMouse:(NSEvent *)event { return YES; }
 
-// The label inside would take the click for itself; while editing, the field gets it.
 - (NSView *)hitTest:(NSPoint)point {
     NSView *hit = [super hitTest:point];
     if (!hit) return nil;
@@ -90,7 +75,6 @@ static NSURL *DPPeekTypedURL(NSString *text) {
     [self refresh];
 }
 
-#pragma mark Typing another address
 - (void)begin {
     if (self.field) return (void)[self.window makeFirstResponder:self.field];
     NSString *shown = [self.url.absoluteString isEqual:@"about:blank"] ? @"" : self.url.absoluteString;
@@ -121,7 +105,6 @@ static NSURL *DPPeekTypedURL(NSString *text) {
     [self.field removeFromSuperview];
     self.field = nil;
     self.label.hidden = NO;
-    // Back to the Peek's page, not the tab behind it.
     for (NSView *view = self.superview; view; view = view.superview)
         if ([view isKindOfClass:DPPeekCard.class]) [self.window makeFirstResponder:((DPPeekCard *)view).host];
     self.ending = NO;
@@ -134,7 +117,7 @@ static NSURL *DPPeekTypedURL(NSString *text) {
     NSString *typed = [self.field.stringValue stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
     [self end];
     if (!go || !typed.length) return;
-    NSURL *url = DPPeekTypedURL(typed) ?: DPPeekSearchURL(self.page, typed);
+    NSURL *url = DPAddressURL(typed) ?: DPPeekSearchURL(self.page, typed);
     if (url) DPPeekLoad(self.page, url);
 }
 

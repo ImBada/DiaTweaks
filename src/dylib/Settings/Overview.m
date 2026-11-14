@@ -2,8 +2,8 @@
 
 @interface DPOverviewView ()
 @property (nonatomic, strong) NSMapTable<DPPatchSwitch *, NSTextField *> *notes;
-@property (nonatomic, strong) NSMutableArray<NSArray *> *sections;  // header, group, rows
-@property (nonatomic, strong) NSMutableDictionary<NSString *, NSString *> *sectionHiders;  // "" when its tweaks don't share one
+@property (nonatomic, strong) NSMutableArray<NSArray *> *sections;
+@property (nonatomic, strong) NSMutableDictionary<NSString *, NSString *> *sectionHiders;
 @property (nonatomic, strong) NSMutableDictionary<NSString *, NSImageView *> *sectionEyes;
 @property (nonatomic, strong) NSTextField *noResults;
 @end
@@ -60,7 +60,7 @@
 }
 
 - (NSView *)makeSafeModeRow {
-    NSView *row = DPRow(DPLabel(@"Patches are off because Dia quit unexpectedly twice right after opening.", 13, NSFontWeightRegular, NSColor.labelColor),
+    NSView *row = DPRow(DPLabel(@"Patches are off because Dia quit unexpectedly right after opening.", 13, NSFontWeightRegular, NSColor.labelColor),
                         [NSButton buttonWithTitle:@"Turn Patches Back On" target:self action:@selector(leaveSafeMode:)]);
     [self.searchText setObject:@"Safe mode patches off crashed quit unexpectedly turn back on" forKey:row];
     return row;

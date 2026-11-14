@@ -3,8 +3,6 @@
 
 extern DPPatch DPMouseBackForward;
 
-// Raw side buttons are 3 and 4. Drivers such as SteerMouse instead send a discrete, windowless swipe.
-// Handle either before the page can swallow it, once on release for a button, or once for a discrete swipe.
 static const NSInteger DPWebContentsHidden = 0;
 static NSHashTable *DPPages;
 
@@ -21,12 +19,10 @@ static NSInteger DPOffset(NSEvent *event) {
 
 static BOOL DPPageBool(id page, SEL sel) { return ((BOOL (*)(id, SEL))objc_msgSend)(page, sel); }
 
-// The page under the pointer, or over the sidebar or toolbar the focused page, or the only page, in that window.
 static id DPPageAt(NSEvent *event) {
     NSWindow *window = event.window;
     NSPoint point = event.locationInWindow;
     if (!window && event.type == NSEventTypeSwipe) {
-        // The driver's gesture has no window. Resolve its target from the pointer, not an unrelated key window.
         NSPoint screen = NSEvent.mouseLocation;
         window = [NSApp windowWithWindowNumber:[NSWindow windowNumberAtPoint:screen belowWindowWithWindowNumber:0]];
         point = [window convertPointFromScreen:screen];

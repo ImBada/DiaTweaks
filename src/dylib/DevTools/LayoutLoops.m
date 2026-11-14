@@ -1,6 +1,4 @@
-// AppKit aborts Dia once a layout pass repeats past the window's view count, and the crash report shows only AppKit frames.
 #import "DevTools/DevTools.h"
-#import <dlfcn.h>
 
 static const NSUInteger DPLoopLimit = 150;
 static const NSUInteger DPMaxReports = 12;
@@ -71,9 +69,7 @@ static void DPView_setFrameOrigin(NSView *self, SEL _cmd, NSPoint origin) {
 }
 
 void DPTraceLayoutLoops(void) {
-    Dl_info dylib;
-    dladdr((const void *)DPTraceLayoutLoops, &dylib);
-    DPReportPath = [@(dylib.dli_fname).stringByDeletingLastPathComponent stringByAppendingPathComponent:@"layout-loops.txt"];
+    DPReportPath = DPBesideDylib(@"layout-loops.txt");
     DPCounts = [NSMapTable weakToStrongObjectsMapTable];
     DPReported = [NSMutableSet set];
     DPRecent = [NSMutableArray array];
@@ -81,7 +77,6 @@ void DPTraceLayoutLoops(void) {
     DPHookClass(NSView.class, @selector(setNeedsUpdateConstraints:), (IMP)DPView_setNeedsUpdateConstraints);
     DPHookClass(NSView.class, @selector(setFrameSize:), (IMP)DPView_setFrameSize);
     DPHookClass(NSView.class, @selector(setFrameOrigin:), (IMP)DPView_setFrameOrigin);
-    // A loop never lets the run loop wait.
     CFRunLoopObserverRef reset = CFRunLoopObserverCreateWithHandler(NULL, kCFRunLoopBeforeWaiting, true, 0, ^(CFRunLoopObserverRef o, CFRunLoopActivity a) {
         [DPCounts removeAllObjects];
     });

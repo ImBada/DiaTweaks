@@ -1,18 +1,6 @@
 #import "PullRequestRepo.h"
 
-// GitHub live folders show "author • review status" under each pull request's title, and in Created by Me the author is
-// always you. This shows "hello-world #42 · Open" there instead, and moves the review status to a line of its own.
-// Only the sidebar's list can make a row taller, so with tabs at the top the status stays on the repository line.
-
-@interface NSObject (DPSwiftFields)
-- (id)safeSwiftValueForKey:(NSString *)key;
-@end
-
 static char DPDiaTextKey, DPCheckedKey, DPInListKey;
-
-static id DPField(id object, NSString *key) {
-    return [object respondsToSelector:@selector(safeSwiftValueForKey:)] ? [object safeSwiftValueForKey:key] : nil;
-}
 
 static NSString *DPMatch(NSString *pattern, NSString *text) {
     NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:pattern options:0 error:nil];
@@ -24,21 +12,21 @@ BOOL DPIsPRSubtitle(NSView *label) {
     return DPIsKind(label, DPDiaFeatheredLabel) && DPIsKind(label.superview, DPDiaTransitioningLabel);
 }
 
-// In the sidebar's list, as opposed to the tab strip at the top or a row that isn't in either yet.
-static BOOL DPInTabList(NSView *view) {
-    while (view && !DPIsKind(view, DPDiaTabListCollection)) view = view.superview;
-    return view != nil;
+NSView *DPEnclosingView(NSView *view, const char *className) {
+    while (view && !DPIsKind(view, className)) view = view.superview;
+    return view;
 }
 
-// From the row's live item, on its TabContentController.
+static BOOL DPInTabList(NSView *view) { return DPEnclosingView(view, DPDiaTabListCollection) != nil; }
+
 NSDictionary *DPPullRequestOf(NSView *view) {
-    while (view && !DPIsKind(view, DPDiaTabContentView)) view = view.superview;
-    id controller = DPField(DPField(view, @"viewModel"), @"delegate");
-    NSString *item = [DPField(controller, @"currentlyRenderedLiveItem") description];
+    view = DPEnclosingView(view, DPDiaTabContentView);
+    id controller = DPSwiftValue(DPSwiftValue(view, @"viewModel"), @"delegate");
+    NSString *item = [DPSwiftValue(controller, @"currentlyRenderedLiveItem") description];
     if (![item containsString:@".pullRequest("]) return nil;
     NSString *repo = DPMatch(@"github\\.com/[^/\\s]+/([^/\\s)]+)/pull/[0-9]+", item), *number = DPMatch(@"github\\.com/[^\\s)]+/pull/([0-9]+)", item);
     NSString *author = DPMatch(@"author: \"([^\"]+)\"", item), *state = DPMatch(@"PullRequest\\.Status\\.([a-zA-Z]+)", item);
-    NSString *tab = DPMatch(@"[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}", [DPField(controller, @"tabID") description]);
+    NSString *tab = DPMatch(@"[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}", [DPSwiftValue(controller, @"tabID") description]);
     if (!repo || !number || !author) return nil;
     NSString *line = [NSString stringWithFormat:@"%@ #%@", repo, number];
     state = state.length ? [[state substringToIndex:1].uppercaseString stringByAppendingString:[state substringFromIndex:1]] : @"";
@@ -46,9 +34,6 @@ NSDictionary *DPPullRequestOf(NSView *view) {
     return @{@"repo": line, @"state": state, @"author": author, @"tab": tab ?: @""};
 }
 
-// "author", "author •", "author • Changes Requested" and "author • Changes Requested •" (a comments icon follows a
-// trailing dot). Returns the repository line, and the review status when there is one. A status that only repeats the
-// state, like "Merged ✓", takes the state's place on the repository line instead.
 static NSString *DPSplit(NSView *label, NSString *text, NSString **status, NSString **tab) {
     NSDictionary *pr = text.length ? DPPullRequestOf(label) : nil;
     if (!pr || ![text hasPrefix:pr[@"author"]]) return nil;
@@ -82,7 +67,7 @@ static void DPLabel_setStringValue(NSTextField *self, SEL _cmd, NSString *value)
     DPCallOriginal(DPLabel_setStringValue, self, shown ?: value);
 }
 
-// Catches a label Dia filled in before putting it in the row, and one that moved in or out of the sidebar's list since.
+// Dia may set the text before the label is in a row, or move the label in or out of the list later.
 static void DPLabel_layout(NSTextField *self, SEL _cmd) {
     DPCallOriginal(DPLabel_layout, self);
     if (!DPPullRequestRepo.on || !DPIsPRSubtitle(self)) return;

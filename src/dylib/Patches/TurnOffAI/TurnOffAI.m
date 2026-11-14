@@ -2,7 +2,6 @@
 #import "Updates/Updates.h"
 
 #define DPDiaCapabilitiesToolbar "_TtC23AssistantCapabilitiesUI32AssistantCapabilitiesToolbarView"
-#define DPDiaCapabilitiesItem    "_TtC23AssistantCapabilitiesUI36AssistantCapabilitiesToolbarItemView"
 #define DPDiaTabCardActions      "_TtC5TabUI21TabPopoverActionsView"
 #define DPDiaSettingsHeader      "_TtC11Preferences25SettingsSectionHeaderView"
 #define DPDiaPlaceholderText     "_TtC5ARCUI23TextViewWithPlaceholder"
@@ -16,16 +15,12 @@ BOOL DPIsAITitle(NSString *title) {
         || [lower hasPrefix:@"chat with "] || [lower hasPrefix:@"ask dia"];
 }
 
-#pragma mark Views
-
 static BOOL DPIsAIView(NSView *view) {
     return DPHasLabel(view, @"Chat with this tab") || DPIsKind(view, DPDiaLibraryButton) || DPIsKind(view, DPDiaLibraryCell)
         || DPIsKind(view, DPDiaSkillsSuggestions) || DPIsKind(view, DPDiaPersonalizeButton) || DPIsKind(view, DPDiaChatUsage)
-        || DPIsKind(view, DPDiaCapabilitiesItem);
+        || DPIsKind(view, DPDiaCapabilityButton);
 }
 
-// The command bar and a tab's card are outside the hide hosts. The command bar's toolbar itself stays, so the buttons
-// right of it don't slide left.
 static void DPHost_layout(NSView *self, SEL _cmd) {
     [DPHideHosts addObject:self];
     DPEnforceHides(self);
@@ -34,21 +29,16 @@ static void DPHost_layout(NSView *self, SEL _cmd) {
 
 static NSHashTable<NSView *> *DPMorningBriefs;
 
-// Settings' Morning Brief section: a heading and its switch in a stack of their own, hidden whole so no gap is left.
 static void DPSettingsHeader_layout(NSView *self, SEL _cmd) {
     DPCallOriginal(DPSettingsHeader_layout, self);
     NSTextField *title = (NSTextField *)DPFindView(self, ^BOOL(NSView *view) { return [view isKindOfClass:NSTextField.class]; });
     if (![title.stringValue isEqual:@"Morning Brief"] || !self.superview) return;
     [DPMorningBriefs addObject:self.superview];
-    self.superview.hidden = DPTurnOffAI.on;
+    if (DPTurnOffAI.on) self.superview.hidden = YES;
 }
-
-#pragma mark Chat sidebar
 
 static NSHashTable<NSViewController *> *DPChatSidebars;
 
-// Chat beside the page, open when AI is turned off or opened some way still left, is closed with Dia's own Hide Chat
-// button, which also gives the page its width back.
 static void DPCloseChat(NSViewController *sidebar) {
     if (!DPTurnOffAI.on) return;
     NSView *hide = DPFindView(sidebar.view, ^BOOL(NSView *view) { return DPHasLabel(view, @"Hide chat"); });
@@ -61,11 +51,8 @@ static void DPChatSidebar_viewWillLayout(NSViewController *self, SEL _cmd) {
     dispatch_async(dispatch_get_main_queue(), ^{ DPCloseChat(self); });
 }
 
-#pragma mark Placeholder
-
 static NSHashTable<NSTextView *> *DPPlaceholderViews;
 
-// "Ask anything…" in the command bar. Dia sets it from Swift, so it's changed where AppKit reads it to draw.
 static NSAttributedString *DPPlaceholder_get(NSTextView *self, SEL _cmd) {
     NSAttributedString *dia = DPCallOriginal(DPPlaceholder_get, self);
     [DPPlaceholderViews addObject:self];
@@ -75,12 +62,9 @@ static NSAttributedString *DPPlaceholder_get(NSTextView *self, SEL _cmd) {
     return ours;
 }
 
-#pragma mark Menus
-
 static NSHashTable<NSMenuItem *> *DPAIItems;
 static char DPDiaHiddenKey;
 
-// Dia shows and hides some of these itself, so what it asked for is kept and only added to.
 static void DPItem_setHidden(NSMenuItem *self, SEL _cmd, BOOL hidden) {
     BOOL ai = [DPAIItems containsObject:self];
     if (ai) DPSet(self, &DPDiaHiddenKey, @(hidden));
@@ -90,9 +74,8 @@ static void DPItem_setHidden(NSMenuItem *self, SEL _cmd, BOOL hidden) {
 static void DPTrack(NSMenuItem *item) {
     if (!DPIsAITitle(item.title)) return;
     if (![DPAIItems containsObject:item]) {
-        BOOL diaHidden = item.hidden;
+        DPSet(item, &DPDiaHiddenKey, @(item.hidden));
         [DPAIItems addObject:item];
-        DPSet(item, &DPDiaHiddenKey, @(diaHidden));
     }
     item.hidden = [DPGet(item, &DPDiaHiddenKey) boolValue];
 }
@@ -116,23 +99,18 @@ static void DPMenu_insertItem(NSMenu *self, SEL _cmd, NSMenuItem *item, NSIntege
 
 static const NSEventModifierFlags DPModifiers = NSEventModifierFlagCommand | NSEventModifierFlagControl | NSEventModifierFlagOption | NSEventModifierFlagShift;
 
-// Dia runs its shortcuts, ones set in its Shortcuts settings included, ahead of the menus, so a hidden item's still works.
+// Dia runs its shortcuts, including ones set in its settings, ahead of the menus, so a hidden menu item's shortcut still works.
 static BOOL DPIsAIShortcut(NSEvent *event) {
     NSEventModifierFlags mods = event.modifierFlags & DPModifiers;
     NSString *key = event.charactersIgnoringModifiers.lowercaseString;
     for (NSMenuItem *item in DPAIItems)
         if (item.keyEquivalent.length && [item.keyEquivalent.lowercaseString isEqual:key] && (item.keyEquivalentModifierMask & DPModifiers) == mods) return YES;
-    // ⌃⌘Return in the command bar sends what's typed to chat.
     BOOL inBar = [NSStringFromClass([event.window.firstResponder class]) hasPrefix:@"_TtCC15BoostCommandBar"];
     return inBar && (event.keyCode == 36 || event.keyCode == 76) && mods == (NSEventModifierFlagCommand | NSEventModifierFlagControl);
 }
 
-#pragma mark Servers
+static BOOL gCutOff;
 
-static BOOL gCutOff;  // Chromium reads its host rules only as Dia starts.
-
-// Dia sends chat and fetches AI apps and skills from inside Chromium, so names that resolve nowhere stop them at once,
-// as if offline.
 static void DPCutOffAIServers(void) {
     gCutOff = DPTurnOffAI.on;
     if (!gCutOff) return;
@@ -152,8 +130,6 @@ static void DPOfferRelaunch(DPPatch *patch) {
     if ([alert runModal] == NSAlertFirstButtonReturn) DPHandOffAndQuit(@[ @"apply" ]);
 }
 
-#pragma mark Patch
-
 static void DPInstallTurnOffAI(void) {
     DPCutOffAIServers();
     DPAIItems = [NSHashTable weakObjectsHashTable];
@@ -170,7 +146,7 @@ static void DPInstallTurnOffAI(void) {
     DPHook(DPDiaChatSidebar, @selector(viewWillLayout), (IMP)DPChatSidebar_viewWillLayout);
     DPInstallAIRows();
     [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskKeyDown handler:^NSEvent *(NSEvent *event) {
-        return DPTurnOffAI.on && DPIsAIShortcut(event) ? nil : event;
+        return DPTurnOffAI.on && !DPShortcutRecording() && DPIsAIShortcut(event) ? nil : event;
     }];
     DPOnLaunch(^{ DPTrackMenu(NSApp.mainMenu); });
 }

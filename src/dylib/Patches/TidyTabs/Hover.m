@@ -28,7 +28,7 @@ static NSView *DPSidebarOf(NSView *list) {
     hover.list = list;
     DPSet(list, &DPHoverKey, hover);
     NSView *sidebar = DPSidebarOf(list);
-    // The sidebar's visibleRect spans the whole window, so the area follows its bounds instead.
+    // Not NSTrackingInVisibleRect: the sidebar's visibleRect spans the whole window.
     if (hover.tracking && hover.sidebar == sidebar && NSEqualRects(hover.tracking.rect, sidebar.bounds)) return hover;
     BOOL first = !hover.tracking;
     if (hover.tracking) [hover.sidebar removeTrackingArea:hover.tracking];
@@ -100,7 +100,6 @@ static NSView *DPSidebarOf(NSView *list) {
 - (void)mouseMoved:(NSEvent *)event { [self track]; }
 - (void)mouseExited:(NSEvent *)event { [self track]; }
 
-// A short wait keeps the broom from flickering as the pointer crosses the divider's edge, and while a tab is dragged.
 - (void)track {
     if ([self containsPointer]) {
         [self.hideTimer invalidate];

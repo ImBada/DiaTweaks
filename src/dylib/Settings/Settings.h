@@ -51,8 +51,8 @@ NSURL *DPWikiURL(DPPatch *patch);
 @protocol DPPaneContent <NSObject>
 @property (nonatomic, copy) void (^open)(NSString *title, NSView *page);
 @optional
-- (void)syncWithQuery:(NSString *)query;  // Gives the pane a search field.
-- (void)refresh;  // Each time the pane is shown.
+- (void)syncWithQuery:(NSString *)query;
+- (void)refresh;
 @end
 
 @interface DPOverviewView : NSStackView <DPPaneContent>
@@ -73,7 +73,7 @@ NSURL *DPWikiURL(DPPatch *patch);
 - (instancetype)initWithTitle:(NSString *)title content:(NSView<DPPaneContent> *)content;
 @property (nonatomic, readonly) NSString *title;
 @property (nonatomic, readonly) NSView<DPPaneContent> *content;
-@property (nonatomic, readonly) NSSearchToolbarItem *searchItem;  // nil when the content has nothing to search.
+@property (nonatomic, readonly) NSSearchToolbarItem *searchItem;
 @property (nonatomic, copy) void (^titleChanged)(NSString *title, BOOL canGoBack);
 @property (nonatomic, readonly) BOOL showsPage;
 - (void)goBack;

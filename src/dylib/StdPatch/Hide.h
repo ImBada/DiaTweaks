@@ -1,7 +1,7 @@
 #import "StdPatch/StdPatch.h"
 
 extern NSHashTable<NSView *> *DPHideHosts;
-extern NSHashTable<NSView *> *DPSuppressed;  // Hidden by a patch while Dia wants them shown.
+extern NSHashTable<NSView *> *DPSuppressed;
 extern const char *const DPHideHostClasses[];
 
 DPPatch *DPHider(NSView *view);

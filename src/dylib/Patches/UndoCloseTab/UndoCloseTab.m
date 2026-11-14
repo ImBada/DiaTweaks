@@ -1,5 +1,6 @@
 #import "StdPatch/StdPatch.h"
 #import "Commands/GroupTabs/GroupTabs.h"
+#import "Patches/CommandBar/Tabs.h"
 
 extern DPPatch DPUndoCloseTab;
 static BOOL DPJustClosed;
@@ -11,12 +12,17 @@ static NSMenuItem *DPReopenItem(void) {
     return nil;
 }
 
-// Dia closes a tab's page this way; Peek closes its own pages with -close.
+// Not -close: Peek closes its pages with it, and that must not arm Undo.
 static void DPPage_close(id self, SEL _cmd, NSInteger timing) {
     DPCallOriginal(DPPage_close, self, timing);
     if (!DPUndoCloseTab.on) return;
-    DPJustClosed = YES;
+    if (!DPTakeOwnClose()) DPJustClosed = YES;
     DPForgetGroupingUndo();
+}
+
+static BOOL DPEditingWithUndo(NSWindow *window) {
+    NSText *text = [window.firstResponder isKindOfClass:NSText.class] ? (NSText *)window.firstResponder : nil;
+    return text.editable && text.undoManager.canUndo;
 }
 
 static NSDictionary *DPDefaultUndoShortcut(void) { return @{ @"keyCode" : @6, @"modifiers" : @(NSEventModifierFlagCommand), @"key" : @"Z" }; }
@@ -25,7 +31,8 @@ static void DPInstallUndoCloseTab(void) {
     DPHook(DPDiaWebContents, @selector(closeWithForegroundCommitTiming:), (IMP)DPPage_close);
     NSEventMask mask = NSEventMaskKeyDown | NSEventMaskLeftMouseDown | NSEventMaskRightMouseDown | NSEventMaskOtherMouseDown;
     [NSEvent addLocalMonitorForEventsMatchingMask:mask handler:^NSEvent *(NSEvent *event) {
-        BOOL undo = DPJustClosed && event.type == NSEventTypeKeyDown && DPShortcutMatches(event, &DPUndoCloseTab) && !DPCanUndoGrouping();
+        BOOL undo = DPJustClosed && event.type == NSEventTypeKeyDown && DPShortcutMatches(event, &DPUndoCloseTab)
+            && !DPCanUndoGrouping() && !DPEditingWithUndo(event.window);
         DPJustClosed = NO;
         NSMenuItem *reopen = undo ? DPReopenItem() : nil;
         if (!reopen) return event;
@@ -49,7 +56,7 @@ DP_PATCH(DPUndoCloseTab) {
     .classes = DPClasses(DPDiaWebContents),
     .shortcut = @"undoCloseTabShortcut",
     .defaultShortcut = DPDefaultUndoShortcut,
-    .sharesShortcutWith = @"undo:",  // It only takes the shortcut right after a tab closes, when there's nothing for Undo to undo.
+    .sharesShortcutWith = @"undo:",
     .install = DPInstallUndoCloseTab,
     .verify = DPVerifyUndoCloseTab,
 };

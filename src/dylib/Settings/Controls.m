@@ -1,6 +1,5 @@
 #import "Settings.h"
 
-// An NSBox separator costs far more to lay out than the line it draws.
 @interface DPSeparatorView : NSView
 @end
 
@@ -72,7 +71,7 @@ NSView *DPRow(NSView *leading, NSView *trailing) {
     if (!NSPointInRect(point, self.bounds)) return;
     NSSwitch *toggle = (NSSwitch *)DPFindView(self, ^BOOL(NSView *v) { return [v isKindOfClass:NSSwitch.class]; });
     NSRect frame = [self convertRect:toggle.bounds fromView:toggle];
-    if (toggle.enabled && NSPointInRect(point, frame)) return;  // The switch already flipped itself.
+    if (toggle.enabled && NSPointInRect(point, frame)) return;
     if (toggle.enabled && NSPointInRect(point, NSInsetRect(frame, -10, -10))) [toggle performClick:nil];
     else self.open();
 }
@@ -103,7 +102,7 @@ NSView *DPLinkRow(NSView *row, NSString *title, void (^open)(void)) {
 + (NSImage *)imageWithPrivateSystemSymbolName:(NSString *)name accessibilityDescription:(NSString *)description;
 @end
 
-// NSImageView throws on a missing symbol, which crashed Settings. Rows share a few symbols, so each is looked up and sized once.
+// NSImageView throws on a missing symbol, which crashed Settings.
 NSImageView *DPSymbol(NSString *symbols, CGFloat size, NSColor *color) {
     static NSMutableDictionary<NSString *, id> *cache;
     if (!cache) cache = [NSMutableDictionary new];
@@ -130,7 +129,6 @@ void DPFillStack(NSStackView *stack, NSArray<NSView *> *views) {
     for (NSView *view in views) {
         [stack addArrangedSubview:view];
         [view.widthAnchor constraintEqualToAnchor:stack.widthAnchor].active = YES;
-        // So a section's title sits with the rows under it.
         if ([view isMemberOfClass:DPFillView.class]) [stack setCustomSpacing:20 afterView:view];
     }
 }
@@ -157,8 +155,6 @@ NSView *DPIconTile(NSString *symbol, NSColor *color) { return DPIconTileOfSize(s
 
 static CGFloat DPLinear(CGFloat c) { return c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4); }
 
-// The same fill in both appearances, so a layer's fixed CGColor never goes stale: the light-mode color, darkened until
-// the white glyph on it reaches 3:1.
 static NSColor *DPTileFill(NSColor *color) {
     __block NSColor *rgb;
     [[NSAppearance appearanceNamed:NSAppearanceNameAqua] performAsCurrentDrawingAppearance:^{
@@ -192,7 +188,6 @@ NSView *DPIconTileOfSize(NSString *symbol, NSColor *color, CGFloat size) {
     return tile;
 }
 
-// An NSBox resolves its fill once, so it kept the dark one in light mode.
 @implementation DPFillView
 - (instancetype)initWithFrame:(NSRect)frame {
     if (!(self = [super initWithFrame:frame])) return nil;

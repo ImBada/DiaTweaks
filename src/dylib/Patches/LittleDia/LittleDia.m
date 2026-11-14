@@ -1,7 +1,7 @@
 #import "LittleDia.h"
 #import "Updates/Updates.h"
 
-static BOOL gLoadedOn;  // The extension only loads as Dia starts.
+static BOOL gLoadedOn;
 
 static void DPInstallLittleDia(void) {
     gLoadedOn = DPLittleDia.on;
@@ -26,7 +26,6 @@ static void DPApplyLittleDia(DPPatch *patch) {
     if ([alert runModal] == NSAlertFirstButtonReturn) DPHandOffAndQuit(@[ @"apply" ]);
 }
 
-// Only checks open Little Dia windows: their bar has its buttons while on, and Dia's own bar is back while off.
 static NSString *DPLittleDiaProblem(DPPatch *patch) { return DPLittleDiaExtensionProblem(); }
 
 static NSString *DPVerifyLittleDia(DPPatch *patch) {

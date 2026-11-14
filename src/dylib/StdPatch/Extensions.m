@@ -14,8 +14,7 @@ static void DPMergeListFlag(NSMutableArray<NSString *> *args, NSString *flag) {
     if (values.count) [args insertObject:[flag stringByAppendingString:[values componentsJoinedByString:@","]] atIndex:first];
 }
 
-// Dia passes Chromium its command line here. Chromium keeps only the last --load-extension, so one flag lists every
-// folder, any Dia passed first.
+// Chromium keeps only the last --load-extension, so one flag lists every folder, Dia's own first.
 static id DPConfiguration_init(id self, SEL _cmd, int argc, NSArray<NSString *> *argv, NSString *profilePath, NSUInteger applicationID,
                                BOOL isProduction, NSUInteger restorationPolicy, BOOL loadAllProfiles, BOOL quitRunLoop, NSString *suiteName) {
     static NSString *const flag = @"--load-extension=";

@@ -22,5 +22,5 @@ typedef struct { uint32_t tag, version, count; uint32_t attributes[]; } DPKeyFor
 
 id<DPAssetStorage> DPOpenCatalog(NSString *path, BOOL writing);
 
-// nil on success, else what went wrong.
+// nil on success, else the problem.
 NSString *DPMergeCatalog(NSString *sourcePath, NSString *catalogPath);

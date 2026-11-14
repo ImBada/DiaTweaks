@@ -5,19 +5,19 @@ static void DPApplyPullRequestRepo(DPPatch *patch) {
     if (!patch->on) DPResetPRRows();
 }
 
-// On, no pull request shows its author. Off, none shows its repository or a status line of ours.
 static NSString *DPVerifyPullRequestRepo(DPPatch *patch) {
     for (NSView *view in DPFindViews(DPDiaFeatheredLabel)) {
         if (!DPIsPRSubtitle(view) || view.hiddenOrHasHiddenAncestor) continue;
         NSDictionary *pr = DPPullRequestOf(view);
-        NSString *text = ((NSTextField *)view).stringValue;
         if (!pr) continue;
+        NSString *text = ((NSTextField *)view).stringValue;
         if (patch->on && [text hasPrefix:pr[@"author"]]) return @"a pull request still shows its author";
         if (!patch->on && [text hasPrefix:pr[@"repo"]]) return @"a pull request still shows its repository";
     }
+    if (patch->on) return nil;
     for (NSView *view in DPFindViews(DPDiaTabContentView))
         for (NSView *sub in view.subviews)
-            if (!patch->on && [sub isKindOfClass:DPPRStatusLine.class] && !sub.hidden) return @"a status line still shows";
+            if ([sub isKindOfClass:DPPRStatusLine.class] && !sub.hidden) return @"a status line still shows";
     return nil;
 }
 
@@ -34,7 +34,7 @@ DP_PATCH(DPPullRequestRepo) {
     .symbol = @"arrow.triangle.pull",
     .tint = @"systemTealColor",
     .section = @"Sidebar & Tab Bar",
-    .classes = DPClasses(DPDiaTabContentView, DPDiaFeatheredLabel, DPDiaTransitioningLabel, DPDiaTabListLayout, DPDiaTabListCollection),
+    .classes = DPClasses(DPDiaTabContentView, DPDiaFeatheredLabel, DPDiaTransitioningLabel, DPDiaTabListLayout, DPDiaTabListCollection, DPDiaTabList),
     .install = DPInstallPullRequestRepo,
     .apply = DPApplyPullRequestRepo,
     .verify = DPVerifyPullRequestRepo,

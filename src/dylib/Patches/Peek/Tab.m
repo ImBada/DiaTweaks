@@ -1,10 +1,11 @@
 #import "Patches/Peek/Peek.h"
+#import "Patches/CommandBar/Tabs.h"
 
 static id DPTabState(NSView *tab) {
     return DPSwiftValue(DPSwiftValue(DPSwiftValue(tab, @"viewModel"), @"stateSubject"), @"currentValue");
 }
 
-// selectionStyle is "none" when unselected (nil on an unselected pinned tab), and above/below on the selection's neighbours.
+// selectionStyle is nil on an unselected pinned tab, "none" on other unselected tabs, above/below beside the selection.
 static BOOL DPTabSelected(NSView *tab) {
     NSString *style = [[DPSwiftValue(DPTabState(tab), @"selectionStyle") description] lowercaseString];
     return style && ![style containsString:@"none"] && ![style containsString:@"above"] && ![style containsString:@"below"];
@@ -35,7 +36,6 @@ static NSView *DPPeekOriginTab(NSWindow *window, id source) {
     return selected;
 }
 
-// Pinned tabs list no contentIDs.
 static NSString *DPPeekTabContentKey(NSView *tab) {
     NSString *state = [DPTabState(tab) description];
     NSRange mark = [state rangeOfString:@"contentIDs: ["];
@@ -56,14 +56,13 @@ static BOOL DPTabIsTop(NSView *tab) {
     return NO;
 }
 
-// Hides on hover over a sidebar tab, where Dia's close button shares its spot.
 @interface DPPeekTabBadge : NSView
 @property (nonatomic, weak) DPPeekCard *peek;
-@property (nonatomic, copy) NSString *contentKey;
+@property (nonatomic, copy) NSString *contentKey, *frontIDAtOpen;
 @property (nonatomic) BOOL pinned;
 @property (nonatomic, strong) NSTrackingArea *tabTracking;
+@property (nonatomic, weak) NSView *trackedTab;
 @property (nonatomic, strong) NSTimer *watch;
-@property (nonatomic) NSInteger misses;
 @end
 
 @implementation DPPeekTabBadge
@@ -71,12 +70,13 @@ static BOOL DPTabIsTop(NSView *tab) {
 
 - (void)viewDidMoveToSuperview {
     [super viewDidMoveToSuperview];
-    [self.tabTracking.owner removeTrackingArea:self.tabTracking];
+    [self.trackedTab removeTrackingArea:self.tabTracking];
     self.tabTracking = nil;
     if (!self.superview || self.pinned) return;
     self.tabTracking = [[NSTrackingArea alloc] initWithRect:self.superview.bounds
         options:NSTrackingMouseEnteredAndExited | NSTrackingActiveAlways | NSTrackingInVisibleRect owner:self userInfo:nil];
     [self.superview addTrackingArea:self.tabTracking];
+    self.trackedTab = self.superview;
 }
 
 - (void)mouseEntered:(NSEvent *)event { if (!self.pinned) self.hidden = YES; }
@@ -93,10 +93,11 @@ static BOOL DPTabIsTop(NSView *tab) {
     }
     tab = DPPeekTabWithContent(peek.window, self.contentKey);
     if (!tab) {
-        if (++self.misses >= 2) [self closePeek];
+        // A missing row says nothing (the sidebar builds rows lazily); only the tab closing or another coming to the front does.
+        NSString *front = DPActiveTabID(peek.window);
+        if (!peek.source || (self.frontIDAtOpen && front && ![front isEqual:self.frontIDAtOpen])) [self closePeek];
         return;
     }
-    self.misses = 0;
     if (self.superview != tab) [tab addSubview:self];
     if (!DPTabSelected(tab)) [self closePeek];
 }
@@ -135,7 +136,8 @@ void DPPeekShowTabBadge(DPPeekCard *peek, id source) {
     badge.peek = peek;
     badge.pinned = pinned;
     badge.contentKey = DPPeekTabContentKey(tab);
-    eyes.frame = NSOffsetRect(badge.bounds, 0, !pinned && top ? 2 : 0);  // The glyph sits low in a top-strip row.
+    badge.frontIDAtOpen = DPActiveTabID(peek.window);
+    eyes.frame = NSOffsetRect(badge.bounds, 0, !pinned && top ? 2 : 0);
     eyes.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
     [badge addSubview:eyes];
     [tab addSubview:badge];

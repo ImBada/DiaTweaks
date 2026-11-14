@@ -2,12 +2,22 @@
 
 static char DPSettingsKey, DPSearchItemKey;
 
-// Our rows follow Dia's. Dia never sees their indexes: its cell lookup traps past the end of its items.
+// Dia's cell lookup traps past its own rows, so it never sees our indexes.
 typedef NS_ENUM(NSInteger, DPSidebarRow) { DPDiaRow = -1, DPDividerRow, DPHomeRow, DPPatchesRow, DPOurRowCount };
 
 static DPSidebarRow DPOurRow(NSTableView *table, NSInteger row) {
     NSInteger ours = row - (table.numberOfRows - DPOurRowCount);
     return row >= 0 && ours >= 0 ? ours : DPDiaRow;
+}
+
+static void DPRemoveDiaPaneItems(NSToolbar *toolbar) {
+    void **slot = DPIvar(toolbar.delegate, "paneToolbarItems");
+    // A Swift array of objects is its storage, an NSArray; one bridged from Objective-C is tagged and left alone.
+    if (!slot || !*slot || ((uintptr_t)*slot & 0xC000000000000001)) return;
+    NSArray<NSToolbarItem *> *paneItems = (__bridge NSArray *)*slot;
+    NSSet *identifiers = [NSSet setWithArray:[paneItems valueForKey:@"itemIdentifier"]];
+    for (NSInteger i = toolbar.items.count - 1; i >= 0; i--)
+        if ([identifiers containsObject:toolbar.items[i].itemIdentifier]) [toolbar removeItemAtIndex:i];
 }
 
 @interface DPSettings : NSObject
@@ -39,7 +49,6 @@ static __weak DPPaneView *DPShownPane;
     return settings;
 }
 
-// The divider takes the sidebar's spare height, so our rows sit at its bottom. It's sized when the table first asks for its height, and re-fitted when the clip's size or insets change.
 - (CGFloat)fittedDividerHeight {
     NSTableView *table = self.table;
     NSClipView *clip = table.enclosingScrollView.contentView;
@@ -71,7 +80,6 @@ static __weak DPPaneView *DPShownPane;
     return nil;
 }
 
-// Building and laying out a pane takes a moment, so it's done hidden as Settings opens and a click only shows it.
 - (void)preparePane:(DPPaneView *)pane {
     NSView *detail = ((NSSplitViewController *)self.table.window.contentViewController).splitViewItems.lastObject.viewController.view;
     if (!detail || pane.superview == detail) return;
@@ -98,6 +106,7 @@ static __weak DPPaneView *DPShownPane;
     [self allowResizing:YES];
 
     NSToolbar *toolbar = window.toolbar;
+    DPRemoveDiaPaneItems(toolbar);
     if (pane.searchItem) {
         DPSet(toolbar, &DPSearchItemKey, pane.searchItem);
         [toolbar insertItemWithItemIdentifier:NSToolbarFlexibleSpaceItemIdentifier atIndex:toolbar.items.count];
@@ -116,7 +125,6 @@ static __weak DPPaneView *DPShownPane;
     [self allowResizing:NO];
 }
 
-// Leaves the window resizable, for when another of our panes is about to show.
 - (void)closeShownPane {
     DPPaneView *pane = self.shown;
     if (!pane) return;
@@ -157,7 +165,6 @@ static __weak DPPaneView *DPShownPane;
         self.fixedHeight = window.frame.size.height;
         CGFloat width = window.contentLayoutRect.size.width;
         window.styleMask |= NSWindowStyleMaskResizable;
-        // Resizable enables zoom and full screen; Settings should only grow taller.
         window.collectionBehavior = (window.collectionBehavior & ~NSWindowCollectionBehaviorFullScreenPrimary) | NSWindowCollectionBehaviorFullScreenNone;
         [window standardWindowButton:NSWindowZoomButton].enabled = NO;
         window.contentMinSize = NSMakeSize(width, 400);
@@ -242,7 +249,17 @@ static void DPSettings_handleBack(id self, SEL _cmd) {
     DPCallOriginal(DPSettings_handleBack, self);
 }
 
-// Dia's sidebar implements neither, so there's nothing to hook or call through to.
+static NSEvent *DPSettings_findKey(NSEvent *event) {
+    DPPaneView *pane = DPShownPane;
+    NSSearchToolbarItem *item = pane.searchItem;
+    if (!item || pane.hidden || event.window != pane.window || !event.window.isKeyWindow || DPShortcutRecording()) return event;
+    NSEventModifierFlags mods = event.modifierFlags & NSEventModifierFlagDeviceIndependentFlagsMask & ~(NSEventModifierFlagCapsLock | NSEventModifierFlagNumericPad);
+    if (mods != NSEventModifierFlagCommand || !DPEventIsKey(event, @"f")) return event;
+    [item beginSearchInteraction];
+    [item.searchField selectText:nil];
+    return nil;
+}
+
 static void DPAddSidebarMethod(SEL sel, IMP imp) {
     const char *types = protocol_getMethodDescription(@protocol(NSTableViewDelegate), sel, NO, YES).types;
     if (!class_addMethod(objc_getClass(DPDiaSettingsSidebar), sel, imp, types))
@@ -258,4 +275,5 @@ void DPInstallSettings(void) {
     DPAddSidebarMethod(@selector(tableView:shouldSelectRow:), (IMP)DPSidebar_shouldSelectRow);
     DPAddSidebarMethod(@selector(tableView:heightOfRow:), (IMP)DPSidebar_heightOfRow);
     DPHook(DPDiaSettingsController, @selector(toolbar:itemForItemIdentifier:willBeInsertedIntoToolbar:), (IMP)DPSettings_toolbarItem);
+    [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskKeyDown handler:^NSEvent *(NSEvent *event) { return DPSettings_findKey(event); }];
 }

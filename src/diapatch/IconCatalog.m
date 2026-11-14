@@ -1,8 +1,6 @@
 #import "IconCatalog.h"
 #import <dlfcn.h>
 
-// macOS only looks for an app's layered icon in the bundle's own Assets.car, and actool can't add to a compiled catalog,
-// so each icon's renditions are copied in through CoreUI. Their name hashes are kept: a collision stops the merge.
 enum { DPElement = 1, DPPart = 2, DPAppearance = 7, DPIdentifier = 17, DPPackedElement = 9, DPIconImagePart = 220 };
 
 id<DPAssetStorage> DPOpenCatalog(NSString *path, BOOL writing) {
@@ -27,7 +25,6 @@ static NSString *DPCopyNames(id<DPAssetStorage> source, id<DPAssetStorage> catal
     return nil;
 }
 
-// nil if the key can't be expressed in the catalog's format.
 static NSData *DPTranslateKey(const DPKeyToken *key, id<DPAssetStorage> source, id<DPAssetStorage> catalog) {
     const DPKeyFormat *format = catalog.keyFormat;
     NSMutableData *translated = [NSMutableData dataWithLength:format->count * sizeof(uint16_t)];
@@ -64,7 +61,7 @@ NSString *DPMergeCatalog(NSString *sourcePath, NSString *catalogPath) {
             if (token->attribute == DPElement) element = token->value;
             if (token->attribute == DPPart) part = token->value;
         }
-        // The smallest flat sizes are links into a shared atlas keyed like Dia's own. The layered stack draws those sizes.
+        // The smallest flat sizes link into a shared atlas keyed like Dia's own; the layered stack draws them.
         if (element == DPPackedElement || (part == DPIconImagePart && value.length < 1024)) return;
         NSData *newKey = DPTranslateKey(key, source, catalog);
         if (newKey) [assets addObject:@[ newKey, value ]];

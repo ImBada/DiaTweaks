@@ -48,7 +48,7 @@ pub fn run(env: &Env, ui: &Ui) -> Result<()> {
             Action::Quit => break,
         };
         match result {
-            // The menu would carry on with the replaced binary or a Dia without DiaTweaks.
+            // The menu would go on with a replaced binary or a Dia without DiaTweaks.
             Ok(()) if matches!(action, Action::UpdateDiaTweaks | Action::Restore) => break,
             Ok(()) => {}
             Err(err) => match err.downcast_ref::<Cancelled>() {

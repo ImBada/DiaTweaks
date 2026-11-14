@@ -1,10 +1,9 @@
 #import "TidyTabs.h"
 
 static NSString *const DPWaveName = @"DPTidyWave";
-// Flat, the wave matches Dia's 1pt line, so the swap can't be seen.
 static const CGFloat DPWavelength = 10, DPAmplitude = 2.25, DPWaveWidth = 1.25, DPLineWidth = 1, DPBoxHeight = 9;
 
-// Sampled densely enough that a flat path and a wavy one have the same points, so one animates into the other.
+// Flat and wavy paths need the same points for the morph to animate.
 static CGPathRef DPWavePath(CGFloat width, CGFloat height, CGFloat amplitude) {
     CGMutablePathRef path = CGPathCreateMutable();
     CGFloat mid = height / 2;
@@ -84,13 +83,11 @@ void DPTidyWave(CALayer *host, CALayer *line, CGColorRef color, BOOL busy) {
         if (![shape animationForKey:@"morph"]) shape.path = wave;
         CGPathRelease(wave);
     } else if (box) {
-        // Flattens, then hands back to the line, unless a new wave started meanwhile.
         CGPathRef flat = DPWavePath(NSWidth(box.frame), NSHeight(box.frame), 0);
         __weak CALayer *weakBox = box, *weakLine = line, *weakHost = host;
         [CATransaction commit];
         box.name = [DPWaveName stringByAppendingString:@"-leaving"];
         DPMorph(shape, flat, DPLineWidth, ^{
-            // No implicit fade: the line returns as the flat wave goes.
             [CATransaction begin];
             [CATransaction setDisableActions:YES];
             if (!DPWaveIn(weakHost)) weakLine.opacity = 1;

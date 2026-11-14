@@ -1,7 +1,5 @@
 #import "HideToolbar.h"
 
-static void DPApplyShowWithSidebar(DPPatch *patch) { DPRelayoutPanes(); }
-
 DP_PATCH(DPShowToolbarWithSidebar) {
     .key = @"showToolbarWithSidebar",
     .order = 45,
@@ -11,6 +9,6 @@ DP_PATCH(DPShowToolbarWithSidebar) {
     .tint = @"systemIndigoColor",
     .requires = @"hideToolbar",
     .section = @"Showing the Toolbar",
-    .apply = DPApplyShowWithSidebar,
+    .apply = DPApplyRelayoutPanes,
     .verify = DPVerifyKeptInPlace,
 };

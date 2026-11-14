@@ -38,7 +38,6 @@ NSToolbarItemIdentifier const DPSearchItemIdentifier = @"DiaPatchesSearch";
     NSLayoutConstraint *fill = [content.widthAnchor constraintEqualToAnchor:document.widthAnchor constant:-48];
     fill.priority = NSLayoutPriorityDefaultHigh;
     [NSLayoutConstraint activateConstraints:@[
-        // Dia's toolbar sits over the top of the pane.
         [scroll.topAnchor constraintEqualToAnchor:self.topAnchor constant:52],
         [scroll.bottomAnchor constraintEqualToAnchor:self.bottomAnchor],
         [scroll.leadingAnchor constraintEqualToAnchor:self.leadingAnchor],

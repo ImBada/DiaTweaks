@@ -8,7 +8,6 @@ static CAGradientLayer *DPBorderIn(NSView *shape) {
     return [layer isKindOfClass:CAGradientLayer.class] ? layer : nil;
 }
 
-// Use Dia's middle opacity: the outline stays subtle and follows its light/dark palette.
 static NSArray *DPUniformColors(NSArray *colors) {
     if (!colors.count) return colors;
     NSArray *sorted = [colors sortedArrayUsingComparator:^NSComparisonResult(id a, id b) {
@@ -26,6 +25,14 @@ static void DPSetColors(CAGradientLayer *border, id colors) {
     if (![DPColorsOf(border) isEqual:colors]) border.colors = colors == NSNull.null ? nil : colors;
 }
 
+static void DPRestoreTabBorder(NSView *shape) {
+    CAGradientLayer *border = DPBorderIn(shape);
+    if (!DPGet(border, &DPColorsKey)) return;
+    id dia = DPDiaValue(border, &DPColorsKey, DPColorsOf(border));
+    DPSet(border, &DPColorsKey, nil);
+    DPSetColors(border, dia);
+}
+
 void DPStyleUniformTabBorder(NSView *shape) {
     CAGradientLayer *border = DPBorderIn(shape);
     if (!border) return;
@@ -34,14 +41,6 @@ void DPStyleUniformTabBorder(NSView *shape) {
     id ours = dia == NSNull.null ? dia : DPUniformColors(dia);
     DPOverride(border, &DPColorsKey, dia, ours);
     DPSetColors(border, ours);
-}
-
-void DPRestoreTabBorder(NSView *shape) {
-    CAGradientLayer *border = DPBorderIn(shape);
-    if (!DPGet(border, &DPColorsKey)) return;
-    id dia = DPDiaValue(border, &DPColorsKey, DPColorsOf(border));
-    DPSet(border, &DPColorsKey, nil);
-    DPSetColors(border, dia);
 }
 
 NSString *DPVerifyUniformTabBorder(NSView *shape, BOOL on) {

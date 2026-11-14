@@ -1,7 +1,5 @@
 #import "StdPatch/StdPatch.h"
 
-// The hover tracker sets the field's state from the pointer; a delayed tracker hands it to the field once it settles.
-
 extern DPPatch DPShowAddressField;
 
 typedef void (*DPHoverHandler)(bool hovered, void *context __attribute__((swift_context))) __attribute__((swiftcall));
@@ -43,7 +41,6 @@ static void DPTracker_mouseExited(id self, SEL _cmd, NSEvent *event) {
     if (!DPKeepsHover(self)) DPCallOriginal(DPTracker_mouseExited, self, event);
 }
 
-// Each tab has its own field, and Dia lays one out before showing it.
 static void DPField_layout(NSView *self, SEL _cmd) {
     DPCallOriginal(DPField_layout, self);
     if (DPShowAddressField.on && !DPShowsHover(self)) DPSetHover(self, YES);

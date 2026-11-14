@@ -1,7 +1,7 @@
 #import "StdPatch/StdPatch.h"
 
 extern DPPatch DPTidyTabs;
-static const CGFloat DPTidyRowHeight = 24, DPTidyBrushSize = 22;
+static const CGFloat DPTidyBrushSize = 22, DPTidyLineGap = 6;
 static const NSInteger DPTidyMinimumTabs = 6;
 
 @interface DPTidyHover : NSObject
@@ -43,5 +43,5 @@ NSRect DPTidyHoverZone(NSView *list);
 void DPTidyTabsNow(NSWindow *window);
 NSString *DPTidyUnavailableReason(void);
 
-NSDictionary<NSString *, NSString *> *DPTidyLooseTabs(NSWindow *window);  // URL to title.
+NSDictionary<NSString *, NSString *> *DPTidyLooseTabs(NSWindow *window);
 NSString *DPTidyAddress(NSString *url, NSString *host);

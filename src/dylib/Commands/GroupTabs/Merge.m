@@ -1,6 +1,6 @@
 #import "GroupTabs.h"
 
-// Without an apply, toggling eases and relayouts every patch. Group Tabs reads the switch when it runs.
+// An apply keeps every toggle from easing and relaying out all patches; Group Tabs reads the switch itself.
 static void DPApplyMergeSubdomains(DPPatch *patch) {}
 
 DP_PATCH(DPGroupTabsMergeSubdomains) {

@@ -1,7 +1,5 @@
 #import "EdgeToEdge.h"
 
-// Dia hangs popups such as the command bar from the address field, which edge-to-edge moves, so they're moved back.
-
 static char DPPopoverKey;
 
 static CGFloat DPTop(NSView *parent, NSRect rect) { return parent.isFlipped ? NSMinY(rect) : NSMaxY(rect); }

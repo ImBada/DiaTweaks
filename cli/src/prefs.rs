@@ -73,7 +73,7 @@ impl Prefs {
     }
 }
 
-/// How NSString's boolValue, and so Dia, reads `defaults write com.diapatches key YES`.
+/// Reads strings the way NSString's boolValue, and so Dia, does.
 fn string_is_true(text: &str) -> bool {
     let number = text
         .trim_start()

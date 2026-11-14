@@ -11,7 +11,6 @@ use signal_hook::consts::{SIGHUP, SIGINT, SIGTERM};
 
 static INTERRUPTED: LazyLock<Arc<AtomicBool>> = LazyLock::new(Arc::default);
 
-/// Signals only raise a flag, so running steps can stop or finish safely.
 pub fn install() -> io::Result<()> {
     for signal in [SIGINT, SIGTERM, SIGHUP] {
         signal_hook::flag::register(signal, Arc::clone(&INTERRUPTED))?;

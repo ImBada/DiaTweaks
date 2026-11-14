@@ -1,4 +1,5 @@
 #import "LittleDia.h"
+#import "Patches/Peek/Peek.h"
 
 static NSString *const DPWidthKey = @"littleDiaWidth", *const DPHeightKey = @"littleDiaHeight";
 
@@ -13,8 +14,6 @@ NSSize DPLittleDiaSize(void) {
     NSNumber *width = [DPSettings() objectForKey:DPWidthKey], *height = [DPSettings() objectForKey:DPHeightKey];
     return NSMakeSize(width ? width.doubleValue : 1180, height ? height.doubleValue : 860);
 }
-
-#pragma mark Settings rows
 
 @interface DPSizeRow : NSStackView <NSTextFieldDelegate>
 @property (nonatomic, copy) NSString *key;
@@ -75,18 +74,17 @@ NSArray<NSView *> *DPLittleDiaRows(void) {
     ];
 }
 
-#pragma mark Escape closes the window
-
 extern DPPatch DPLittleDiaEscape;
 
-// Escape closes the focused Little Dia window. It still cancels typing in the address first, and leaves full screen
-// video to the page.
+// Peek's own monitor takes Escape too and may run first or second, so this one stands aside while a Peek is open.
 static BOOL DPEscapeCloses(NSEvent *event) {
     NSWindow *window = event.window;
     NSEventModifierFlags mods = event.modifierFlags & (NSEventModifierFlagCommand | NSEventModifierFlagShift | NSEventModifierFlagOption | NSEventModifierFlagControl);
-    if (!DPLittleDia.on || !DPLittleDiaEscape.on || event.keyCode != 53 || mods || !window.isKeyWindow) return NO;
-    if (!DPIsLittleDiaWindow(window) || (window.styleMask & NSWindowStyleMaskFullScreen)) return NO;
+    if (!DPLittleDia.on || !DPLittleDiaEscape.on || event.keyCode != 53 || mods || event.isARepeat || !window.isKeyWindow) return NO;
+    if (!DPIsLittleDiaWindow(window) || (window.styleMask & NSWindowStyleMaskFullScreen) || DPPeekCardIn(window)) return NO;
     if ([window.firstResponder isKindOfClass:NSText.class] && [(NSText *)window.firstResponder isFieldEditor]) return NO;
+    NSResponder<NSTextInputClient> *typing = (id)window.firstResponder;
+    if ([typing conformsToProtocol:@protocol(NSTextInputClient)] && typing.hasMarkedText) return NO;
     [window performClose:nil];
     return YES;
 }

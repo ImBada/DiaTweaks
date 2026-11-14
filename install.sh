@@ -35,7 +35,7 @@ rm -rf "$incoming"
 mkdir -p "$incoming" "$support/bin"
 cp build/diapatch build/DiaPatches.dylib build/patches.json ${cli:+"$cli"} "$incoming/"
 cp -R assets/app-icons "$incoming/"
-# Each rename is atomic, and Ctrl-C waits until all are done, so the installed files always come from one build.
+# Ctrl-C waits for the renames, so the installed files always come from one build.
 trap 'interrupted=1' INT TERM
 (
     trap '' INT TERM

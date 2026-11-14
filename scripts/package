@@ -1,5 +1,5 @@
 #!/bin/sh
-# DiaTweaks.zip is the release asset diapatch self-update installs.
+# Name and contents are what diapatch self-update expects.
 set -eu
 cd "$(dirname "$0")/.."
 make -s

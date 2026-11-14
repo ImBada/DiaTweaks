@@ -4,7 +4,7 @@
 NSHashTable<NSView *> *DPHideHosts, *DPSuppressed;
 static char DPHidersKey;
 
-// Every patch that hides the view. Only a match is remembered: some views only match once Dia labels them.
+// Only a match is cached: some views only match once Dia labels them.
 static NSArray<NSValue *> *DPHiders(NSView *view) {
     NSArray<NSValue *> *cached = DPGet(view, &DPHidersKey);
     if (cached) return cached;
@@ -15,7 +15,6 @@ static NSArray<NSValue *> *DPHiders(NSView *view) {
     return hiders;
 }
 
-// One that's on, else the first that would hide it.
 DPPatch *DPHider(NSView *view) {
     NSArray<NSValue *> *hiders = DPHiders(view);
     for (NSValue *hider in hiders)
@@ -23,7 +22,6 @@ DPPatch *DPHider(NSView *view) {
     return hiders.firstObject.pointerValue;
 }
 
-// Dia shows these views again itself, so refuse while the patch is on.
 static void DPHidden_setHidden(NSView *self, SEL _cmd, BOOL hidden) {
     DPPatch *patch = DPHider(self);
     BOOL suppress = !hidden && patch && patch->on;
@@ -32,7 +30,7 @@ static void DPHidden_setHidden(NSView *self, SEL _cmd, BOOL hidden) {
     DPCallOriginal(DPHidden_setHidden, self, hidden || suppress);
 }
 
-// Before the window shows, Dia only hides views that report visible, so lie to Dia's code then; AppKit needs the truth.
+// Before the window shows, Dia only hides views that report visible, so lie to Dia's code then.
 static BOOL DPHidden_isHidden(NSView *self, SEL _cmd) {
     Dl_info caller;
     if (!self.window.isVisible && [DPSuppressed containsObject:self] && dladdr(__builtin_return_address(0), &caller)
@@ -47,7 +45,6 @@ static void DPEnforce(NSView *view) {
     DPHookClass(view.class, @selector(setHidden:), (IMP)DPHidden_setHidden);
     DPHookClass(view.class, @selector(isHidden), (IMP)DPHidden_isHidden);
     if (!patch->on || view.hidden) return;
-    // Goes through the hook so the view is remembered in DPSuppressed.
     DPHidden_setHidden(view, @selector(setHidden:), NO);
 }
 
@@ -85,7 +82,6 @@ static NSString *DPProblem(NSView *view, DPPatch *patch) {
     return nil;
 }
 
-// A missing view passes: not every layout has every button.
 NSString *DPVerifyHides(DPPatch *patch) {
     NSHashTable<NSView *> *hosts = [DPHideHosts copy];
     for (const char *const *name = DPHideHostClasses; *name; name++) for (NSView *host in DPFindViews(*name)) [hosts addObject:host];

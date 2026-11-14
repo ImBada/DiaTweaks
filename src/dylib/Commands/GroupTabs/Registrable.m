@@ -1,6 +1,5 @@
 #import "GroupTabs.h"
 
-// eTLD+1 by a short rule, not the Public Suffix List.
 static BOOL DPCountryCode(NSString *label) {
     if (label.length != 2) return NO;
     unichar a = [label characterAtIndex:0], b = [label characterAtIndex:1];

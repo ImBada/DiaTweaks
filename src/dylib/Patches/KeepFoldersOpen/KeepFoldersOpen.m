@@ -1,8 +1,5 @@
 #import "StdPatch/StdPatch.h"
-
-// Dia collapses a folder when its last tab or live item goes away, and leaves it shut when new ones arrive. A folder
-// that collapses without a click on its header gets one click to open it again. With tabs at the top a folder is a
-// TabGroupView, not a TabGroupCellView.
+#import "Commands/GroupTabs/GroupTabs.h"
 
 extern DPPatch DPKeepFoldersOpen;
 
@@ -20,7 +17,6 @@ static NSView *DPTopHeader(NSView *folder) {
     return [header isKindOfClass:NSView.class] ? header : nil;
 }
 
-// A collapsed sidebar folder turns its chevron to point right. nil until the chevron exists.
 static NSNumber *DPFolderExpanded(NSView *folder) {
     if (DPIsKind(folder, DPDiaTabGroupView)) {
         BOOL *flag = DPIvar(folder, "shouldDisplayExpandedContainer");
@@ -68,7 +64,7 @@ static void DPCheckFolder(NSView *folder) {
     DPSet(folder, &DPExpandedKey, expanded);
     CFTimeInterval now = CACurrentMediaTime();
     if (!collapsed || !DPKeepFoldersOpen.on || now - [DPGet(folder, &DPClickedKey) doubleValue] < 1) return;
-    // Don't fight Dia if it shuts the folder again straight away.
+    if (now - DPFoldedAt < 2) return;
     if (now - [DPGet(folder, &DPReopenedKey) doubleValue] < 1) return;
     if (!DPCollapsedFolders.count)
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 10), dispatch_get_main_queue(), ^{ DPReopenFolders(); });
@@ -85,7 +81,6 @@ static void DPFolder_mouse(NSView *self, SEL _cmd, NSEvent *event) {
     DPCallOriginal(DPFolder_mouse, self, event);
 }
 
-// A click on a top folder's header counts for the folder around it.
 static void DPHeader_mouse(NSView *self, SEL _cmd, NSEvent *event) {
     NSView *folder = self.superview;
     while (folder && !DPIsKind(folder, DPDiaTabGroupView)) folder = folder.superview;
@@ -93,7 +88,6 @@ static void DPHeader_mouse(NSView *self, SEL _cmd, NSEvent *event) {
     DPCallOriginal(DPHeader_mouse, self, event);
 }
 
-// Dia reuses the cell for another folder, so it forgets this one's chevron.
 static void DPFolder_prepareForReuse(NSView *self, SEL _cmd) {
     DPCallOriginal(DPFolder_prepareForReuse, self);
     DPSet(self, &DPExpandedKey, nil);

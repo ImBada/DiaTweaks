@@ -1,10 +1,7 @@
 #import "StdPatch/StdPatch.h"
 
-// The switcher never drops a closed tab while open, so after closing one it reopens and steps back into place.
-
 extern DPPatch DPCloseFromTabSwitcher;
 
-// Tab IDs are UUIDs, and the items only come through as their description.
 static NSArray<NSString *> *DPSwitcherTabs(NSWindowController *switcher, NSString **focused) {
     id state = DPSwiftValue(DPSwiftValue(DPSwiftValue(switcher, @"viewModel"), @"stateSubject"), @"currentValue");
     if (focused) *focused = [DPSwiftValue(state, @"focusedItemID") description];
@@ -27,14 +24,12 @@ static NSMenuItem *DPCycleItem(NSMenu *menu) {
     return nil;
 }
 
-// Once open, the switcher moves on ⌃⇥ itself rather than through the menu.
 static void DPStep(void) {
     [NSApp postEvent:[NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:NSEventModifierFlagControl timestamp:NSProcessInfo.processInfo.systemUptime
                                   windowNumber:NSApp.keyWindow.windowNumber context:nil characters:@"\t" charactersIgnoringModifiers:@"\t" isARepeat:NO keyCode:48]
              atStart:NO];
 }
 
-// Steps only once the last step has shown, so a slow switcher isn't overshot.
 static void DPFocus(NSString *tabID, NSString *lastSeen, int tries) {
     NSString *focused = nil;
     NSWindowController *switcher = DPOpenTabSwitcher();
@@ -46,7 +41,6 @@ static void DPFocus(NSString *tabID, NSString *lastSeen, int tries) {
     });
 }
 
-// Closing finishes later, and a switcher opened before then would still list the tab.
 static void DPReopenOnceClosed(NSString *closed, NSString *focus, int tries) {
     if (!tries || !(NSEvent.modifierFlags & NSEventModifierFlagControl)) return;
     if (DPScriptTab(closed)) {
@@ -80,10 +74,12 @@ static BOOL DPTakeEvent(NSEvent *event) {
     if (event.type == NSEventTypeFlagsChanged) return event.keyCode == 54 || event.keyCode == 55;
     // ⇧ may still be down from cycling backward, and ⌘⇧W would close the window.
     NSEventModifierFlags mods = event.modifierFlags & (NSEventModifierFlagCommand | NSEventModifierFlagOption);
-    return (mods == NSEventModifierFlagCommand || !mods) && [event.charactersIgnoringModifiers.lowercaseString isEqualToString:@"w"] && DPCloseFocusedTab(switcher);
+    // A layout with no Latin letters matches by the W key's position, others by the letter, so Dvorak's W works.
+    NSString *typed = event.charactersIgnoringModifiers.lowercaseString;
+    BOOL isW = (typed.length && [typed characterAtIndex:0] > 0x7f) ? event.keyCode == 13 : [typed isEqualToString:@"w"];
+    return (mods == NSEventModifierFlagCommand || !mods) && isW && DPCloseFocusedTab(switcher);
 }
 
-// Every event comes through here, before the switcher's own key handling can take it.
 static NSEvent *DPApplication_nextEvent(NSApplication *self, SEL _cmd, NSEventMask mask, NSDate *until, NSRunLoopMode mode, BOOL dequeue) {
     NSEvent *event;
     do event = DPCallOriginal(DPApplication_nextEvent, self, mask, until, mode, dequeue);

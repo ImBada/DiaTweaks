@@ -7,13 +7,9 @@
 
 extern DPPatch DPOpenSidebarInstantly;
 
-// Dia waits 0.08 s after the pointer reaches the left edge before it reveals the hidden sidebar. The wait is a
-// constant in Swift code that sets a timer, with no property, method or Objective-C hook to change, so the one
-// instruction that loads it is rewritten in memory. The site is found by the instructions around it, with branch and
-// page offsets masked; if they don't match exactly once, the patch is unavailable.
-static const uint32_t DPLoadDelay = 0x9E670100;  // fmov d0, x8
-static const uint32_t DPNoDelay = 0x9E6703E0;    // fmov d0, xzr
-static const NSUInteger DPSiteIndex = 28;        // Where the fmov sits in the signature; it's checked apart.
+static const uint32_t DPLoadDelay = 0x9E670100;
+static const uint32_t DPNoDelay = 0x9E6703E0;
+static const NSUInteger DPSiteIndex = 28;
 static uint32_t *DPSite;
 
 static const struct { uint32_t value, mask; } DPSignature[] = {
@@ -56,7 +52,6 @@ static BOOL DPMatchesAt(const uint32_t *code) {
     return code[DPSiteIndex] == DPLoadDelay || code[DPSiteIndex] == DPNoDelay;
 }
 
-// Matches of the signature among the words from `first` up to `end`; `found` is the last one's fmov.
 static NSUInteger DPSearch(const uint32_t *text, NSUInteger first, NSUInteger end, uint32_t **found) {
     NSUInteger count = 0;
     for (NSUInteger i = first; i < end; i++)
@@ -64,7 +59,7 @@ static NSUInteger DPSearch(const uint32_t *text, NSUInteger first, NSUInteger en
     return count;
 }
 
-// It was 0x1ff629 words into __text in Dia 1.57.0, so look near there before the whole 100 MB.
+// Measured on Dia 1.57.0: searched first, the whole 100 MB only as a fallback.
 static uint32_t *DPFindSite(void) {
     unsigned long size = 0;
     const struct mach_header_64 *header = (const struct mach_header_64 *)_dyld_get_image_header(0);
@@ -76,7 +71,6 @@ static uint32_t *DPFindSite(void) {
     return DPSearch(text, 0, words, &found) == 1 ? found : NULL;
 }
 
-// Only from the instruction it should be to the one it should become.
 static BOOL DPRewrite(uint32_t expected, uint32_t value) {
     if (!DPSite || *DPSite != expected) return NO;
     mach_vm_address_t page = (mach_vm_address_t)DPSite & ~((mach_vm_address_t)vm_page_size - 1);
@@ -103,6 +97,15 @@ static void DPApplyOpenSidebarInstantly(DPPatch *patch) {
     dispatch_async(dispatch_get_main_queue(), ^{ [NSNotificationCenter.defaultCenter postNotificationName:DPPatchesDidChangeNotification object:nil]; });
 }
 
+// Off in memory only: the saved switch stays on for a release that knows this Dia's code.
+static void DPInstallOpenSidebarInstantly(void) {
+    if (!DPOpenSidebarInstantly.on) return;
+    if (DPLocate()) return DPApplyOpenSidebarInstantly(&DPOpenSidebarInstantly);
+    DPOpenSidebarInstantly.unavailable = YES;
+    DPOpenSidebarInstantly.on = NO;
+    NSLog(@"DiaPatches: Open Sidebar Instantly doesn't know this Dia's sidebar code, so it stays off");
+}
+
 static NSString *DPVerifyOpenSidebarInstantly(DPPatch *patch) {
     if (!patch->on && !DPSite) return nil;
     if (!DPSite) return @"the delay isn't where it was";
@@ -118,6 +121,7 @@ DP_PATCH(DPOpenSidebarInstantly) {
     .symbol = @"arrow.right.to.line.circle.fill arrow.right.to.line",
     .tint = @"systemTealColor",
     .section = @"Sidebar & Tab Bar",
+    .install = DPInstallOpenSidebarInstantly,
     .apply = DPApplyOpenSidebarInstantly,
     .verify = DPVerifyOpenSidebarInstantly,
 };

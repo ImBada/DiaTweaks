@@ -15,7 +15,6 @@ static uint32_t DPGrainRandom(uint32_t *state) {
     return *state;
 }
 
-// Each channel of a speck mostly follows the others, so the colour is a tint and not a rainbow.
 static float DPGrainNormal(uint32_t *state) {
     float value = 0;
     for (NSUInteger sample = 0; sample < 6; sample++) value += (DPGrainRandom(state) & 65535) / 65535.0f;
@@ -37,8 +36,6 @@ void DPBlurGrainPixels(uint8_t *pixels, NSInteger width, NSInteger height, NSUIn
     }
 }
 
-// Gives the tile the shared tone and spread, after a blur or resize has flattened them. The spread is of the
-// brightness, so independent colour noise gets a larger one per channel and looks as strong as grey noise.
 void DPFitGrainTone(uint8_t *pixels, NSUInteger count) {
     double mean[3] = {0}, sum = 0, square = 0;
     for (NSUInteger i = 0; i < count; i++) {

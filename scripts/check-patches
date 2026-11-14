@@ -1,5 +1,4 @@
 #!/bin/sh
-# Fails if Settings would show a tweak out of step with its neighbours. Run after make.
 set -eu
 cd "$(dirname "$0")/.."
 manifest=build/patches.json

@@ -1,8 +1,8 @@
 #import "Patches/Peek/Peek.h"
+#import "Commands/GroupTabs/GroupTabs.h"
 #import <objc/message.h>
 
 static NSMapTable *DPPeekFactories;
-static NSMapTable<NSWindow *, id> *DPPeekBrowsers;
 static __weak id DPPeekLastFactory;
 static id DPPeekWarmPage;
 static NSView *DPPeekWarmView;
@@ -26,11 +26,6 @@ static id DPBrowser_create(id self, SEL _cmd, id configuration) {
     return page;
 }
 
-static void DPBrowser_setWindow(id self, SEL _cmd, NSWindow *window) {
-    DPCallOriginal(DPBrowser_setWindow, self, window);
-    if (window) [DPPeekBrowsers setObject:self forKey:window];
-}
-
 static void DPPage_attach(id self, SEL _cmd, NSView *host) {
     for (NSWindow *window in NSApp.windows) {
         DPPeekCard *peek = (DPPeekCard *)DPFindView(window.contentView, ^BOOL(NSView *view) {
@@ -41,10 +36,10 @@ static void DPPage_attach(id self, SEL _cmd, NSView *host) {
     DPCallOriginal(DPPage_attach, self, host);
 }
 
-// Restored tabs' pages skip the hooked createWebContents, so they fall back to the window's browser.
+// Restored tabs' pages skip the hooked createWebContents, so they fall back to the window's browser for the profile in front.
 static id DPPeekFactoryFor(id source, NSWindow *window) {
     if (!source) return nil;
-    return [DPPeekFactories objectForKey:source] ?: (window ? [DPPeekBrowsers objectForKey:window] : nil) ?: DPPeekLastFactory;
+    return [DPPeekFactories objectForKey:source] ?: DPBrowserOfWindow(window) ?: DPPeekLastFactory;
 }
 
 BOOL DPPeekCanOpen(id source) { return DPPeekFactoryFor(source, NSApp.keyWindow) != nil; }
@@ -61,7 +56,6 @@ void DPPeekLoad(id page, NSURL *url) {
     if (url && [navigation respondsToSelector:load]) ((id (*)(id, SEL, NSURL *, NSURL *))objc_msgSend)(navigation, load, url, nil);
 }
 
-// Dia's default search engine for the profile the page belongs to, else Google.
 NSURL *DPPeekSearchURL(id page, NSString *text) {
     id factory = DPPeekFactoryFor(page, NSApp.keyWindow);
     id context = [factory respondsToSelector:@selector(preferences)] ? factory : [(NSObject *)factory valueForKey:@"context"];
@@ -73,16 +67,19 @@ NSURL *DPPeekSearchURL(id page, NSString *text) {
     if (![template isKindOfClass:NSString.class] || ![template containsString:@"{searchTerms}"] || [template containsString:@"{google:"])
         template = @"https://www.google.com/search?q={searchTerms}";
     template = [template stringByReplacingOccurrencesOfString:@"{searchTerms}" withString:query];
-    // Chromium's other placeholders, such as {inputEncoding}, mean nothing outside its omnibox.
     NSRegularExpression *rest = [NSRegularExpression regularExpressionWithPattern:@"\\{[^}]*\\}" options:0 error:nil];
     return [NSURL URLWithString:[rest stringByReplacingMatchesInString:template options:0 range:NSMakeRange(0, template.length) withTemplate:@""]];
 }
+
+BOOL DPPeekGiving;
 
 static BOOL DPPeekGive(id page, id delegate, id source, NSURL *url, DPPeekExit exit) {
     SEL adopt = @selector(webContents:didCreateNewWebContent:targetURL:disposition:);
     if (!page || !source || ![url isKindOfClass:NSURL.class] || ![delegate respondsToSelector:adopt]) return NO;
     NSInteger disposition = exit == DPPeekSplit ? DPSplitView : DPForegroundTab;
+    DPPeekGiving = YES;
     ((void (*)(id, SEL, id, id, NSURL *, NSInteger))objc_msgSend)(delegate, adopt, source, page, url, disposition);
+    DPPeekGiving = NO;
     return YES;
 }
 
@@ -128,7 +125,7 @@ static void DPPeekFindLink(NSWindow *window, id source, NSPoint origin, NSView *
     };
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.15 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ finish(fallback); });
     void (^answer)(NSString *, BOOL) = ^(NSString *result, BOOL ok) {
-        NSString *box = [result stringByTrimmingCharactersInSet:[NSCharacterSet characterSetWithCharactersInString:@"\""]];  // JSON-quoted
+        NSString *box = [result stringByTrimmingCharactersInSet:[NSCharacterSet characterSetWithCharactersInString:@"\""]];
         NSArray<NSString *> *parts = [box componentsSeparatedByString:@","];
         NSRect link = fallback;
         if (ok && parts.count == 4 && parts[2].doubleValue >= 1 && parts[3].doubleValue >= 1) {
@@ -225,8 +222,6 @@ void DPPeekOpen(NSWindow *window, NSURL *url, NSPoint origin, id delegate, id so
 
 void DPPeekInstallPages(void) {
     DPPeekFactories = [NSMapTable weakToWeakObjectsMapTable];
-    DPPeekBrowsers = [NSMapTable weakToWeakObjectsMapTable];
-    DPHook(DPDiaBrowser, @selector(setWindow:), (IMP)DPBrowser_setWindow);
     DPHook(DPDiaBrowserContext, @selector(createWebContents:), (IMP)DPContext_create);
     DPHook(DPDiaBrowser, @selector(createWebContents:), (IMP)DPBrowser_create);
     DPHook(DPDiaWebContents, @selector(attachToPaneHostView:), (IMP)DPPage_attach);

@@ -1,8 +1,6 @@
 #import "StdPatch/StdPatch.h"
 #include <spawn.h>
 
-// 1Password's helper turns the patched Dia away, so diapatch stands in and starts it through the original Dia.
-
 extern DPPatch DPOnePassword;
 
 static const char *DPDiapatch(void) {
@@ -15,7 +13,7 @@ static const char *DPDiapatch(void) {
 static int DPSpawn(pid_t *pid, const char *path, const posix_spawn_file_actions_t *files, const posix_spawnattr_t *attrs, char *const argv[], char *const envp[]) {
     const char *name = path ? strrchr(path, '/') : NULL;
     if (!name || strcmp(name, "/1Password-BrowserSupport")) return posix_spawn(pid, path, files, attrs, argv, envp);
-    // Started for the patched Dia itself, the helper turns it away, then waits for good, even after Dia quits.
+    // Refuse when off: a helper started for the patched Dia waits forever, even after Dia quits.
     if (!DPOnePassword.on) return ENOENT;
     int argc = 0;
     while (argv[argc]) argc++;

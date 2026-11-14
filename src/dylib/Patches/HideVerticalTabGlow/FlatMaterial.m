@@ -22,7 +22,6 @@ NSString *DPVerifyFlatTabMaterial(NSView *shape, BOOL on) {
     return nil;
 }
 
-// Material changes can create glass after layout, or move it out of a sidebar tab.
 static void DPGlass_viewDidMoveToSuperview(NSView *self, SEL _cmd) {
     DPCallOriginal(DPGlass_viewDidMoveToSuperview, self);
     for (NSView *up = self.superview; up; up = up.superview)

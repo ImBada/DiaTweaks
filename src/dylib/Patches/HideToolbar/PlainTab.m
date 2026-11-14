@@ -21,9 +21,8 @@ static CGFloat DPToolbarShowing(NSWindow *window) {
 
 static BOOL DPPlain(NSView *fill) { return DPPlainSelectedTab.on && DPHideToolbar.on && DPToolbarShowing(fill.window) < 0.01; }
 
-// Dia gives the selected tab an appearance that suits the site's color; a plain tab drops it, and it comes back with the color.
 static void DPPlainAppearance(NSView *fill, BOOL plain) {
-    NSView *tab = fill.superview.superview.superview.superview;  // tab, background, shape, flipped, fill
+    NSView *tab = fill.superview.superview.superview.superview;
     if (!DPIsKind(tab, DPDiaTabView)) return;
     for (NSView *part in tab.subviews) {
         NSAppearance *dia = DPGet(part, &DPAppearanceKey);
@@ -37,7 +36,6 @@ static void DPPlainAppearance(NSView *fill, BOOL plain) {
     }
 }
 
-// Dia sets the site's color here each time, so whatever's on the layer after it is Dia's.
 static void DPFill_updateLayer(NSView *self, SEL _cmd) {
     DPCallOriginal(DPFill_updateLayer, self);
     if (!self.layer.backgroundColor || !DPIsTabFill(self)) return;
@@ -47,7 +45,6 @@ static void DPFill_updateLayer(NSView *self, SEL _cmd) {
     CGFloat plain = DPPlainSelectedTab.on && DPHideToolbar.on ? 1 - DPToolbarShowing(self.window) : 0;
     DPPlainAppearance(self, plain > 0.5);
     if (plain <= 0) return;
-    // The strip's appearance, since a tab on a dark site color has a dark one of its own.
     NSView *strip = self;
     while (strip && !DPIsKind(strip, DPDiaTabStrip)) strip = strip.superview;
     __block NSColor *page;

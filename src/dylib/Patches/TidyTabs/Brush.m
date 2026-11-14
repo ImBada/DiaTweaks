@@ -1,6 +1,5 @@
 #import "TidyTabs.h"
 
-// SF Symbols has no broom.
 static NSImage *DPBroomImage(CGFloat size) {
     NSImage *image = [NSImage imageWithSize:NSMakeSize(size, size) flipped:YES drawingHandler:^BOOL(NSRect rect) {
         NSAffineTransform *tilt = [NSAffineTransform transform];
@@ -41,7 +40,6 @@ NSHashTable<DPTidyBrush *> *DPTidyBrushes(void) {
 
 BOOL DPTidyIsBusy(void) { return DPBrushesBusy; }
 
-// Busy keeps the row open; after, it follows the pointer again.
 void DPTidySetBusy(BOOL busy) {
     DPBrushesBusy = busy;
     for (DPTidyBrush *brush in DPTidyBrushes()) [brush showBusy];
@@ -84,12 +82,11 @@ void DPTidySetBusy(BOOL busy) {
 - (void)viewDidMoveToWindow {
     [super viewDidMoveToWindow];
     if (self.window) [self showBusy];
-    else DPSetHint(self, nil);  // Closes a bubble that would point at nothing.
+    else DPSetHint(self, nil);
 }
 
 - (void)restyle {
     [self.effectiveAppearance performAsCurrentDrawingAppearance:^{
-        // Plain matches Close All.
         if (self.plain) self.contentTintColor = self.hovered ? NSColor.secondaryLabelColor : NSColor.tertiaryLabelColor;
         else self.contentTintColor = self.hovered ? NSColor.labelColor : NSColor.secondaryLabelColor;
         self.layer.backgroundColor = self.hovered && !self.plain ? NSColor.quaternaryLabelColor.CGColor : NSColor.clearColor.CGColor;

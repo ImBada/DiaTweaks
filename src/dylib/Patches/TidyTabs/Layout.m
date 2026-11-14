@@ -1,5 +1,6 @@
 #import "TidyTabs.h"
 
+static const CGFloat DPTidyRowHeight = 24;
 static NSHashTable<NSView *> *DPTidyLists;
 static char DPScrollFrameKey;
 
@@ -8,7 +9,6 @@ NSScrollView *DPTidyListScroll(NSView *list) {
     return nil;
 }
 
-// Dia's scroll frame is kept so the next layout starts from it.
 static void DPTabList_layout(NSView *self, SEL _cmd) {
     DPCallOriginal(DPTabList_layout, self);
     [DPTidyLists addObject:self];
@@ -34,7 +34,6 @@ static void DPTabList_layout(NSView *self, SEL _cmd) {
     row.hidden = inset < 1;
 }
 
-// In window coordinates. Dia's divider shows the broom with Close All, so needs no zone.
 NSRect DPTidyHoverZone(NSView *list) {
     NSScrollView *scroll = DPTidyListScroll(list);
     if (!scroll || DPTidySeparatorIn(list)) return NSZeroRect;

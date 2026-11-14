@@ -3,7 +3,6 @@
 const char *const DPHideHostClasses[] = {DPDiaToolbar, DPDiaSidebarHeader, DPDiaSidebarFooter, DPDiaNewTabPage, NULL};
 static char DPGrownKey;
 
-// Dia centers the profile dots between the footer's buttons, so a hidden one pulls them off center.
 static void DPCenterSpaceSwitcher(NSView *footer) {
     NSView *switcher = DPSubview(footer, DPDiaSpaceSwitcher);
     BOOL patched = NO;
@@ -54,7 +53,6 @@ static void DPSidebar_viewDidLayout(NSViewController *self, SEL _cmd) {
     }
 }
 
-// The tab strip's buttons sit directly in its root view, beside the tabs.
 static void DPTabStrip_viewWillLayout(NSViewController *self, SEL _cmd) {
     [DPHideHosts addObject:self.view];
     for (NSView *sub in self.view.subviews) if (DPHider(sub)) DPEnforceHides(sub);

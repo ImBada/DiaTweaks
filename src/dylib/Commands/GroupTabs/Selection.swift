@@ -1,6 +1,5 @@
 import Foundation
 
-// The selection and each tab use this reader, and a UUID inside the description is the key, so the two match.
 private func DPIDText(_ value: Any?, _ depth: Int = 0) -> String? {
     guard let value, depth < 5 else { return nil }
     if let text = value as? String { return DPIDNormalized(text) }

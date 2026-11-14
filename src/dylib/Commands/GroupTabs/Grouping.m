@@ -1,8 +1,6 @@
 #import "GroupTabs.h"
 #import <objc/message.h>
 
-extern DPPatch DPGroupTabsMergeSubdomains;
-
 static void DPCollectPinned(NSMutableSet<NSNumber *> *sessions, NSMutableSet<NSString *> *pinnedURLs, NSMutableSet<NSString *> *openURLs) {
     id app = NSApp.delegate;
     if (![app respondsToSelector:@selector(appleScriptWindows)]) return;
@@ -37,7 +35,6 @@ static id DPGroupProperties(NSString *title) {
     return props;
 }
 
-// Cleared by the next key press, so Command-Z only undoes right after.
 static void (^DPUndoGrouping)(void);
 
 BOOL DPCanUndoGrouping(void) { return DPUndoGrouping != nil; }
@@ -50,7 +47,7 @@ static void DPArmUndo(void (^undo)(void)) {
             void (^undo)(void) = DPUndoGrouping;
             DPUndoGrouping = nil;
             NSEventModifierFlags mods = event.modifierFlags & (NSEventModifierFlagCommand | NSEventModifierFlagShift | NSEventModifierFlagOption | NSEventModifierFlagControl);
-            if (!undo || mods != NSEventModifierFlagCommand || ![event.charactersIgnoringModifiers isEqualToString:@"z"]) return event;
+            if (!undo || DPShortcutRecording() || mods != NSEventModifierFlagCommand || ![event.charactersIgnoringModifiers isEqualToString:@"z"]) return event;
             undo();
             return nil;
         }];

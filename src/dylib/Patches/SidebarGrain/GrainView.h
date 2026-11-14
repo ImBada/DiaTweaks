@@ -6,7 +6,6 @@
 - (void)reloadSettings;
 @end
 
-// Every texture tile has this average tone and spread, so one opacity gives each texture the same contrast.
 static const CGFloat DPGrainTone = 0.88, DPGrainSpread = 0.068;
 
 void DPBlurGrainPixels(uint8_t *pixels, NSInteger width, NSInteger height, NSUInteger passes);

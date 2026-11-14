@@ -18,7 +18,7 @@ static double DPPeekTuned(NSString *key) {
 }
 
 double DPPeekDarkness(void) { return DPPeekTuned(DPPeekDarknessKey); }
-double DPPeekResponse(void) { return 0.24 / MAX(0.1, DPPeekTuned(DPPeekSpeedKey)); }  // iOS's response at 100%.
+double DPPeekResponse(void) { return 0.24 / MAX(0.1, DPPeekTuned(DPPeekSpeedKey)); }
 BOOL DPPeekGenie(void) { return DPPeekTuned(DPPeekGenieKey) != 0; }
 BOOL DPPeekShowsToolbar(void) { return DPPeekTuned(DPPeekToolbarKey) != 0; }
 
@@ -82,10 +82,9 @@ static NSView *DPPeekSlider(NSString *title, NSString *key, double min, double m
     return row;
 }
 
-// Titled and described like the options Settings lists for a patch.
 static NSView *DPPeekSwitch(NSString *title, NSString *detail, NSString *key) {
     NSSwitch *toggle = [NSSwitch new];
-    toggle.controlSize = NSControlSizeSmall;  // As Settings' own switches.
+    toggle.controlSize = NSControlSizeSmall;
     toggle.state = DPPeekTuned(key) ? NSControlStateValueOn : NSControlStateValueOff;
     toggle.action = @selector(tune:);
     NSStackView *lines = DPColumn(@[DPLabel(title, 13, NSFontWeightRegular, NSColor.labelColor),
@@ -105,7 +104,7 @@ NSArray<NSView *> *DPPeekSettingsRows(void) {
     NSView *toolbar = DPPeekSwitch(@"Show Address Toolbar",
         @"Show back, forward, reload and the address across the top of the card, like Little Dia. It hides and shows with Hide Toolbar.",
         DPPeekToolbarKey);
-    toolbar.identifier = DPLeadingOption;  // Above Drag Links and Pinned Tabs.
+    toolbar.identifier = DPLeadingOption;
     return @[
         toolbar,
         DPPeekSwitch(@"Genie Effect", @"Grow the card out of the link you clicked, and shrink it back into it as it closes.", DPPeekGenieKey),

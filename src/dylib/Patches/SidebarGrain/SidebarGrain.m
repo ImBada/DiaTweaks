@@ -10,7 +10,6 @@ static void DPGrainStripDidLayout(NSViewController *self, SEL _cmd) {
     DPTrackGrainHost(self.view);
 }
 
-// The profile switched: each window shows its own profile's grain.
 static void DPGrainSwitcherItemDidUpdate(NSView *self, SEL _cmd) {
     DPCallOriginal(DPGrainSwitcherItemDidUpdate, self);
     if ([DPSwiftValue(self, @"isSelected") boolValue]) DPRefreshSidebarGrain();
@@ -21,14 +20,12 @@ static void DPGrainDotDidLayout(NSView *self, SEL _cmd) {
     DPRefreshSidebarGrain();
 }
 
-// At the top, the profile switched when its dot is redrawn as selected.
 static void DPGrainDotDidUpdate(NSView *self, SEL _cmd) {
     DPCallOriginal(DPGrainDotDidUpdate, self);
     if ([DPSwiftValue(self, @"isSelected") boolValue]) DPRefreshSidebarGrain();
 }
 
 static void DPInstallSidebarGrain(void) {
-    DPGrainHosts = [NSHashTable weakObjectsHashTable];
     [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskRightMouseDown handler:^NSEvent *(NSEvent *event) {
         return DPGrainRightClick(event);
     }];
