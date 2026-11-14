@@ -494,8 +494,11 @@ static void DPPresentCommandBar(NSView *page, BOOL overBlank) {
     }];
     if (!overlay.returnTab) return;
     // Dia can still be showing the new tab when it adds the page, and focusing another tab then crashes it (index out of range).
-    // A run loop block runs once Dia is done but before the window draws, so the new tab never shows.
-    CFRunLoopPerformBlock(CFRunLoopGetMain(), kCFRunLoopCommonModes, ^{ if (weak.superview) DPGoBack(weak); });
+    // A run loop block runs once Dia is done; a transaction held open until it has gone back keeps the new tab from being drawn.
+    [CATransaction begin];
+    CFRunLoopPerformBlock(CFRunLoopGetMain(), kCFRunLoopCommonModes, ^{
+        @try { if (weak.superview) DPGoBack(weak); } @finally { [CATransaction commit]; }
+    });
     CFRunLoopWakeUp(CFRunLoopGetMain());
 }
 
