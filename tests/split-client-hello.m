@@ -125,7 +125,13 @@ static void DPCheckSend(NSData *hello) {
     NSCAssert(handled, @"splits on a fresh TCP socket");
     fcntl(client, F_SETFL, O_NONBLOCK);
     char filler[4096] = { 0 };
-    while (send(client, filler, sizeof filler, 0) > 0) {}
+    // The peer keeps draining what is in flight after the first EAGAIN, so top up until a pause adds nothing.
+    for (ssize_t added = 1; added;) {
+        usleep(20000);
+        added = 0;
+        for (size_t chunk = sizeof filler; chunk; chunk = chunk > 1)
+            for (ssize_t sent; (sent = send(client, filler, chunk, 0)) > 0;) added += sent;
+    }
     DPSendScripted(client, hello, true, 0, NULL, &handled);
     NSCAssert(!handled && gCalls == 0, @"leaves it whole when the send buffer is full");
     close(peer), close(client), close(server);
