@@ -2,12 +2,11 @@
 #import "Patches/HideToolbar/Layout.m"
 #import "Patches/HideToolbar/HideToolbar.m"
 #import "Patches/HideToolbar/Hover.m"
-#import "Patches/HideToolbar/CopyToast.m"
 #import "Patches/HideToolbar/RevealOnHover.m"
 #import "Patches/HideToolbar/ShowWithSidebar.m"
 #import "Patches/HideToolbar/ShowOnNewTab.m"
 
-DPPatch DPSidebarAddressBar, DPSidebarComfortableSpacing, DPPlainSelectedTab, DPPeekToolbarOnCopy, DPCopyToast;
+DPPatch DPSidebarAddressBar, DPSidebarComfortableSpacing, DPPlainSelectedTab;
 static BOOL available = YES, docked = YES, flipped = YES;
 static NSMutableArray *launch;
 BOOL DPSidebarAddressRowAvailable(NSWindow *window) { return available && DPSidebarAddressBar.on; }
@@ -63,7 +62,7 @@ int main(void) { @autoreleasepool {
             NSCAssert(!DPSidebarVerifyToolbar(), @"replacement verifier must check actual geometry");
         }
         DPToolbarHover *hover = [DPToolbarHover forPane:pane];
-        [hover peek]; NSCAssert(!hover.peeking && !hover.tracking, @"no hover or duplicate copy reveal");
+        NSCAssert(!hover.tracking, @"no hover tracking on the replacement");
         [(id)hover reset]; NSCAssert(DPTop(pane,page.frame) == 20, @"focus loss preserves replacement layout");
         page.frame = NSOffsetRect(page.frame,0,5);
         NSCAssert(DPSidebarVerifyToolbar(), @"verification detects broken page geometry");

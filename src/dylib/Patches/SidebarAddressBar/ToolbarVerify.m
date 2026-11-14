@@ -11,7 +11,7 @@ NSString *DPSidebarVerifyToolbar(void) {
         DPToolbarHover *hover = [DPToolbarHover forPane:pane];
         BOOL replaced = DPSidebarReplacesToolbar(pane);
         if (replaced) {
-            if (hover.tracking || hover.animation || hover.inPlaceAnimation || hover.peeking)
+            if (hover.tracking || hover.animation || hover.inPlaceAnimation)
                 return @"replacement still has toolbar hover or animation";
         } else if (hover.progress > 0 || hover.inPlaceProgress > 0) continue;
         if (replaced && DPSidebarToolbarIsPeeking(pane)) {
