@@ -3,7 +3,6 @@
 
 #define DPDiaCapabilitiesToolbar "_TtC23AssistantCapabilitiesUI32AssistantCapabilitiesToolbarView"
 #define DPDiaTabCardActions      "_TtC5TabUI21TabPopoverActionsView"
-#define DPDiaSettingsHeader      "_TtC11Preferences25SettingsSectionHeaderView"
 #define DPDiaPlaceholderText     "_TtC5ARCUI23TextViewWithPlaceholder"
 #define DPDiaChatSidebar         "_TtC6Window30AssistantSidebarViewController"
 

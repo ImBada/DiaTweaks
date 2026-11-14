@@ -70,6 +70,7 @@ body:
         - Window Corners
         - App Icon
         - Hide Window Controls
+        - Skip Account
         - Allow 1Password
         - Allow Bitwarden
         - Allow iCloud Passkeys
