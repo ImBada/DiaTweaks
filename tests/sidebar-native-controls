@@ -1,0 +1,9 @@
+#!/bin/sh
+set -eu
+cd "$(dirname "$0")/.."
+mkdir -p build
+clang -fobjc-arc -Isrc/dylib -framework AppKit -framework QuartzCore \
+    tests/sidebar-native-controls.m src/dylib/Patches/SidebarAddressBar/NativeSlot.m \
+    src/dylib/Patches/SidebarAddressBar/NativeHooks.m src/dylib/StdPatch/Views.m src/dylib/StdPatch/Hook.m \
+    -o build/sidebar-native-controls-checks
+exec build/sidebar-native-controls-checks
