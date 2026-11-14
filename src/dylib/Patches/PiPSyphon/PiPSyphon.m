@@ -3,23 +3,17 @@
 #import <IOSurface/IOSurface.h>
 #import <Metal/Metal.h>
 #import <objc/message.h>
-#include <dlfcn.h>
+#import <Syphon/SyphonMetalServer.h>
 
 // Personal and experimental. Chromium normally shows PiP video through a CALayerHost that points into its GPU process,
 // so Dia's own process never sees a pixel. With RemoteCoreAnimationAPI off, Chromium hands every composited frame to
 // Dia as an IOSurface that it sets as a layer's contents. This catches those frames and publishes them through Syphon.
-// The server starts with Dia and stays up between PiPs, so Syphon clients keep their connection.
+// The server starts with Dia and stays up between PiPs, so Syphon clients keep their connection. Syphon's server
+// code is built in from src/vendor/Syphon.
 
 #define DPPiPWindowContent "_TtC16PictureInPicture16PIPWindowContent"
 #define DPPiPController "ArcWebContentsMediaSessionPiPController"
-#define DPSyphonPath "/Library/Frameworks/Syphon.framework/Syphon"
 #define DPFramePrefix "DPPiPFrameLayer_"
-
-@protocol DPSyphonMetalServer <NSObject>
-- (id)initWithName:(NSString *)name device:(id<MTLDevice>)device options:(NSDictionary *)options;
-- (void)publishFrameTexture:(id<MTLTexture>)texture onCommandBuffer:(id<MTLCommandBuffer>)buffer imageRegion:(NSRect)region flipped:(BOOL)flipped;
-- (void)stop;
-@end
 
 extern DPPatch DPPiPSyphon;
 
@@ -31,7 +25,7 @@ static Class gFrameBase;
 static NSTimer *gPollTimer, *gWatchTimer;
 static id<MTLDevice> gDevice;
 static id<MTLCommandQueue> gQueue;
-static id<DPSyphonMetalServer> gServer;
+static SyphonMetalServer *gServer;
 static NSMutableDictionary<NSNumber *, id<MTLTexture>> *gTextures;
 static BOOL gFlip;
 
@@ -46,14 +40,9 @@ static BOOL DPEnsureServer(void) {
     static BOOL failed;
     if (failed) return NO;
     failed = YES;
-    if (!dlopen(DPSyphonPath, RTLD_NOW)) {
-        NSLog(@"DiaPatches: can't load Syphon: %s", dlerror());
-        return NO;
-    }
     gDevice = gDevice ?: MTLCreateSystemDefaultDevice();
     gQueue = gQueue ?: [gDevice newCommandQueue];
-    Class server = NSClassFromString(@"SyphonMetalServer");
-    gServer = server && gQueue ? [(id<DPSyphonMetalServer>)[server alloc] initWithName:@"PiP" device:gDevice options:nil] : nil;
+    gServer = gQueue ? [[SyphonMetalServer alloc] initWithName:@"PiP" device:gDevice options:nil] : nil;
     if (!gServer) {
         NSLog(@"DiaPatches: can't start a Syphon server");
         return NO;
@@ -270,7 +259,7 @@ DP_PATCH(DPPiPSyphon) {
     .order = 113,
     .section = @"Picture in Picture",
     .title = @"Send PiP to Syphon",
-    .detail = @"Publish the Picture in Picture video as a Syphon server named PiP, which stays up between videos. Needs Syphon.framework in /Library/Frameworks. While on, Dia renders without remote Core Animation, which costs power. Experimental.",
+    .detail = @"Publish the Picture in Picture video as a Syphon server named PiP, which stays up between videos. While on, Dia renders without remote Core Animation, which costs power. Experimental.",
     .symbol = @"pip",
     .tint = @"systemRedColor",
     .install = DPInstallPiPSyphon,
