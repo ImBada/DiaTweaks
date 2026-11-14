@@ -37,6 +37,7 @@
 #define DPDiaTabSwitcher        "_TtC10RecentTabs26RecentTabsWindowController"
 #define DPDiaTabSwitcherList    "_TtC10RecentTabs24RecentTabsViewController"
 #define DPDiaSettingsController "_TtC11Preferences38SidebarPreferencesWindowViewController"
+#define DPDiaSettingsHeader     "_TtC11Preferences25SettingsSectionHeaderView"
 #define DPDiaSettingsSidebar    "_TtC11Preferences15SidebarListView"
 #define DPDiaSpaceSwitcher      "_TtC10TabSidebar17SpaceSwitcherView"
 #define DPDiaSpaceSwitcherItem  "_TtC10TabSidebar21SpaceSwitcherItemView"
