@@ -71,7 +71,7 @@ static NSView *DPSelectedTab(NSWindow *window) {
 // Only while it's still on the page it was pinned at, so a tab selected meanwhile keeps its own.
 static void DPPinCurrentURL(NSWindow *window, NSURL *url, int tries) {
     NSView *tab = DPSelectedTab(window);
-    DPHeld NSMenu *menu = tab && (!url || [DPTabURL(tab) isEqual:url]) ? DPTabMenu(tab) : nil;
+    DPHeld NSMenu *menu = tab && [DPTabURL(tab) isEqual:url] ? DPTabMenu(tab) : nil;
     if (DPShownItem([menu itemWithTitle:@"Unpin"])) {
         NSMenuItem *replace = DPFindShownItem(menu, @"Replace Pinned URL with Current");
         if (replace) DPRunItem(replace);
@@ -94,7 +94,7 @@ static void DPInstallPinTabShortcut(void) {
         BOOL pinning = [item.title isEqualToString:@"Pin as Tab"];
         NSURL *url = DPTabURL(tab);
         DPRunItem(item);
-        if (pinning) DPPinCurrentURL(event.window, url, 20);
+        if (pinning && url) DPPinCurrentURL(event.window, url, 20);
         return nil;
     }];
 }
