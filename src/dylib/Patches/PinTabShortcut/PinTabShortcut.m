@@ -19,19 +19,38 @@ static BOOL DPTabShown(NSView *tab) {
     return YES;
 }
 
-// The item doesn't keep its menu, so it runs before the menu goes.
-static BOOL DPPinTab(NSView *tab, BOOL run) {
+static NSMenu *DPTabMenu(NSView *tab) {
     NSPoint point = [tab convertPoint:NSMakePoint(NSMidX(tab.bounds), NSMidY(tab.bounds)) toView:nil];
     NSEvent *click = [NSEvent mouseEventWithType:NSEventTypeRightMouseDown location:point modifierFlags:0 timestamp:NSProcessInfo.processInfo.systemUptime
                                     windowNumber:tab.window.windowNumber context:nil eventNumber:0 clickCount:1 pressure:1];
-    NSMenu *menu = [tab menuForEvent:click];
-    for (NSString *title in @[ @"Pin as Tab", @"Unpin" ]) {
-        NSMenuItem *item = [menu itemWithTitle:title];
-        if (!item || item.hidden || !item.enabled) continue;
-        if (run) [menu performActionForItemAtIndex:[menu indexOfItem:item]];
-        return YES;
+    return [tab menuForEvent:click];
+}
+
+static NSMenuItem *DPShownItem(NSMenuItem *item) { return item && !item.hidden && item.enabled ? item : nil; }
+
+// Pin as Tab and Unpin are at the top of the menu, so an item of the same name in a submenu isn't taken for them.
+static NSMenuItem *DPPinItem(NSMenu *menu) {
+    return DPShownItem([menu itemWithTitle:@"Pin as Tab"]) ?: DPShownItem([menu itemWithTitle:@"Unpin"]);
+}
+
+static NSMenuItem *DPFindShownItem(NSMenu *menu, NSString *title) {
+    for (NSMenuItem *item in menu.itemArray) {
+        if (item.hidden) continue;
+        NSMenuItem *found = [item.title isEqualToString:title] ? DPShownItem(item) : DPFindShownItem(item.submenu, title);
+        if (found) return found;
     }
-    return NO;
+    return nil;
+}
+
+// An item only points to its menu weakly, so whoever finds it holds the menu with DPHeld until it has run.
+#define DPHeld __attribute__((objc_precise_lifetime))
+static void DPRunItem(NSMenuItem *item) { [item.menu performActionForItemAtIndex:[item.menu indexOfItem:item]]; }
+
+// The page a tab shows, or nil when it shows more than one.
+static NSURL *DPTabURL(NSView *tab) {
+    NSDictionary *views = DPSwiftValue(tab, @"contentViews");
+    if (views.count != 1) return nil;
+    return DPSwiftValue(DPSwiftValue(DPSwiftValue(views.allValues.firstObject, @"viewModel"), @"delegate"), @"webContentURL");
 }
 
 static NSArray<NSView *> *DPShownTabs(NSWindow *window) {
@@ -47,11 +66,36 @@ static NSView *DPSelectedTab(NSWindow *window) {
     return nil;
 }
 
+// Dia keeps the URL a tab was first pinned at through Unpin, and Pin as Tab doesn't replace it, so a tab pinned again
+// went back to that page when closed. Once the tab is among the pinned ones, the page it's on becomes its pinned URL.
+// Only while it's still on the page it was pinned at, so a tab selected meanwhile keeps its own.
+static void DPPinCurrentURL(NSWindow *window, NSURL *url, int tries) {
+    NSView *tab = DPSelectedTab(window);
+    DPHeld NSMenu *menu = tab && (!url || [DPTabURL(tab) isEqual:url]) ? DPTabMenu(tab) : nil;
+    if (DPShownItem([menu itemWithTitle:@"Unpin"])) {
+        NSMenuItem *replace = DPFindShownItem(menu, @"Replace Pinned URL with Current");
+        if (replace) DPRunItem(replace);
+    } else if (tries > 0) {
+        __weak NSWindow *weakWindow = window;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 20), dispatch_get_main_queue(), ^{
+            if (weakWindow) DPPinCurrentURL(weakWindow, url, tries - 1);
+        });
+    }
+}
+
 static void DPInstallPinTabShortcut(void) {
     [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskKeyDown handler:^NSEvent *(NSEvent *event) {
         if (!DPPinTabShortcut.on || !event.window || !DPShortcutMatches(event, &DPPinTabShortcut)) return event;
         NSView *tab = DPSelectedTab(event.window);
-        return tab && DPPinTab(tab, !event.isARepeat) ? nil : event;
+        DPHeld NSMenu *menu = tab ? DPTabMenu(tab) : nil;
+        NSMenuItem *item = DPPinItem(menu);
+        if (!item) return event;
+        if (event.isARepeat) return nil;
+        BOOL pinning = [item.title isEqualToString:@"Pin as Tab"];
+        NSURL *url = DPTabURL(tab);
+        DPRunItem(item);
+        if (pinning) DPPinCurrentURL(event.window, url, 20);
+        return nil;
     }];
 }
 
@@ -59,7 +103,7 @@ static NSString *DPVerifyPinTabShortcut(DPPatch *patch) {
     NSArray<NSView *> *tabs = DPShownTabs(nil);
     if (!patch->on || !tabs.count) return nil;
     for (NSView *tab in tabs)
-        if (DPPinTab(tab, NO)) return nil;
+        if (DPPinItem(DPTabMenu(tab))) return nil;
     return @"no tab's menu has Pin as Tab or Unpin";
 }
 
