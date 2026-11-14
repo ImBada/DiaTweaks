@@ -492,7 +492,11 @@ static void DPPresentCommandBar(NSView *page, BOOL overBlank) {
     overlay.watch = [NSTimer scheduledTimerWithTimeInterval:1 repeats:YES block:^(NSTimer *timer) {
         if (weak) DPWatchNewTab(weak); else [timer invalidate];
     }];
-    if (overlay.returnTab) DPGoBack(overlay);
+    if (!overlay.returnTab) return;
+    // Dia can still be showing the new tab when it adds the page, and focusing another tab then crashes it (index out of range).
+    // A run loop block runs once Dia is done but before the window draws, so the new tab never shows.
+    CFRunLoopPerformBlock(CFRunLoopGetMain(), kCFRunLoopCommonModes, ^{ if (weak.superview) DPGoBack(weak); });
+    CFRunLoopWakeUp(CFRunLoopGetMain());
 }
 
 static BOOL DPOpenOverBlank(NSWindow *window) {
