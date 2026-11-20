@@ -684,7 +684,8 @@ static BOOL purge(void) {
     for (NSString *name in @[ @"bin", @DYLIB, @"patches.json", @"release.plist", @"pristine", @"staged", @"identity", @"diapatch.log", @"safe-mode.plist",
                               @".diatweaks.lock", @".incoming", @"icons", @"app-icons", @"passwords-helper", @"passwords.sock", @"onepassword.sock", @"passwords-launch",
                               @"passkey-helper", @"passkey-helper.lock", @"passkeys-extension", @"unpatchable.plist",
-                              @"methods.txt", @"views.txt", @"layout-loops.txt" ])
+                              @"methods.txt", @"views.txt", @"layout-loops.txt",
+                              @"ublock-origin", @"ublock-origin.next", @"ublock-origin.next.partial" ])
         if (!discard(inHome(name))) return NO;
     for (NSString *name in [NSFileManager.defaultManager contentsOfDirectoryAtPath:gHome error:NULL])
         if (([name hasPrefix:@".update-"] || [name hasPrefix:@"little-dia-"]) && !removeTree(inHome(name))) return NO;
