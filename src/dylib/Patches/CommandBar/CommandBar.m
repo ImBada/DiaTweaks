@@ -766,12 +766,25 @@ static BOOL DPResponderInSidePanel(id responder) {
     return NO;
 }
 
-static BOOL DPVisiblePeekTakesCommandL(NSWindow *window) {
+static NSView *DPVisiblePeek(NSWindow *window) {
     Class card = NSClassFromString(@"DPPeekCard");
-    if (!card || DPResponderInSidePanel(window.firstResponder)) return NO;
-    NSView *peek = DPFindView(window.contentView, ^BOOL(NSView *view) {
-        return [view isKindOfClass:card] && !view.isHiddenOrHasHiddenAncestor;
-    });
+    return card ? DPFindView(window.contentView, ^BOOL(NSView *view) { return [view isKindOfClass:card] && !view.isHiddenOrHasHiddenAncestor; }) : nil;
+}
+
+// Typing belongs to another field when text outside the blank tab, or a Side Chat or Peek page, has the keyboard.
+static BOOL DPTypingElsewhere(NSWindow *window) {
+    NSResponder *responder = window.firstResponder;
+    if (![responder isKindOfClass:NSView.class]) return NO;
+    NSView *view = (NSView *)responder, *blank = DPBlankPage(window);
+    if (blank && [view isDescendantOf:blank]) return NO;
+    if ([view isKindOfClass:NSText.class] || DPResponderInSidePanel(view)) return YES;
+    NSView *peek = DPVisiblePeek(window);
+    return peek && [view isDescendantOf:peek];
+}
+
+static BOOL DPVisiblePeekTakesCommandL(NSWindow *window) {
+    if (DPResponderInSidePanel(window.firstResponder)) return NO;
+    NSView *peek = DPVisiblePeek(window);
     if (!peek) return NO;
     SEL closingSel = NSSelectorFromString(@"closing"), toolbarSel = NSSelectorFromString(@"toolbar");
     if ([peek respondsToSelector:closingSel] && ((BOOL (*)(id, SEL))objc_msgSend)(peek, closingSel)) return NO;
@@ -788,7 +801,7 @@ static NSEvent *DPCommandBarKey(NSEvent *event) {
     if (blanks.count && DPHiding() && !(mods & (NSEventModifierFlagCommand | NSEventModifierFlagControl))
         && !DPGet(window, &DPOverlayKey) && event.characters.length) {
         unichar ch = [event.characters characterAtIndex:0];
-        if (ch >= 0x20 && ch != 0x7f && [blanks containsObject:DPActiveTabID(window)]) {
+        if (ch >= 0x20 && ch != 0x7f && [blanks containsObject:DPActiveTabID(window)] && !DPTypingElsewhere(window)) {
             DPOpenOverBlank(window);
             return event;
         }

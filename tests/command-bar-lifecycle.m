@@ -2,6 +2,9 @@
 #import <QuartzCore/QuartzCore.h>
 #import "Patches/CommandBar/CommandBar.m"
 
+static BOOL gHiding;
+static NSString *gActiveTab;
+static int gOpenAttempts;
 static int gCleanHideTabCalls, gUpdateSpareTimerCalls, gForgetSpareCalls, gDropSpareCalls, gClearCatchUpCalls, gFinishHandOverCalls, gCancelPopoverCalls, gHandToDiaCalls;
 static DPCommandBarOverlay *gHandedOver;
 static NSString *gChoice = @"macos";
@@ -10,9 +13,9 @@ static NSArray<NSWindow *> *gWindows;
 NSString *DPChoice(DPPatch *patch) { return gChoice; }
 void DPInstallAutoPipHold(void) {}
 void DPHoldAutoPip(void) {}
-BOOL DPHiding(void) { return NO; }
+BOOL DPHiding(void) { return gHiding; }
 void DPExpectNewTab(NSWindow *window) {}
-void DPStopExpecting(void) {}
+void DPStopExpecting(void) { gOpenAttempts++; }
 void DPHideTabRow(NSString *tabID, NSWindow *window) {}
 void DPShowTabRow(NSString *tabID, BOOL closing) {}
 BOOL DPHidesTab(NSString *tabID) { return NO; }
@@ -52,7 +55,7 @@ id DPScriptWindow(NSWindow *window) { return nil; }
 id DPScriptTab(NSWindow *window, NSString *tabID) { return nil; }
 id DPScriptTabIn(id scriptWindow, NSString *tabID) { return nil; }
 NSString *DPTabID(id tab) { return tab ? [tab description] : nil; }
-NSString *DPActiveTabID(NSWindow *window) { return nil; }
+NSString *DPActiveTabID(NSWindow *window) { return gActiveTab; }
 NSString *DPActiveTabIDIn(id scriptWindow) { return nil; }
 void DPFocusTab(id tab) {}
 void DPCloseTab(id tab) {}
@@ -113,6 +116,11 @@ static NSEvent *DPKey(NSWindow *window, NSString *ch, unsigned short code) {
     return [NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:NSEventModifierFlagCommand
                            timestamp:1 windowNumber:window.windowNumber context:nil
                           characters:ch charactersIgnoringModifiers:ch isARepeat:NO keyCode:code];
+}
+
+static NSEvent *DPTyped(NSWindow *window, NSString *chars, NSEventModifierFlags mods) {
+    return [NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:mods timestamp:1 windowNumber:window.windowNumber
+                             context:nil characters:chars charactersIgnoringModifiers:chars isARepeat:NO keyCode:0];
 }
 
 static int failures;
@@ -243,6 +251,87 @@ int main(void) {
         browser.fakeResponder = nil;
         [sideChat removeFromSuperview];
         [peekCard removeFromSuperview];
+
+        // 7. Regression: typing on a blank tab opens the bar, but typing in another field (rename, Find, Side Chat, Peek) is left alone.
+        NSView *blankPage = [[ntpCls alloc] initWithFrame:browser.contentView.bounds];
+        [browser.contentView addSubview:blankPage];
+        DPSet(blankPage, &DPBlankKey, @YES);
+        [DPBlanks(browser) addObject:@"blank-tab"];
+        gActiveTab = @"blank-tab";
+        gHiding = YES;
+        NSTextView *rename = [[NSTextView alloc] initWithFrame:NSMakeRect(0, 0, 100, 20)];
+        [browser.contentView addSubview:rename];
+        NSTextView *blankText = [[NSTextView alloc] initWithFrame:NSMakeRect(0, 0, 100, 20)];
+        [blankPage addSubview:blankText];
+        NSView *plain = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 100, 20)];
+        [browser.contentView addSubview:plain];
+        NSEvent *typed = DPTyped(browser, @"a", 0);
+        int before = gOpenAttempts;
+        browser.fakeResponder = nil;
+        CHECK(DPCommandBarKey(typed) == typed && gOpenAttempts == before + 1, "typing with nothing focused opens the bar over the blank tab");
+        browser.fakeResponder = plain;
+        before = gOpenAttempts;
+        DPCommandBarKey(typed);
+        CHECK(gOpenAttempts == before + 1, "typing with a non-text view focused still opens the bar");
+        browser.fakeResponder = blankText;
+        before = gOpenAttempts;
+        DPCommandBarKey(typed);
+        CHECK(gOpenAttempts == before + 1, "typing in the blank tab's own text still opens the bar");
+        browser.fakeResponder = rename;
+        before = gOpenAttempts;
+        CHECK(DPCommandBarKey(typed) == typed && gOpenAttempts == before, "typing in a rename field doesn't open the bar");
+        NSTextField *label = [NSTextField textFieldWithString:@""];
+        NSTextView *fieldEditor = [[NSTextView alloc] initWithFrame:NSMakeRect(0, 0, 100, 20)];
+        fieldEditor.fieldEditor = YES;
+        fieldEditor.delegate = (id)label;
+        [browser.contentView addSubview:fieldEditor];
+        browser.fakeResponder = fieldEditor;
+        DPCommandBarKey(typed);
+        CHECK(gOpenAttempts == before, "typing in a text field's editor doesn't open the bar");
+        [fieldEditor removeFromSuperview];
+        NSView *sideChatInput = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 100, 20)];
+        _TtC20AssistantPanelUIBase22AssistantPanelRootView *chatPanel =
+            [[_TtC20AssistantPanelUIBase22AssistantPanelRootView alloc] initWithFrame:NSMakeRect(0, 0, 200, 400)];
+        [chatPanel addSubview:sideChatInput];
+        [browser.contentView addSubview:chatPanel];
+        browser.fakeResponder = sideChatInput;
+        DPCommandBarKey(typed);
+        CHECK(gOpenAttempts == before, "typing in a Side Chat page doesn't open the bar");
+        [chatPanel removeFromSuperview];
+        DPPeekCard *typingPeek = [[DPPeekCard alloc] initWithFrame:browser.contentView.bounds];
+        NSView *peekPage = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 100, 20)];
+        [typingPeek addSubview:peekPage];
+        [browser.contentView addSubview:typingPeek];
+        browser.fakeResponder = peekPage;
+        DPCommandBarKey(typed);
+        CHECK(gOpenAttempts == before, "typing in a visible Peek page doesn't open the bar");
+        typingPeek.hidden = YES;
+        DPCommandBarKey(typed);
+        CHECK(gOpenAttempts == before + 1, "a hidden Peek doesn't swallow typing on the blank tab");
+        [typingPeek removeFromSuperview];
+        browser.fakeResponder = nil;
+        before = gOpenAttempts;
+        DPCommandBarKey(DPTyped(browser, @"a", NSEventModifierFlagCommand));
+        DPCommandBarKey(DPTyped(browser, @"a", NSEventModifierFlagControl));
+        DPCommandBarKey(DPTyped(browser, @"\x1b", 0));
+        DPCommandBarKey(DPTyped(browser, @"\x7f", 0));
+        CHECK(gOpenAttempts == before, "shortcuts and control characters don't open the bar");
+        DPCommandBarKey(DPTyped(browser, @"å", NSEventModifierFlagOption));
+        CHECK(gOpenAttempts == before + 1, "Option-typed characters still open the bar");
+        before = gOpenAttempts;
+        gActiveTab = @"other-tab";
+        DPCommandBarKey(typed);
+        gActiveTab = @"blank-tab";
+        gHiding = NO;
+        DPCommandBarKey(typed);
+        gHiding = YES;
+        CHECK(gOpenAttempts == before, "typing doesn't open the bar off the blank tab or with Hide New Tab off");
+        [blankPage removeFromSuperview];
+        [rename removeFromSuperview];
+        [plain removeFromSuperview];
+        [DPBlanks(browser) removeAllObjects];
+        gHiding = NO;
+        gActiveTab = nil;
 
         if (failures) return 1;
         puts("PASS: CommandBar key-window guard, dealloc/window-close cleanup, and off-tweak teardown");
