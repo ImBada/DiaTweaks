@@ -253,7 +253,7 @@ static NSEvent *KeyEvent(NSWindow *window, NSString *chars, unsigned short code,
 static void DrainMain(void) {
     __block BOOL drained = NO;
     dispatch_async(dispatch_get_main_queue(), ^{ drained = YES; });
-    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:1.0];
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:30];
     while (!drained && deadline.timeIntervalSinceNow > 0)
         [NSRunLoop.mainRunLoop runMode:NSDefaultRunLoopMode beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
 }

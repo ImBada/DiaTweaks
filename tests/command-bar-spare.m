@@ -202,6 +202,13 @@ static DPCommandBarOverlay *DPMakeOverlay(NSWindow *window, DPFakeTab *opened, D
 static int failures;
 #define CHECK(cond, msg) do { if (!(cond)) { printf("FAIL: %s\n", msg); failures++; } } while (0)
 
+// Spins the main run loop until the condition holds, so a slow runner can't end the wait before an animation or timer lands.
+static void PumpUntil(BOOL (^done)(void)) {
+    NSDate *limit = [NSDate dateWithTimeIntervalSinceNow:30];
+    while (!done() && limit.timeIntervalSinceNow > 0)
+        [NSRunLoop.mainRunLoop runMode:NSDefaultRunLoopMode beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
+}
+
 int main(void) {
     @autoreleasepool {
         [NSApplication sharedApplication];
@@ -298,7 +305,7 @@ int main(void) {
         CHECK(DPParkSpare(DPMakeOverlay(winA, spareA3, pageA)), "parks spareA3");
         swA.activeTab = spareA3;
         CHECK(DPAdoptSpare(winA, pageView), "adopts spareA3");
-        [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.38]];
+        PumpUntil(^BOOL { return spareA3.closed; });
         CHECK(spareA3.closed, "adopt timer closes an unused empty spare in a multi-tab space");
         [profA.appleScriptTabs removeObject:spareA2];
         [profA.appleScriptTabs removeObject:spareA3];

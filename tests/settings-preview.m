@@ -25,6 +25,17 @@ static void expect(BOOL ok, NSString *what) {
     fprintf(stderr, "FAIL %s\n", what.UTF8String);
 }
 
+// The main queue is FIFO, so once the sentinel runs, every block queued before it has run too, however long a slow runner stalls.
+static void DrainMainQueue(NSTimeInterval seconds) {
+    NSDate *until = [NSDate dateWithTimeIntervalSinceNow:seconds];
+    __block BOOL drained = NO;
+    dispatch_async(dispatch_get_main_queue(), ^{ drained = YES; });
+    NSDate *limit = [NSDate dateWithTimeIntervalSinceNow:30];
+    while (!drained && limit.timeIntervalSinceNow > 0)
+        [NSRunLoop.mainRunLoop runMode:NSDefaultRunLoopMode beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
+    [NSRunLoop.mainRunLoop runUntilDate:until];
+}
+
 static void writeSolidPNG(NSURL *url, size_t width, size_t height) {
     CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
     CGContextRef ctx = CGBitmapContextCreate(NULL, width, height, 8, width * 4, cs, (CGBitmapInfo)kCGImageAlphaPremultipliedLast);
@@ -79,7 +90,7 @@ int main(void) {
             [NSNotificationCenter.defaultCenter postNotificationName:NSWindowWillCloseNotification object:win];
             [win close];
         }
-        [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.05]];
+        DrainMainQueue(0.05);
         expect(weakPreview == nil, @"DPPreviewView deallocates without NSTimer/CADisplayLink retain cycle");
 
         // 4. DPFetchPreview handles empty list and offline/unreachable URL cleanly without crashing.

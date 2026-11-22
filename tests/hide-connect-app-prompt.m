@@ -208,8 +208,15 @@ static _TtC6Dialog27DialogPanelWindowController *DPMakePanelWC(_TtC6Dialog15Dial
     return wc;
 }
 
+// The main queue is FIFO, so once the sentinel runs, every block queued before it has run too, however long a slow runner stalls.
 static void DPDrainMainQueue(void) {
-    [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.05]];
+    NSDate *until = [NSDate dateWithTimeIntervalSinceNow:0.05];
+    __block BOOL drained = NO;
+    dispatch_async(dispatch_get_main_queue(), ^{ drained = YES; });
+    NSDate *limit = [NSDate dateWithTimeIntervalSinceNow:30];
+    while (!drained && limit.timeIntervalSinceNow > 0)
+        [NSRunLoop.mainRunLoop runMode:NSDefaultRunLoopMode beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
+    [NSRunLoop.mainRunLoop runUntilDate:until];
 }
 
 static int failures;

@@ -266,8 +266,15 @@ static void Check(BOOL ok, NSString *msg) {
     printf("FAIL: %s\n", msg.UTF8String);
 }
 
+// The main queue is FIFO, so once the sentinel runs, every block queued before it has run too, however long a slow runner stalls.
 static void DrainRunLoop(NSTimeInterval seconds) {
-    [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:seconds]];
+    NSDate *until = [NSDate dateWithTimeIntervalSinceNow:seconds];
+    __block BOOL drained = NO;
+    dispatch_async(dispatch_get_main_queue(), ^{ drained = YES; });
+    NSDate *limit = [NSDate dateWithTimeIntervalSinceNow:30];
+    while (!drained && limit.timeIntervalSinceNow > 0)
+        [NSRunLoop.mainRunLoop runMode:NSDefaultRunLoopMode beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
+    [NSRunLoop.mainRunLoop runUntilDate:until];
 }
 
 static NSArray<NSWindow *> *DPApp_windows(NSApplication *self, SEL _cmd) { return gMockWindows ?: @[]; }

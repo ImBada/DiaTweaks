@@ -608,7 +608,26 @@ static BOOL RowsAgree(NSCollectionViewLayout *layout) {
     return YES;
 }
 
-static void Settle(void) { [[NSRunLoop mainRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.05]]; }
+// The main queue is FIFO, so once the sentinel runs, every block queued before it has run too, however long a slow runner stalls.
+// A second pass catches a block that queues another, and the spin that follows lets a pass of AppKit's own layout land.
+static void Settle(void) {
+    NSDate *until = [NSDate dateWithTimeIntervalSinceNow:0.05];
+    for (int pass = 0; pass < 2; pass++) {
+        __block BOOL drained = NO;
+        dispatch_async(dispatch_get_main_queue(), ^{ drained = YES; });
+        NSDate *limit = [NSDate dateWithTimeIntervalSinceNow:30];
+        while (!drained && limit.timeIntervalSinceNow > 0)
+            [NSRunLoop.mainRunLoop runMode:NSDefaultRunLoopMode beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
+    }
+    [NSRunLoop.mainRunLoop runUntilDate:until];
+}
+
+// Each nudge reaches Dia through the main queue, so wait for it by count rather than by time.
+static void WaitForScrolls(_TtC7TabList11TabListView *tabList, int count) {
+    NSDate *limit = [NSDate dateWithTimeIntervalSinceNow:30];
+    while (tabList.scrolled < count && limit.timeIntervalSinceNow > 0)
+        [NSRunLoop.mainRunLoop runMode:NSDefaultRunLoopMode beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
+}
 
 static void TestCollapsePinnedPill(void) {
     NSMutableArray<NSString *> *regular = [NSMutableArray arrayWithObject:@".newtab"];
@@ -642,6 +661,7 @@ static void TestCollapsePinnedPill(void) {
     DPCollapsePinned.on = YES;
     relayout();
     Settle();
+    WaitForScrolls(tabList, 1);
     Check(layout.collectionViewContentSize.height == 806 && cv.frame.size.height == 806, @"CollapsePinned: folded list is 83 pt shorter");
     Check(RowsAgree(layout), @"CollapsePinned: Dia's cached rows are where the list shows them when folded");
     Check(PillEdge(layout, scroll, 8) == nil, @"CollapsePinned: no scroll-to-tab pill for an active tab in view under folded pinned rows");
@@ -688,6 +708,7 @@ static void TestCollapsePinnedPill(void) {
     [defaults setObject:@[] forKey:@"collapsedPinned"];
     relayout();
     Settle();
+    WaitForScrolls(tabList, 2);
     Check(layout.collectionViewContentSize.height == 917 && RowsAgree(layout), @"CollapsePinned: unfolded list shows Dia's rows under the Pinned line");
     Check([PillEdge(layout, scroll, 8) isEqual:@"bottom"] && PillEdge(layout, scroll, 3) == nil, @"CollapsePinned: pill follows the unfolded rows");
     Check(tabList.scrolled == 2, @"CollapsePinned: Dia judges the active tab again when the list unfolds");
@@ -697,6 +718,7 @@ static void TestCollapsePinnedPill(void) {
     DPCollapsePinned.apply(&DPCollapsePinned);
     relayout();
     Settle();
+    WaitForScrolls(tabList, 3);
     Check(DiaRow(layout, 0, 0).frame.origin.y == 0 && layout.collectionViewContentSize.height == 889 && RowsAgree(layout), @"CollapsePinned: off leaves Dia's rows and list height stock");
     Check([PillEdge(layout, scroll, 8) isEqual:@"bottom"] && PillEdge(layout, scroll, 3) == nil, @"CollapsePinned: off leaves the pill to Dia");
     Check(tabList.scrolled == 3 && DPCollapsePinned.verify(&DPCollapsePinned) == nil, @"CollapsePinned: Dia judges the active tab again once it is off");

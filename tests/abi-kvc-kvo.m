@@ -148,6 +148,17 @@ NSView *DPPeekGlowFor(id page) { return [NSView new]; }
 static int failures;
 #define CHECK(cond, msg) do { if (!(cond)) { printf("FAIL: %s\n", msg); failures++; } } while (0)
 
+// The main queue is FIFO, so once the sentinel runs, every block queued before it has run too, however long a slow runner stalls.
+static void DrainMainQueue(NSTimeInterval seconds) {
+    NSDate *until = [NSDate dateWithTimeIntervalSinceNow:seconds];
+    __block BOOL drained = NO;
+    dispatch_async(dispatch_get_main_queue(), ^{ drained = YES; });
+    NSDate *limit = [NSDate dateWithTimeIntervalSinceNow:30];
+    while (!drained && limit.timeIntervalSinceNow > 0)
+        [NSRunLoop.mainRunLoop runMode:NSDefaultRunLoopMode beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
+    [NSRunLoop.mainRunLoop runUntilDate:until];
+}
+
 int main(void) {
     @autoreleasepool {
         [NSApplication sharedApplication];
@@ -264,7 +275,7 @@ int main(void) {
             [bridge detach]; // Idempotent double-detach must not throw over-remove KVO exception.
             [bridge handleKey:@"isLoading"]; // Post-detach handleKey must be a no-op.
         }
-        [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.05]];
+        DrainMainQueue(0.05);
         CHECK(weakBridge == nil, "DPPeekChatBridge deallocates cleanly after off-main-thread KVO + detach race");
 
         DPStage("7. DPStayingAction NSProxy safety");

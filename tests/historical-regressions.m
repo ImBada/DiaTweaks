@@ -17,6 +17,13 @@
 static int failures;
 #define CHECK(cond, msg) do { if (!(cond)) { printf("FAIL: %s\n", msg); failures++; } } while (0)
 
+// Spins the main run loop until the condition holds, so a slow runner can't end the wait before an animation or timer lands.
+static void PumpUntil(BOOL (^done)(void)) {
+    NSDate *limit = [NSDate dateWithTimeIntervalSinceNow:30];
+    while (!done() && limit.timeIntervalSinceNow > 0)
+        [NSRunLoop.mainRunLoop runMode:NSDefaultRunLoopMode beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
+}
+
 // --- Shared test stubs ---
 DPPatch DPPeek = { .on = YES }, DPLittleDia = { .on = YES }, DPHideToolbar = { .on = NO },
         DPRevealToolbarOnHover = { .on = YES }, DPShowLoadingProgress = { .on = NO };
@@ -289,18 +296,18 @@ static void TestLittleDiaOverAndStackRestore(void) {
     DPLittleDia.on = NO;
     CHECK(!DPLittleDiaIsOver(mainWin), "DPLittleDiaIsOver immediately returns NO when Little Dia is off/paused");
     DPUncoverAllLittleDia();
-    [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.25]];
+    PumpUntil(^BOOL { return fabs(bar.alphaValue - 1.0) < 0.01; });
     CHECK(fabs(bar.alphaValue - 1.0) < 0.01, "DPUncoverAllLittleDia restores main window toolbar alpha to 1 on off/pause");
 
     // 2. Miniaturizing Little Dia restores covered window toolbars immediately.
     DPLittleDia.on = YES;
     DPPutLittleDiaOver(little, mainWin);
-    [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.25]];
+    PumpUntil(^BOOL { return bar.alphaValue < 0.05; });
     CHECK(bar.alphaValue < 0.05, "toolbar faded to 0 under Little Dia");
     little.fakeMiniaturized = YES;
     CHECK(!DPLittleDiaIsOver(mainWin), "miniaturized Little Dia is not considered over main window");
     [NSNotificationCenter.defaultCenter postNotificationName:NSWindowWillMiniaturizeNotification object:little];
-    [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.25]];
+    PumpUntil(^BOOL { return fabs(bar.alphaValue - 1.0) < 0.01; });
     CHECK(fabs(bar.alphaValue - 1.0) < 0.01, "miniaturizing Little Dia restores covered window toolbar alpha to 1");
     little.fakeMiniaturized = NO;
 
