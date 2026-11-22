@@ -10,6 +10,23 @@ typedef struct CACornerRadii { CGSize topLeft, topRight, bottomRight, bottomLeft
 @property(readonly) BOOL _usesCornerRadii;
 @end
 
+// All-zero cornerRadii fall back to cornerRadius, and some releases keep _usesCornerRadii set for them.
+static BOOL DPRadiiEmpty(CACornerRadii radii) {
+    return CGSizeEqualToSize(radii.topLeft, CGSizeZero) && CGSizeEqualToSize(radii.topRight, CGSizeZero)
+        && CGSizeEqualToSize(radii.bottomRight, CGSizeZero) && CGSizeEqualToSize(radii.bottomLeft, CGSizeZero);
+}
+
+static void DPClearCornerRadii(CALayer *layer) {
+    if (![layer respondsToSelector:@selector(setCornerRadii:)] || !layer._usesCornerRadii) return;
+    CACornerRadii zero = {0};
+    layer.cornerRadii = zero;
+    if (!layer._usesCornerRadii || DPRadiiEmpty(layer.cornerRadii)) return;
+    // Zero didn't take, so pin the corners to Dia's radius rather than leave them square.
+    CGFloat r = layer.cornerRadius;
+    CACornerRadii round = { { r, r }, { r, r }, { r, r }, { r, r } };
+    layer.cornerRadii = round;
+}
+
 static void DPMaskCorners(NSView *container, CALayer *layer, CGFloat left, CGFloat right) {
     if ([layer respondsToSelector:@selector(setCornerRadii:)]) {
         layer.mask = nil;
@@ -94,8 +111,10 @@ static void DPReshapePaths(NSView *container, CGFloat base, CGFloat grow, CGFloa
 }
 
 BOOL DPCornersRound(CALayer *layer, BOOL right) {
-    if ([layer respondsToSelector:@selector(cornerRadii)] && layer._usesCornerRadii)
-        return (right ? layer.cornerRadii.topRight.width : layer.cornerRadii.topLeft.width) >= 0.5;
+    if ([layer respondsToSelector:@selector(cornerRadii)] && layer._usesCornerRadii) {
+        CACornerRadii radii = layer.cornerRadii;
+        if (!DPRadiiEmpty(radii)) return (right ? radii.topRight.width : radii.topLeft.width) >= 0.5;
+    }
     if (layer.mask) return layer.mask.sublayers[right].cornerRadius > 0;
     return layer.cornerRadius > 0 && (layer.maskedCorners & (right ? DPRightCorners : DPLeftCorners));
 }
@@ -148,10 +167,7 @@ static void DPRestoreSquareCorners(NSView *container, CALayer *layer) {
     DPRestoreCornerCurve(layer);
     CALayer *card = DPChatCard(container).layer;
     if (card) DPRestoreCornerCurve(card);
-    if ([layer respondsToSelector:@selector(setCornerRadii:)] && layer._usesCornerRadii) {
-        CACornerRadii zero = {0};
-        layer.cornerRadii = zero;
-    }
+    DPClearCornerRadii(layer);
     if (layer.mask) layer.mask = nil;
     if (layer.maskedCorners != (DPLeftCorners | DPRightCorners)) layer.maskedCorners = DPLeftCorners | DPRightCorners;
     for (NSView *sub in container.subviews)
@@ -168,10 +184,7 @@ static void DPRestoreSquareCorners(NSView *container, CALayer *layer) {
             CALayer *ctrl = view.layer;
             if (!DPGet(ctrl, &DPControlCornerKey)) return NO;
             DPSet(ctrl, &DPControlCornerKey, nil);
-            if (ctrl._usesCornerRadii) {
-                CACornerRadii zero = {0};
-                ctrl.cornerRadii = zero;
-            }
+            DPClearCornerRadii(ctrl);
             return NO;
         });
     }

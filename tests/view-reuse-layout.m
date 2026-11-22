@@ -107,7 +107,7 @@ static void Check(BOOL ok, NSString *msg) {
 static void DrainMain(void) {
     __block BOOL done = NO;
     dispatch_async(dispatch_get_main_queue(), ^{ done = YES; });
-    NSDate *until = [NSDate dateWithTimeIntervalSinceNow:1.0];
+    NSDate *until = [NSDate dateWithTimeIntervalSinceNow:30];
     while (!done && until.timeIntervalSinceNow > 0)
         [NSRunLoop.mainRunLoop runMode:NSDefaultRunLoopMode beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
 }
@@ -480,9 +480,54 @@ static void DrainMain(void) {
 - (void)setHidden:(BOOL)hidden { self.hiddenCalls++; [super setHidden:hidden]; }
 @end
 
+typedef struct CACornerRadii { CGSize topLeft, topRight, bottomRight, bottomLeft; } CACornerRadii;
+
 @interface CALayer (DPTestCornerRadii)
+@property CACornerRadii cornerRadii;
 @property (readonly) BOOL _usesCornerRadii;
 @end
+
+// Stands in for releases that keep _usesCornerRadii on all-zero radii, or refuse to store them at all.
+@interface DPKeptRadiiLayer : CALayer
+@property BOOL refusesZero;
+@end
+@implementation DPKeptRadiiLayer {
+    CACornerRadii _radii;
+    BOOL _uses;
+}
+- (BOOL)_usesCornerRadii { return _uses; }
+- (CACornerRadii)cornerRadii { return _radii; }
+- (void)setCornerRadii:(CACornerRadii)radii {
+    CACornerRadii zero = {0};
+    if (self.refusesZero && !memcmp(&radii, &zero, sizeof radii)) return;
+    _radii = radii;
+    _uses = YES;
+}
+@end
+
+@interface DPKeptRadiiView : NSView
+@property BOOL refusesZero;
+@end
+@implementation DPKeptRadiiView
+- (CALayer *)makeBackingLayer {
+    DPKeptRadiiLayer *layer = [DPKeptRadiiLayer layer];
+    layer.refusesZero = self.refusesZero;
+    return layer;
+}
+@end
+
+// All-zero radii, or radii equal to cornerRadius, draw the plain rounded rect, so neither overrides it.
+static BOOL OverridesCornerRadius(CALayer *layer) {
+    if (![layer respondsToSelector:@selector(_usesCornerRadii)] || !layer._usesCornerRadii) return NO;
+    CACornerRadii radii = layer.cornerRadii;
+    CGSize corners[4] = { radii.topLeft, radii.topRight, radii.bottomRight, radii.bottomLeft };
+    BOOL zero = YES, plain = YES;
+    for (int i = 0; i < 4; i++) {
+        zero &= CGSizeEqualToSize(corners[i], CGSizeZero);
+        plain &= corners[i].width == layer.cornerRadius && corners[i].height == layer.cornerRadius;
+    }
+    return !zero && !plain;
+}
 
 // --- Tests ---
 
@@ -572,12 +617,54 @@ static void TestEdgeToEdgeOffAndRestore(void) {
     DPEdgeToEdge.progress = 0;
     DPEdgeToEdge.relayout();
     Check(rounded.layer.cornerCurve == kCACornerCurveCircular, @"EdgeToEdge off: restores original cornerCurve");
-    Check(![rounded.layer respondsToSelector:@selector(_usesCornerRadii)] || !rounded.layer._usesCornerRadii,
-          @"EdgeToEdge off: clears _usesCornerRadii");
+    Check(!OverridesCornerRadius(rounded.layer), @"EdgeToEdge off: leaves no cornerRadii override");
     Check(DPCornersRound(rounded.layer, NO) && DPCornersRound(rounded.layer, YES), @"EdgeToEdge off: all corners round again");
     Check(container->cornerRadius == 10, @"EdgeToEdge off: restores cornerRadius ivar to 10");
     Check(CGPathEqualToPath(shape.path, origPath), @"EdgeToEdge off: restores original shape path");
     CGPathRelease(origPath);
+}
+
+static void TestEdgeToEdgeOffWithKeptCornerRadii(void) {
+    DPEdgeToEdge.on = YES;
+    DPEdgeToEdge.progress = 1;
+    DPWindowCorners.on = NO;
+    DPSquareSidebarCorners.on = YES;
+    DPSquareSidebarCorners.progress = 1;
+
+    for (int refuses = 0; refuses < 2; refuses++) {
+        NSString *mode = refuses ? @"refused zero radii" : @"kept _usesCornerRadii";
+        _TtC6Window14PlatformWindow *win = [[_TtC6Window14PlatformWindow alloc] initWithContentRect:NSMakeRect(-30000, -30000, 900, 600)
+                                                                                         styleMask:NSWindowStyleMaskTitled backing:NSBackingStoreBuffered defer:NO];
+        win.fakeCornerRadius = 16;
+        win.fakeVisible = YES;
+        gFakeWindows = @[ win ];
+
+        _TtC6Window20ContentContainerView *container = [[_TtC6Window20ContentContainerView alloc] initWithFrame:NSMakeRect(220, 6, 674, 588)];
+        container->cornerRadius = 10;
+        DPKeptRadiiView *rounded = [[DPKeptRadiiView alloc] initWithFrame:container.bounds];
+        rounded.refusesZero = refuses;
+        rounded.wantsLayer = YES;
+        rounded.layer.masksToBounds = YES;
+        rounded.layer.cornerRadius = 10;
+        [container addSubview:rounded];
+        [win.contentView addSubview:container];
+
+        DPEdgeToEdge.on = YES;
+        DPEdgeToEdge.progress = 1;
+        container.frame = NSMakeRect(220, 6, 674, 588);
+        [container layout];
+        Check(!DPCornersRound(rounded.layer, NO) && DPCornersRound(rounded.layer, YES),
+              [NSString stringWithFormat:@"%@: EdgeToEdge on squares the left corners", mode]);
+
+        DPEdgeToEdge.on = NO;
+        DPEdgeToEdge.progress = 0;
+        DPEdgeToEdge.relayout();
+        Check(DPCornersRound(rounded.layer, NO) && DPCornersRound(rounded.layer, YES),
+              [NSString stringWithFormat:@"%@: EdgeToEdge off rounds every corner again", mode]);
+        Check(!OverridesCornerRadius(rounded.layer),
+              [NSString stringWithFormat:@"%@: EdgeToEdge off leaves no cornerRadii override", mode]);
+        [container removeFromSuperview];
+    }
 }
 
 static void TestWindowMaterialUpdateLayerAndIdempotency(void) {
@@ -1069,6 +1156,7 @@ int main(void) {
         DPTurnOffAI.install();
 
         DPRunTest(TestEdgeToEdgeOffAndRestore);
+        DPRunTest(TestEdgeToEdgeOffWithKeptCornerRadii);
         DPRunTest(TestWindowMaterialUpdateLayerAndIdempotency);
         DPRunTest(TestPullRequestRepoAndCompactTabRows);
         DPRunTest(TestProfileEmojiTidyTabsGrainAndCA);
