@@ -203,6 +203,7 @@ NSButton *DPMakeBarButton(NSString *symbol, NSString *label, NSString *key, void
 #import "Patches/Peek/ChatContext.m"
 #import "Patches/Peek/Card.m"
 #import "Patches/Peek/Pages.m"
+#import "Patches/Peek/Handoff.m"
 #import "Patches/Peek/Zoom.m"
 
 static int failures;
@@ -510,7 +511,7 @@ int main(void) {
             [ntpPeekPage close];
             Check(ntpPeek.closing && DPPeekCardIn(window) == nil,
                   "window.close() on visible Peek page immediately begins closing Peek card");
-            [ntpPeek handOver];
+            [ntpPeek handOverTo:nil attach:nil];
 
             // Parked (hidden) Peek receiving closeWithForegroundCommitTiming: synchronously tears down.
             DPPeekOpenFrom(window, @"C", [NSURL URLWithString:@"https://parked-close.example"], NSMakeRect(100, 100, 80, 20), delegate, ntpSource, nil, nil);
@@ -523,6 +524,37 @@ int main(void) {
             [parkedClosePage closeWithForegroundCommitTiming:0];
             Check(parkedClose.closing && DPPeekAllCards(window).count == 0,
                   "closeWithForegroundCommitTiming: on parked Peek page synchronously removes Peek card");
+        }
+
+        // 7b. Promoting a Peek hands its page to the tab and leaves a parked Peek on another tab untouched.
+        {
+            sw.appleScriptTabs = [NSMutableArray arrayWithObjects:[DPTabMock tabWithID:@"A"], [DPTabMock tabWithID:@"B"], nil];
+            sw.activeID = @"A";
+            ArcWebContents *srcA = [ArcWebContents new], *srcB = [ArcWebContents new];
+            DPPeekOpenFrom(window, @"A", [NSURL URLWithString:@"https://promote-a.example"], NSMakeRect(100, 100, 80, 20), delegate, srcA, nil, nil);
+            DPPeekCard *peekA = DPPeekCardIn(window);
+            ((ArcWebContents *)peekA.page).url = [NSURL URLWithString:@"about:blank"];
+            sw.activeID = @"B";
+            DPPeekSyncTabs(window);
+            DPPeekOpenFrom(window, @"B", [NSURL URLWithString:@"https://promote-b.example"], NSMakeRect(100, 100, 80, 20), delegate, srcB, nil, nil);
+            DPPeekCard *peekB = DPPeekCardIn(window);
+            ((ArcWebContents *)peekB.page).url = [NSURL URLWithString:@"about:blank"];
+            Check(peekA.hidden && !peekB.hidden && DPPeekAllCards(window).count == 2, "parked Peek A and visible Peek B before promotion");
+
+            NSView *tabHost = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 200, 200)];
+            [window.contentView addSubview:tabHost];
+            gDetachCalls = 0;
+            peekB.grown = 1;
+            __block BOOL mountedDuringAttach = NO;
+            [peekB handOverTo:tabHost attach:^{ mountedDuringAttach = peekB.superview != nil; }];
+            Check(mountedDuringAttach && gDetachCalls == 1 && peekB.superview == nil && peekB.page == nil,
+                  "promoting Peek B attaches its page while the expanded card is still mounted");
+            Check(DPPeekAllCards(window).count == 1 && peekA.hidden && !peekA.closing && peekA.superview == window.contentView,
+                  "promoting Peek B leaves parked Peek A untouched");
+            [peekA handOverTo:nil attach:nil];
+            Check(DPPeekAllCards(window).count == 0 && DPPeekSyncTimer == nil, "handing over the last Peek stops the sync timer");
+            [tabHost removeFromSuperview];
+            sw.appleScriptTabs = [NSMutableArray arrayWithObjects:[DPTabMock tabWithID:@"pin-1"], [DPTabMock tabWithID:@"C"], nil];
         }
 
         // 8. Source deallocation closes only its own Peek; multi-window close & Peek OFF clean everything.

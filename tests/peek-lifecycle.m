@@ -4,6 +4,7 @@
 
 static int gCloseCalls, gDetachCalls, gGiveCalls, gZoomCalls, gOrigZoomCalls;
 static BOOL gGiveSucceeds = YES;
+static NSURL *gGivenURL;
 
 @interface DPFakePeekPage : NSObject <DPPeekPage>
 @property (nonatomic, strong) NSURL *url;
@@ -40,6 +41,7 @@ static BOOL gGiveSucceeds = YES;
 @implementation DPFakeDelegate
 - (void)webContents:(id)source didCreateNewWebContent:(id)page targetURL:(NSURL *)url disposition:(NSInteger)disp {
     gGiveCalls++;
+    gGivenURL = url;
 }
 - (void)webContents:(id)page finalizeDiscardRequest:(BOOL)discarded {}
 @end
@@ -143,11 +145,38 @@ void DPDrawProgressShader(CAMetalLayer *layer, CGFloat progress, CGFloat cycle, 
 #import "Patches/Peek/ChatContext.m"
 #import "Patches/Peek/Card.m"
 #import "Patches/Peek/Pages.m"
+#import "Patches/Peek/Handoff.m"
 #import "Patches/Peek/Zoom.m"
 #import "Patches/Peek/DragLinks.m"
 
 static int failures;
 #define CHECK(cond, msg) do { if (!(cond)) { printf("FAIL: %s\n", msg); failures++; } } while (0)
+
+static void DrainMain(void) {
+    __block BOOL drained = NO;
+    dispatch_async(dispatch_get_main_queue(), ^{ drained = YES; });
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:1.0];
+    while (!drained && deadline.timeIntervalSinceNow > 0)
+        [NSRunLoop.mainRunLoop runMode:NSDefaultRunLoopMode beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
+}
+
+static DPPeekTestWindow *MakeWindow(NSRect frame) {
+    DPPeekTestWindow *window = [[DPPeekTestWindow alloc] initWithContentRect:frame styleMask:NSWindowStyleMaskTitled
+                                                                    backing:NSBackingStoreBuffered defer:NO];
+    window.releasedWhenClosed = NO;
+    _TtC11ContentPane15ContentPaneView *pane = [[_TtC11ContentPane15ContentPaneView alloc] initWithFrame:window.contentView.bounds];
+    [window.contentView addSubview:pane];
+    return window;
+}
+
+static DPPeekCover *MakeCover(NSWindow *window, NSString *originTabID) {
+    DPPeekCover *cover = [[DPPeekCover alloc] initWithContentRect:NSMakeRect(0, 0, 100, 100) styleMask:NSWindowStyleMaskBorderless
+                                                         backing:NSBackingStoreBuffered defer:NO];
+    cover.releasedWhenClosed = NO;
+    cover.originTabID = originTabID;
+    [window addChildWindow:cover ordered:NSWindowAbove];
+    return cover;
+}
 
 int main(void) {
     @autoreleasepool {
@@ -337,8 +366,118 @@ int main(void) {
         CHECK(gGiveCalls == 0 && gCloseCalls == 1 && expanding.page == nil && DPGet(expanding, &DPGrowthKey) == nil,
               "detached DPPeekGrowth step invokes done and discards page without leaking");
 
+        // 13. Regression: the Peek-to-tab cover is cancelled by a tab switch, window close, and tweak off.
+        {
+            DPPeekTestWindow *window3 = MakeWindow(NSMakeRect(-30000, -30000, 600, 400));
+            DPPeekCover *cover = MakeCover(window3, @"tab-1");
+            CHECK(DPPeekHandoffActive(), "handoff cover counts as an active handoff");
+            DPPeekUpdateSyncTimer();
+            CHECK(DPPeekSyncTimer != nil, "handoff cover keeps the sync timer alive");
+
+            // ⌘O was already pressed, so a tab switch dismisses the cover but still promotes.
+            __block int promoted = 0;
+            cover.promote = ^{ promoted++; };
+            DPPeekHandoffSelectionChanged(window3, @"tab-1");
+            CHECK(cover.parentWindow == window3 && promoted == 0, "handoff cover survives its origin tab");
+            DPPeekHandoffSelectionChanged(window3, @"tab-2");
+            DrainMain();
+            CHECK(cover.parentWindow == nil && promoted == 1, "tab switch dismisses the cover and still promotes");
+
+            // Once the destination tab is live, its own selection keeps the cover until it paints.
+            DPPeekCover *settled = MakeCover(window3, @"tab-1");
+            settled.destinationTabID = @"tab-2";
+            DPPeekHandoffSelectionChanged(window3, @"tab-2");
+            CHECK(settled.parentWindow == window3, "cover stays while its destination tab is selected");
+            DPPeekHandoffSelectionChanged(window3, @"tab-3");
+            CHECK(settled.parentWindow == nil, "cover leaves when another tab is selected");
+
+            // Window close and tweak off cancel a pending promotion outright.
+            DPPeekCover *closing = MakeCover(window3, @"tab-1");
+            __block int closingPromoted = 0;
+            closing.promote = ^{ closingPromoted++; };
+            DPPeekHandoffSelectionChanged(window3, nil);
+            DrainMain();
+            CHECK(closing.parentWindow == nil && closingPromoted == 0, "window close cancels the handoff without promoting");
+
+            DPPeekCover *paused = MakeCover(window3, @"tab-1");
+            __block int pausedPromoted = 0;
+            paused.promote = ^{ pausedPromoted++; };
+            DPPeek.on = NO;
+            DPPeekCloseAll();
+            DrainMain();
+            CHECK(paused.parentWindow == nil && pausedPromoted == 0, "turning Peek off cancels the handoff without promoting");
+            DPPeek.on = YES;
+            CHECK(!DPPeekHandoffActive() && DPPeekSyncTimer == nil, "no handoff cover or sync timer survives teardown");
+            [window3 close];
+        }
+
+        // 14. Regression: promoting a Peek attaches its page to the tab before the card leaves the window.
+        {
+            DPPeekTestWindow *window4 = MakeWindow(NSMakeRect(-30000, -30000, 600, 400));
+            NSView *destination = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 100, 100)];
+            [window4.contentView addSubview:destination];
+
+            DPFakePeekPage *promotedPage = [DPFakePeekPage new];
+            promotedPage.url = [NSURL URLWithString:@"https://example.com/promote"];
+            DPPeekCard *card = DPPeekShowCard(window4, promotedPage, nil, NSMakeRect(10, 10, 40, 20));
+            card.grown = 1;
+            __block BOOL mountedDuringAttach = NO;
+            gDetachCalls = 0;
+            [card handOverTo:destination attach:^{
+                mountedDuringAttach = card.superview != nil;
+                promotedPage.attachedHost = destination;
+            }];
+            CHECK(mountedDuringAttach, "promotion attaches the page while the expanded card is still mounted");
+            CHECK(promotedPage.attachedHost == destination && gDetachCalls == 1 && card.superview == nil && card.page == nil,
+                  "promotion detaches the page from the card and unmounts it");
+            CHECK(DPPeekAllCards(window4).count == 0, "promoted card leaves the tracked cards");
+
+            DPFakePeekPage *smallPage = [DPFakePeekPage new];
+            smallPage.url = [NSURL URLWithString:@"https://example.com/small"];
+            DPPeekCard *small = DPPeekShowCard(window4, smallPage, nil, NSMakeRect(10, 10, 40, 20));
+            __block BOOL unmountedDuringAttach = NO;
+            [small handOverTo:destination attach:^{ unmountedDuringAttach = small.superview == nil; }];
+            CHECK(unmountedDuringAttach, "a card that never expanded unmounts before its page attaches");
+            [window4 close];
+        }
+
+        // 15. Regression: ⌘O on a still-loading preview opens the clicked link, not about:blank.
+        {
+            DPPeekTestWindow *window5 = MakeWindow(NSMakeRect(-30000, -30000, 600, 400));
+            DPFakeDelegate *delegate = [DPFakeDelegate new];
+            DPFakePeekPage *source5 = [DPFakePeekPage new];
+            DPFakePeekPage *loading = [DPFakePeekPage new];
+            loading.url = [NSURL URLWithString:@"about:blank"];
+            DPPeekCard *card = DPPeekShowCard(window5, loading, nil, NSMakeRect(10, 10, 40, 20));
+            card.sourceDelegate = delegate;
+            card.source = source5;
+            card.requestedURL = [NSURL URLWithString:@"https://clicked.example/article"];
+            gGiveCalls = 0;
+            gGivenURL = nil;
+            [card finish:DPPeekTab];
+            CHECK(gGiveCalls == 1 && [gGivenURL.absoluteString isEqualToString:@"https://clicked.example/article"],
+                  "promoting a still-loading preview opens the clicked URL");
+            CHECK(!DPPeekHandoffActive(), "an offscreen window skips the handoff cover");
+            [window5 close];
+        }
+
+        // 16. Regression: Dia attaching a Peek page to a real tab hands the card over and still attaches.
+        {
+            DPPeekTestWindow *window6 = MakeWindow(NSMakeRect(-30000, -30000, 600, 400));
+            ArcWebContents *page = [ArcWebContents new];
+            page.url = [NSURL URLWithString:@"https://example.com/tab"];
+            DPPeekCard *card = DPPeekShowCard(window6, page, nil, NSMakeRect(10, 10, 40, 20));
+            NSView *tabHost = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 100, 100)];
+            [window6.contentView addSubview:tabHost];
+            gDetachCalls = 0;
+            [page attachToPaneHostView:tabHost];
+            CHECK(page.attachedHost == tabHost && gDetachCalls == 1 && card.superview == nil && card.page == nil,
+                  "attaching a Peek page to a tab hands the card over and attaches the page");
+            [window6 close];
+        }
+
         if (failures) return 1;
-        puts("PASS: Peek glow fallback, off-tweak teardown, window close, and timer lifecycle");
+        puts("PASS: Peek glow fallback, off-tweak teardown, window close, handoff, and timer lifecycle");
     }
     return 0;
 }

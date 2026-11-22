@@ -28,7 +28,10 @@ static NSSet<NSString *> *DPPeekOpenTabIDs(id scriptWindow, NSString *active) {
 
 static void DPPeekSyncAllWindows(void) {
     NSArray<DPPeekCard *> *all = DPPeekAllCards(nil);
-    if (!all.count) return DPPeekUpdateSyncTimer();
+    if (!all.count) {
+        DPPeekHandoffSync();
+        return DPPeekUpdateSyncTimer();
+    }
     NSMutableArray<NSWindow *> *windows = [NSMutableArray array];
     for (DPPeekCard *peek in all) {
         if (peek.closing) continue;
@@ -37,12 +40,13 @@ static void DPPeekSyncAllWindows(void) {
         else if (![windows containsObject:owner]) [windows addObject:owner];
     }
     for (NSWindow *window in windows) DPPeekSyncTabs(window);
+    DPPeekHandoffSync();
     DPPeekUpdateSyncTimer();
 }
 
 void DPPeekUpdateSyncTimer(void) {
-    BOOL live = NO;
-    for (DPPeekCard *peek in DPPeekAllCards(nil))
+    BOOL live = DPPeekHandoffActive();
+    if (!live) for (DPPeekCard *peek in DPPeekAllCards(nil))
         if (!peek.closing) { live = YES; break; }
     if (!live) {
         [DPPeekSyncTimer invalidate];
@@ -67,11 +71,14 @@ void DPPeekCloseForSource(id source) {
 void DPPeekSyncTabs(NSWindow *window) {
     if (!window || DPPeekSyncing) return;
     NSArray<DPPeekCard *> *cards = DPPeekAllCards(window);
-    if (!cards.count) return DPPeekUpdateSyncTimer();
+    if (!cards.count && !DPPeekHandoffActive()) return DPPeekUpdateSyncTimer();
     DPPeekSyncing = YES;
     @try {
         id scriptWindow = DPScriptWindow(window);
         NSString *active = scriptWindow ? DPActiveTabIDIn(scriptWindow) : DPActiveTabID(window);
+        if (active) DPPeekHandoffSelectionChanged(window, active);
+        // A cover outliving its card only needs the selection check; its own dismissal stops the timer.
+        if (!cards.count) return;
         NSString *lastActive = DPGet(window, &DPPeekLastActiveKey);
         if (active && ![active isEqual:lastActive]) {
             DPSet(window, &DPPeekLastActiveKey, active);

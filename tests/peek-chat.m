@@ -231,6 +231,7 @@ BOOL DPPeekIsShortcut(NSEvent *event, NSMenuItem *item) {
 #import "Patches/Peek/ChatContext.m"
 #import "Patches/Peek/Card.m"
 #import "Patches/Peek/Pages.m"
+#import "Patches/Peek/Handoff.m"
 
 static int failures;
 #define CHECK(cond, msg) do { if (!(cond)) { printf("FAIL: %s\n", msg); failures++; } } while (0)
@@ -417,6 +418,10 @@ int main(void) {
         [peek layoutSubtreeIfNeeded];
 
         CHECK(NSEqualRects(peek.frame, NSMakeRect(0, 0, 820, 800)), "Peek card shrinks to page pane width when docked AI Side Chat opens");
+        // The Peek-to-tab handoff cover spans the Peek's page pane, so AI Side Chat beside it stays uncovered.
+        NSRect coverInWindow = [peek convertRect:peek.bounds toView:nil];
+        NSRect chatInWindow = [chatPanel convertRect:chatPanel.bounds toView:nil];
+        CHECK(NSMaxX(coverInWindow) <= NSMinX(chatInWindow), "handoff cover bounds stop at the page pane and never cover AI Side Chat");
         NSRect chatInPeek = [peek convertRect:chatBtn.bounds fromView:chatBtn];
         CHECK(!NSIntersectsRect(peek.controls.frame, chatInPeek), "Peek controls shift clear of visible toolbar Chat button");
 
@@ -624,7 +629,7 @@ int main(void) {
 
         // 9. Closing Peek detaches KVO cleanly and restores parent context.
         int closeSel = kvo.selectedHits, closeIn = kvo.inputHits;
-        [peek handOver];
+        [peek handOverTo:nil attach:nil];
         CHECK(peek.chatBridge == nil, "closing Peek clears chatBridge");
         CHECK(kvo.selectedHits == closeSel + 1 && kvo.inputHits == closeIn + 1, "closing Peek notifies source once to restore context");
         CHECK([kvo.lastSeenSelected isEqualToString:@"parent-selection"], "source selectedText restores to parent on Peek close");
@@ -642,7 +647,7 @@ int main(void) {
 
         // 10. KVO torture: double detach, background-thread KVO racing with detach, sudden DPPeekCard dealloc, and quiet detach on parked/source close.
         {
-            // 10a. Sudden DPPeekCard dealloc without close:/handOver must cleanly remove all KVO observers from peekPage.
+            // 10a. Sudden DPPeekCard dealloc without close:/handOverTo: must cleanly remove all KVO observers from peekPage.
             ArcWebContents *orphanPeekPage = [ArcWebContents new];
             orphanPeekPage.tag = @"orphan";
             orphanPeekPage.selectedText = @"orphan-sel";
@@ -652,7 +657,7 @@ int main(void) {
                 orphan.source = source;
                 DPPeekChatAttach(orphan);
                 CHECK(orphan.chatBridge != nil, "orphan card attached chatBridge");
-                // Intentionally drop orphan without calling close: or handOver.
+                // Intentionally drop orphan without calling close: or handOverTo:.
             }
             int orphanSelBefore = kvo.selectedHits, orphanInBefore = kvo.inputHits;
             orphanPeekPage.selectedText = @"after-dealloc";
@@ -734,8 +739,8 @@ int main(void) {
             CHECK([exC[@"tag"] isEqualToString:@"peekC"] && [srcC.selectedText isEqualToString:@"peekC-sel"], "Tab C active -> routes to Peek C");
             CHECK([exA[@"tag"] isEqualToString:@"tabA"] && [exB[@"tag"] isEqualToString:@"tabB"], "parked Peek A and Tab B stay isolated on Tab C");
 
-            [peekA handOver];
-            [peekC handOver];
+            [peekA handOverTo:nil attach:nil];
+            [peekC handOverTo:nil attach:nil];
             gActiveTabID = @"tab-1";
         }
 

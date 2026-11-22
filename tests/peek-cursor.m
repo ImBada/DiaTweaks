@@ -12,7 +12,10 @@ DPPeekCard *DPPeekCardIn(NSWindow *window) {
 @implementation DPPeekCard
 - (NSRect)cardFrame { return self.bounds; }
 - (void)close:(DPPeekExit)exit { [self removeFromSuperview]; }
-- (void)handOver { [self removeFromSuperview]; }
+- (void)handOverTo:(NSView *)destination attach:(void (^)(void))attach {
+    [self removeFromSuperview];
+    if (attach) attach();
+}
 - (void)setOriginVisible:(BOOL)visible { self.hidden = !visible; }
 @end
 

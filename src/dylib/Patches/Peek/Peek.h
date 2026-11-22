@@ -18,6 +18,7 @@ enum { DPIgnoreAction = 0, DPCurrentTab = 1, DPForegroundTab = 2, DPBackgroundTa
 @property (nonatomic, strong) NSView *dim, *card, *shade, *clip, *host, *controls, *tabBadge, *toolbar, *toolbarZone;
 @property (nonatomic, strong) id<DPPeekPage> page;
 @property (nonatomic, weak) id sourceDelegate, source;
+@property (nonatomic, copy) NSURL *requestedURL;
 @property (nonatomic, copy) NSString *originTabID;
 @property (nonatomic, weak) NSWindow *originWindow;
 @property (nonatomic, weak) NSView *pane;
@@ -28,7 +29,7 @@ enum { DPIgnoreAction = 0, DPCurrentTab = 1, DPForegroundTab = 2, DPBackgroundTa
 @property (nonatomic) NSInteger paneMoves;
 - (NSRect)cardFrame;
 - (void)close:(DPPeekExit)exit;
-- (void)handOver;
+- (void)handOverTo:(NSView *)destination attach:(void (^)(void))attach;
 @end
 
 @interface DPPeekCard (Visibility)
@@ -131,6 +132,12 @@ BOOL DPPeekResponderInChat(id responder);
 BOOL DPPeekChatShortcut(DPPeekCard *peek, NSEvent *event, NSEventModifierFlags mods);
 
 void DPPeekInstallPages(void);
+void DPPeekPrepareHandoff(DPPeekCard *peek, void (^complete)(void));
+void DPPeekCompleteHandoff(DPPeekCard *peek, NSView *destination);
+void DPPeekHandoffSelectionChanged(NSWindow *window, NSString *active);
+void DPPeekHandoffSync(void);
+void DPPeekCancelHandoffs(void);
+BOOL DPPeekHandoffActive(void);
 BOOL DPPeekCanOpen(id source);
 BOOL DPPeekShows(id page);
 void DPPeekLoad(id page, NSURL *url);

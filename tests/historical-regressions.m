@@ -61,7 +61,7 @@ static int gNavBackCalls;
 @implementation DPPeekCard
 - (NSRect)cardFrame { return self.bounds; }
 - (void)close:(DPPeekExit)exit {}
-- (void)handOver {}
+- (void)handOverTo:(NSView *)destination attach:(void (^)(void))attach {}
 @end
 
 // A real NSButton tracks a click until a mouse-up that a synthetic event never delivers, and whether it returns first depends on the macOS build.

@@ -71,7 +71,7 @@ NSView *DPPeekGlowFor(id page) { return [NSView new]; }
 @implementation DPPeekCard
 - (NSRect)cardFrame { return NSZeroRect; }
 - (void)close:(DPPeekExit)exit {}
-- (void)handOver {}
+- (void)handOverTo:(NSView *)destination attach:(void (^)(void))attach {}
 @end
 
 #import "Patches/ExtensionsShortcut/ExtensionsShortcut.m"

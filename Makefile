@@ -169,15 +169,15 @@ build/passkeys-origin: tests/passkeys-origin.m src/diapatch/Passkeys.m src/diapa
 build/app-icon-signing: tests/app-icon-signing.m src/diapatch/AppIcon.m src/diapatch/IconCatalog.m src/diapatch/AppIcon.h src/diapatch/IconCatalog.h | build
 	clang $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -Isrc -framework Foundation -framework CoreGraphics -framework Security -o $@ tests/app-icon-signing.m src/diapatch/AppIcon.m src/diapatch/IconCatalog.m
 
-PEEK_LIFE := $(addprefix src/dylib/Patches/Peek/,Peek.h Glow.m Tab.m Selection.m Motion.m Keys.m Visibility.m Chat.m ChatContext.m Card.m Pages.m Zoom.m DragLinks.m)
+PEEK_LIFE := $(addprefix src/dylib/Patches/Peek/,Peek.h Glow.m Tab.m Selection.m Motion.m Keys.m Visibility.m Chat.m ChatContext.m Card.m Pages.m Handoff.m Zoom.m DragLinks.m)
 build/peek-lifecycle: tests/peek-lifecycle.m $(PEEK_LIFE) src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m $(wildcard src/dylib/StdPatch/*.h) | build
 	clang $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -Isrc/dylib -framework AppKit -framework QuartzCore -o $@ tests/peek-lifecycle.m src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m
 
-PEEK_TABS := $(addprefix src/dylib/Patches/Peek/,Peek.h Controls.m Address.m Find.m Tab.m Selection.m Motion.m Keys.m Visibility.m Chat.m ChatContext.m Card.m Pages.m Zoom.m)
+PEEK_TABS := $(addprefix src/dylib/Patches/Peek/,Peek.h Controls.m Address.m Find.m Tab.m Selection.m Motion.m Keys.m Visibility.m Chat.m ChatContext.m Card.m Pages.m Handoff.m Zoom.m)
 build/peek-tabs: tests/peek-tabs.m $(PEEK_TABS) src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m $(wildcard src/dylib/StdPatch/*.h) | build
 	clang $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -Isrc/dylib -framework AppKit -framework QuartzCore -o $@ tests/peek-tabs.m src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m
 
-PEEK_CHAT := $(addprefix src/dylib/Patches/Peek/,Peek.h Chat.m ChatContext.m Keys.m Visibility.m Selection.m Card.m Pages.m Motion.m Tab.m)
+PEEK_CHAT := $(addprefix src/dylib/Patches/Peek/,Peek.h Chat.m ChatContext.m Keys.m Visibility.m Selection.m Card.m Pages.m Handoff.m Motion.m Tab.m)
 build/peek-chat: tests/peek-chat.m $(PEEK_CHAT) src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m $(wildcard src/dylib/StdPatch/*.h) | build
 	clang $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -Isrc/dylib -framework AppKit -framework QuartzCore -o $@ tests/peek-chat.m src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m
 
@@ -289,6 +289,7 @@ COMBINATORIAL := src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m src/dylib/
 	src/dylib/Patches/Peek/Peek.m src/dylib/Patches/Peek/Card.m src/dylib/Patches/Peek/Pages.m \
 	src/dylib/Patches/Peek/Keys.m src/dylib/Patches/Peek/Chat.m src/dylib/Patches/Peek/ChatContext.m \
 	src/dylib/Patches/Peek/Visibility.m src/dylib/Patches/Peek/Motion.m src/dylib/Patches/Peek/Selection.m \
+	src/dylib/Patches/Peek/Handoff.m \
 	src/dylib/Patches/Peek/Tab.m src/dylib/Patches/Peek/Zoom.m \
 	$(LAUNCH_FLAGS) src/dylib/Patches/SplitClientHello/SplitClientHello.m \
 	src/dylib/Patches/SplitClientHello/Split.m src/dylib/Patches/SplitClientHello/Write.m src/dylib/Patches/SplitClientHello/Send.m

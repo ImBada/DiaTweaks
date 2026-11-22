@@ -35,8 +35,8 @@ static id DPBrowser_create(id self, SEL _cmd, id configuration) {
 static void DPPage_attach(id self, SEL _cmd, NSView *host) {
     DPPeekCard *peek = DPPeekCardForPage(self);
     BOOL ownHost = peek && host == peek.host;
-    if (peek && !ownHost) [peek handOver];
-    DPCallOriginal(DPPage_attach, self, host);
+    if (peek && !ownHost) [peek handOverTo:host attach:^{ DPCallOriginal(DPPage_attach, self, host); }];
+    else DPCallOriginal(DPPage_attach, self, host);
     if (!ownHost && DPPeek.on && host.window && DPPeekHasCards()) DPPeekSyncTabs(host.window);
 }
 
@@ -214,6 +214,7 @@ static void DPPeekOpenFrom(NSWindow *window, NSString *originTabID, NSURL *url, 
     peek.originTabID = originTabID;
     peek.sourceDelegate = delegate;
     peek.source = source;
+    peek.requestedURL = url;
     DPPeekChatAttach(peek);
     DPPeekShowTabBadge(peek, source);
 }
@@ -231,34 +232,49 @@ void DPPeekOpen(NSWindow *window, NSString *originTabID, NSURL *url, NSPoint ori
 void DPPeekCloseAll(void) {
     DPPeekCool();
     DPPeekHideDragZone();
+    DPPeekCancelHandoffs();
     for (DPPeekCard *peek in DPPeekAllCards(nil)) {
         id page = peek.page;
-        [peek handOver];
+        [peek handOverTo:nil attach:nil];
         DPPeekDiscard(page, nil);
     }
     DPPeekUpdateSyncTimer();
 }
 
+static NSURL *DPPeekLiveURL(NSObject *page) {
+    NSURL *url = DPValueForKey(page, @"url");
+    return [url isKindOfClass:NSURL.class] && url.scheme.length && ![url.absoluteString isEqualToString:@"about:blank"] ? url : nil;
+}
+
 @implementation DPPeekCard (Handoff)
 
-- (void)finish:(DPPeekExit)exit {
+- (void)finishExit:(DPPeekExit)exit {
     NSObject *page = (NSObject *)self.page;
     if (!page) {
-        [self handOver];
+        [self handOverTo:nil attach:nil];
         return;
     }
     if (!self.window) {
-        [self handOver];
-        DPPeekDiscard(page, nil);
+        [self handOverTo:nil attach:nil];
+        return DPPeekDiscard(page, nil);
+    }
+    if (exit != DPPeekClose || !self.hidden) [self.window makeKeyWindow];
+    NSURL *url = nil;
+    // A preview still loading has no URL yet, so the tab opens the link that was clicked.
+    if (exit == DPPeekTab) url = DPPeekLiveURL(page) ?: self.requestedURL;
+    else if (exit != DPPeekClose) url = DPValueForKey(page, @"url");
+    if (exit != DPPeekClose && DPPeekGive(page, self.sourceDelegate, self.source, url, exit)) {
+        // DPPage_attach takes the card down once Dia shows the page.
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{ if (self.superview) [self handOverTo:nil attach:nil]; });
         return;
     }
-    if (!self.hidden) [self.window makeKeyWindow];
-    if (exit != DPPeekClose && DPPeekGive(page, self.sourceDelegate, self.source, DPValueForKey(page, @"url"), exit)) {
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{ if (self.superview) [self handOver]; });
-        return;
-    }
-    [self handOver];
+    [self handOverTo:nil attach:nil];
     DPPeekDiscard(page, nil);
+}
+
+- (void)finish:(DPPeekExit)exit {
+    if (exit == DPPeekTab) DPPeekPrepareHandoff(self, ^{ [self finishExit:exit]; });
+    else [self finishExit:exit];
 }
 
 @end
@@ -271,10 +287,11 @@ void DPPeekInstallPages(void) {
     [NSNotificationCenter.defaultCenter addObserverForName:NSWindowWillCloseNotification object:nil queue:nil usingBlock:^(NSNotification *note) {
         if (note.object) DPSet(note.object, &DPPeekWindowClosedKey, @YES);
         if (DPPeekWarmView.window == note.object) DPPeekCool();
+        DPPeekHandoffSelectionChanged(note.object, nil);
         for (DPPeekCard *peek in DPPeekAllCards(note.object)) {
             id page = peek.page;
             DPPeekChatDetachQuiet(peek);
-            [peek handOver];
+            [peek handOverTo:nil attach:nil];
             DPPeekDiscard(page, nil);
         }
         DPPeekUpdateSyncTimer();
