@@ -8,6 +8,11 @@ BOOL DPIsNewTabButton(NSView *view) {
 
 static BOOL DPStandingIn(NSWindow *window) { return DPHidesTab(DPGet(window, &DPTabKey)); }
 
+// Only in the hidden tab's own space, not the next one a swipe slides in.
+static BOOL DPStandingInHere(NSView *background) {
+    return DPStandingIn(background.window) && DPListsTab(background, DPGet(background.window, &DPTabKey));
+}
+
 static void DPSelectButton(NSView *background, BOOL selected) {
     uintptr_t *style = DPSelectionStyle(background);
     uint8_t *shape = DPTabShape(background);
@@ -36,13 +41,12 @@ static void DPSelectButton(NSView *background, BOOL selected) {
 }
 
 static void DPSelectButtons(NSWindow *window) {
-    BOOL standingIn = DPStandingIn(window);
     for (NSView *background in DPFindViews(DPDiaTabBackground))
-        if (background.window == window && DPIsNewTabButton(background.superview)) DPSelectButton(background, standingIn);
+        if (background.window == window && DPIsNewTabButton(background.superview)) DPSelectButton(background, DPStandingInHere(background));
 }
 
 static void DPHideFrontTab(NSView *background) {
-    BOOL standingIn = DPStandingIn(background.window), front = standingIn && DPDrawnSelected(background) && DPIsKind(background.superview, DPDiaTabView);
+    BOOL standingIn = DPStandingInHere(background), front = standingIn && DPDrawnSelected(background) && DPIsKind(background.superview, DPDiaTabView);
     if (DPSwitchingTo(background)) return;
     DPUnselectFrontTab(background, standingIn);
     if (front) DPSelectButtons(background.window);
@@ -56,12 +60,11 @@ static void DPRefresh(NSWindow *window) {
         if ([view isKindOfClass:cls]) [backgrounds addObject:view];
         return NO;
     });
-    BOOL standingIn = DPStandingIn(window);
     for (NSView *background in backgrounds)
-        if (DPIsNewTabButton(background.superview)) DPSelectButton(background, standingIn);
+        if (DPIsNewTabButton(background.superview)) DPSelectButton(background, DPStandingInHere(background));
     for (NSView *background in backgrounds) {
         if (!DPIsKind(background.superview, DPDiaTabView)) continue;
-        if (!standingIn) DPGiveBackSelection(background);
+        if (!DPStandingInHere(background)) DPGiveBackSelection(background);
         else if (DPDrawnSelected(background)) {
             DPHideFrontTab(background);
             DPTabShapeView(background).needsLayout = YES;
@@ -107,13 +110,13 @@ static void DPTabBackground_layout(NSView *self, SEL _cmd) {
     }
     DPHideFrontTab(self);
     DPCallOriginal(DPTabBackground_layout, self);
-    if (DPIsNewTabButton(self.superview)) DPSelectButton(self, DPStandingIn(self.window));
+    if (DPIsNewTabButton(self.superview)) DPSelectButton(self, DPStandingInHere(self));
 }
 
 NSString *DPVerifyStandIn(NSWindow *window, NSString *tabID) {
-    BOOL standingIn = DPHidesTab(tabID);
     for (NSView *background in DPFindViews(DPDiaTabBackground)) {
         if (background.window != window || background.isHiddenOrHasHiddenAncestor) continue;
+        BOOL standingIn = DPHidesTab(tabID) && DPListsTab(background, tabID);
         if (DPIsNewTabButton(background.superview)) {
             if (standingIn && !DPDrawnSelected(background) && DPSelectedLook(background.superview)) return @"the New Tab button isn't selected while the new tab is hidden";
             if (!standingIn && DPGet(background, &DPSavedKey)) return @"the New Tab button stays selected once the bar closes";

@@ -23,6 +23,26 @@ NSArray<NSString *> *DPListedTabs(NSWindow *window) {
     return tabs;
 }
 
+static char DPListsKey;
+
+// Each space has its own sidebar page, and a swipe between spaces shows two. Only the one listing the tab is its space.
+BOOL DPListsTab(NSView *view, NSString *tabID) {
+    NSView *found = view;
+    while (found && !DPIsKind(found, DPDiaTabListCollection)) found = found.superview;
+    if (!found || !tabID) return found == nil;
+    NSCollectionView *list = (NSCollectionView *)found;
+    NSInteger count = 0;
+    for (NSInteger section = 0; section < list.numberOfSections; section++) count += [list numberOfItemsInSection:section];
+    NSArray *cached = DPGet(list, &DPListsKey);  // Asked for every row on every frame of a swipe.
+    if ([cached[0] isEqual:tabID] && [cached[1] integerValue] == count) return [cached[2] boolValue];
+    BOOL listed = NO;
+    for (NSInteger section = 0; section < list.numberOfSections && !listed; section++)
+        for (NSInteger item = 0; item < [list numberOfItemsInSection:section] && !listed; item++)
+            listed = [DPTabIn(DPRowName(list, [NSIndexPath indexPathForItem:item inSection:section])) isEqual:tabID];
+    DPSet(list, &DPListsKey, @[ tabID, @(count), @(listed) ]);
+    return listed;
+}
+
 // Pinned tabs sit above SectionID.pinned, so resetting regular there leaves only unpinned tabs.
 BOOL DPOnlyListedTab(NSString *tab, NSString *closing, NSWindow *window) {
     NSMutableArray<NSString *> *regular = [NSMutableArray array];

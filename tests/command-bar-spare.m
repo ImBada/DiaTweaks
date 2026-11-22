@@ -138,6 +138,7 @@ id DPDismiss(DPCommandBarOverlay *overlay, BOOL closing) {
 void DPInstallFrozenLists(void) {}
 void DPFreezeLists(NSWindow *window) {}
 NSArray<NSString *> *DPListedTabs(NSWindow *window) { return @[]; }
+BOOL DPListsTab(NSView *view, NSString *tabID) { return YES; }
 void DPRelayoutLists(void) {}
 NSString *DPVerifyHiddenRows(void) { return nil; }
 void DPInstallHiddenStripTab(void) {}
@@ -461,6 +462,42 @@ int main(void) {
         CHECK(gSendActionCalls == 1, "DPMakeSpare resumes once Peek card is parked/hidden");
         DPStopExpecting();
         [peekCard removeFromSuperview];
+
+        // Regression: a parked spare belongs to its own space, so another space coming forward drops it
+        // (never touching the new space's tabs) instead of showing it there.
+        DPCommandBarSpare.on = YES;
+        DPCommandBarHideTab.on = YES;
+        peekCard.hidden = NO;
+        [profA.appleScriptTabs removeAllObjects];
+        [profA.appleScriptTabs addObject:pageA];
+        swA.appleScriptProfiles = [NSMutableArray arrayWithObject:profA];
+        swA.activeTab = pageA;
+        DPFakeTab *otherSpaceTab = DPMakeTab(@"other-space", @"https://example.com");
+        DPFakeProfile *otherSpace = [DPFakeProfile new];
+        otherSpace.appleScriptTabs = [NSMutableArray arrayWithObject:otherSpaceTab];
+        DPFakeTab *leftSpare = DPAddHiddenTab(winA, profA, @"left-space-spare");
+        CHECK(DPParkSpare(DPMakeOverlay(winA, leftSpare, pageA)) && DPSpareIn(winA), "a spare parks in its own space");
+        swA.appleScriptProfiles = [NSMutableArray arrayWithObjects:otherSpace, profA, nil];
+        swA.activeTab = otherSpaceTab;
+        CHECK(!DPShowSpare(winA) && !DPSpareIn(winA), "a spare left in another space isn't shown when the bar opens there");
+        CHECK(leftSpare.closed && !otherSpaceTab.closed && !pageA.closed, "dropping the left spare closes only the spare, not the new space's tabs");
+        CHECK(![gDefaults.store[DPSparesKey] containsObject:@"left-space-spare"], "a dropped spare is no longer noted");
+
+        swA.appleScriptProfiles = [NSMutableArray arrayWithObject:profA];
+        swA.activeTab = pageA;
+        [profA.appleScriptTabs removeObject:leftSpare];
+        DPFakeTab *idleSpare = DPAddHiddenTab(winA, profA, @"idle-space-spare");
+        CHECK(DPParkSpare(DPMakeOverlay(winA, idleSpare, pageA)) && DPSpareIn(winA), "a second spare parks in its own space");
+        swA.appleScriptProfiles = [NSMutableArray arrayWithObjects:otherSpace, profA, nil];
+        swA.activeTab = otherSpaceTab;
+        winA.fakeResponder = webA;
+        gIdleSeconds = 10;
+        DPMakeSpare();
+        CHECK(!DPSpareIn(winA) || DPSpareIn(winA).openedTab != idleSpare, "the spare timer drops a spare left in another space");
+        CHECK(idleSpare.closed && !otherSpaceTab.closed, "the spare timer closes the left spare without touching the new space");
+        DPStopExpecting();
+        swA.appleScriptProfiles = [NSMutableArray arrayWithObject:profA];
+        swA.activeTab = pageA;
 
         if (failures) return 1;
         puts("PASS: command bar spare guards, launch cleanup, and timer lifecycle");

@@ -23,6 +23,7 @@ void DPFreezeLists(NSWindow *window);
 NSString *DPRowName(NSCollectionView *list, NSIndexPath *path);
 NSString *DPTabIn(NSString *rowName);
 NSArray<NSString *> *DPListedTabs(NSWindow *window);
+BOOL DPListsTab(NSView *view, NSString *tabID);
 BOOL DPOnlyListedTab(NSString *tabID, NSString *closingID, NSWindow *window);
 void DPRelayoutLists(void);
 NSRect DPDiaRowFrame(NSCollectionViewLayout *layout, NSIndexPath *path);
