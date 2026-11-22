@@ -32,6 +32,14 @@ id DPScriptTabInAnyProfile(id scriptWindow, NSString *tabID) {
     return nil;
 }
 
+id DPScriptProfileHolding(id scriptWindow, NSString *tabID) {
+    id profiles = tabID ? DPValueForKey(scriptWindow, @"appleScriptProfiles") : nil;
+    if (![profiles isKindOfClass:NSArray.class]) return nil;
+    for (id profile in profiles)
+        if (DPScriptTabIn(profile, tabID)) return profile;
+    return nil;
+}
+
 NSString *DPTabID(id tab) { return DPValueForKey(tab, @"tabId"); }
 NSString *DPActiveTabIDIn(id scriptWindow) { return DPTabID(DPValueForKey(scriptWindow, @"activeTab")); }
 NSString *DPActiveTabID(NSWindow *window) { return DPActiveTabIDIn(DPScriptWindow(window)); }

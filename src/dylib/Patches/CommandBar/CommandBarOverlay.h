@@ -11,7 +11,7 @@ extern DPPatch DPCommandBar, DPCommandBarKeepText;
 @property(strong) NSTimer *watch;
 @property(copy) NSString *startURL;
 @property CGFloat collapsedHeight, collapsedWidth;
-@property CFTimeInterval sizedAt;
+@property CFTimeInterval sizedAt, listlessSince;
 @property BOOL picked, overBlank, passingThrough;
 - (NSView *)viewUnder:(NSPoint)point;
 @end

@@ -372,9 +372,12 @@ id DPDismiss(DPCommandBarOverlay *overlay, BOOL closing) {
 static BOOL DPNowhereToGo(DPCommandBarOverlay *overlay) {
     NSWindow *host = overlay.host;
     id scriptWindow = overlay.returnTab ? DPScriptWindow(host) : nil;
-    id tabs = DPValueForKey(scriptWindow, @"appleScriptTabs");
+    // Once another space is in front, the bar's tab and the tab it came from are counted in their own space.
+    NSString *openedID = DPTabID(overlay.openedTab);
+    id space = DPScriptTabIn(scriptWindow, openedID) ? scriptWindow : DPScriptProfileHolding(scriptWindow, openedID) ?: scriptWindow;
+    id tabs = DPValueForKey(space, @"appleScriptTabs");
     NSUInteger count = [tabs isKindOfClass:NSArray.class] ? [tabs count] : 0;
-    return !overlay.returnTab || (!DPScriptTabIn(scriptWindow, DPTabID(overlay.returnTab)) && count < 2);
+    return !overlay.returnTab || (!DPScriptTabIn(space, DPTabID(overlay.returnTab)) && count < 2);
 }
 
 static id DPDismissCommandBar(DPCommandBarOverlay *overlay) { return DPDismiss(overlay, NO); }
@@ -404,6 +407,33 @@ static void DPCloseOnNewLayout(NSWindow *window) {
     if (DPSpareIn(window) && DPHasStrip(window)) DPDropSpare(window);
 }
 
+// A result is opening in the bar's tab. A chat loads no page; Dia empties the bar once it has taken what was typed.
+static BOOL DPTaken(DPCommandBarOverlay *overlay, id tab) {
+    NSString *url = DPValueForKey(tab, @"URL");
+    return (overlay.picked && !DPBarText(overlay).string.length) || !(url == overlay.startURL || [url isEqual:overlay.startURL]);
+}
+
+// Midway through a swipe between spaces Dia lists no tabs at all. Wait it out, but not for good.
+static BOOL DPSwipeSettling(DPCommandBarOverlay *overlay, id scriptWindow) {
+    id tabs = DPValueForKey(scriptWindow, @"appleScriptTabs");
+    if (![tabs isKindOfClass:NSArray.class] || [tabs count]) return overlay.listlessSince = 0, NO;
+    CFTimeInterval now = CACurrentMediaTime();
+    if (!overlay.listlessSince) overlay.listlessSince = now;
+    return now - overlay.listlessSince < 3;
+}
+
+// Another space came forward, leaving the bar's tab in the old one. Close it unless a result is opening in it, it
+// was opened over a blank tab, or it's its space's only tab, since closing that would empty the space.
+static void DPLeaveSpace(DPCommandBarOverlay *overlay, id scriptWindow) {
+    NSString *openedID = DPTabID(overlay.openedTab);
+    id space = DPScriptProfileHolding(scriptWindow, openedID), left = DPScriptTabIn(space, openedID), spaceTabs = DPValueForKey(space, @"appleScriptTabs");
+    BOOL close = left && DPHiding() && !overlay.overBlank && !overlay.picked && !DPTaken(overlay, left)
+              && [spaceTabs isKindOfClass:NSArray.class] && [spaceTabs count] > 1;
+    DPDismiss(overlay, close);
+    DPNoteSpare(openedID, NO);
+    if (close) DPCloseTab(left);
+}
+
 static void DPWatchNewTab(DPCommandBarOverlay *overlay, id scriptWindow) {
     NSWindow *window = overlay.host;
     NSView *content = window.contentView;
@@ -416,7 +446,9 @@ static void DPWatchNewTab(DPCommandBarOverlay *overlay, id scriptWindow) {
     DPPlaceShade(overlay.shade, window);
     scriptWindow = scriptWindow ?: DPScriptWindow(window);
     id tab = DPScriptTabIn(scriptWindow, DPTabID(overlay.openedTab));
-    if (!tab) return (void)DPDismissCommandBar(overlay);
+    if (!tab && DPSwipeSettling(overlay, scriptWindow)) return;
+    if (!tab) return DPLeaveSpace(overlay, scriptWindow);
+    overlay.listlessSince = 0;
     NSString *active = DPActiveTabIDIn(scriptWindow);
     if (active && ![active isEqual:DPTabID(tab)] && ![active isEqual:DPTabID(overlay.returnTab)]) {
         NSString *left = DPTabID(overlay.returnTab);
@@ -429,10 +461,7 @@ static void DPWatchNewTab(DPCommandBarOverlay *overlay, id scriptWindow) {
         DPDismissCommandBar(overlay);
         return DPFocusTab(tab);
     }
-    // A chat loads no page; Dia empties the bar once it has taken what was typed.
-    BOOL taken = overlay.picked && !DPBarText(overlay).string.length;
-    NSString *url = DPValueForKey(tab, @"URL");
-    if (!taken && (url == overlay.startURL || [url isEqual:overlay.startURL])) return;
+    if (!DPTaken(overlay, tab)) return;
     DPDismissCommandBar(overlay);
     DPNoteSpare(DPTabID(tab), NO);
     DPFocusTab(tab);
