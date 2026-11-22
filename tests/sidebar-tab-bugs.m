@@ -315,9 +315,11 @@ static int gDragEnteredCalls, gDragUpdatedCalls, gDragExitedCalls;
 
 @interface _TtC7TabList11TabListView : NSView
 @property DPFakeSpace *space;
+@property int scrolled;
 @end
 @implementation _TtC7TabList11TabListView
 - (id)safeSwiftValueForKey:(NSString *)key { return self.space; }
+- (void)scrollViewDidScroll { self.scrolled++; }
 - (NSDragOperation)draggingEntered:(id<NSDraggingInfo>)info { gDragEnteredCalls++; return NSDragOperationMove; }
 - (NSDragOperation)draggingUpdated:(id<NSDraggingInfo>)info { gDragUpdatedCalls++; return NSDragOperationMove; }
 - (void)draggingExited:(id<NSDraggingInfo>)info { gDragExitedCalls++; }
@@ -495,6 +497,7 @@ static void TestCollapsePinnedWithHideTab(void) {
     DPCommandBar.on = DPCommandBarHideTab.on = DPCollapsePinned.on = YES;
 
     DPFakeVisibleWindow *w = [[DPFakeVisibleWindow alloc] initWithContentRect:NSMakeRect(0, 0, 300, 500) styleMask:NSWindowStyleMaskTitled backing:NSBackingStoreBuffered defer:NO];
+    w.releasedWhenClosed = NO;
     _TtC7TabList11TabListView *tabList = [[_TtC7TabList11TabListView alloc] initWithFrame:NSMakeRect(0, 0, 200, 500)];
     tabList.space = [DPFakeSpace new];
     tabList.space.spaceID = @"space-fake";
@@ -574,6 +577,135 @@ static void TestCollapsePinnedWithHideTab(void) {
     gFakeHeights = nil;
     gFakeNames = nil;
     gFakeList = nil;
+    [w close];
+}
+
+
+// --- 4c. CollapsePinned and the pill that scrolls to the active tab ---
+// Dia judges the active tab from the row it cached against the visible rect, without going through any hook.
+static NSCollectionViewLayoutAttributes *DiaRow(NSCollectionViewLayout *layout, NSInteger section, NSInteger item) {
+    SEL sel = @selector(layoutAttributesForItemAtIndexPath:);
+    NSCollectionViewLayoutAttributes *(*dia)(id, SEL, NSIndexPath *) = (void *)DPDiaIMP(objc_getClass(DPDiaTabListLayout), sel);
+    return dia(layout, sel, [NSIndexPath indexPathForItem:item inSection:section]);
+}
+
+static NSString *PillEdge(NSCollectionViewLayout *layout, NSScrollView *scroll, NSInteger item) {
+    NSRect row = DiaRow(layout, 1, item).frame, visible = scroll.documentVisibleRect;
+    return NSMaxY(row) <= NSMinY(visible) ? @"top" : NSMinY(row) >= NSMaxY(visible) ? @"bottom" : nil;
+}
+
+static void ScrollTo(NSScrollView *scroll, CGFloat y) {
+    [scroll.contentView scrollToPoint:NSMakePoint(0, y)];
+    [scroll reflectScrolledClipView:scroll.contentView];
+}
+
+static BOOL RowsAgree(NSCollectionViewLayout *layout) {
+    for (NSInteger section = 0; section < (NSInteger)gFakeHeights.count; section++)
+        for (NSInteger item = 0; item < (NSInteger)gFakeHeights[section].count; item++) {
+            NSRect dia = DiaRow(layout, section, item).frame, shown = [layout layoutAttributesForItemAtIndexPath:[NSIndexPath indexPathForItem:item inSection:section]].frame;
+            if (!NSEqualRects(dia, shown)) return NO;
+        }
+    return YES;
+}
+
+static void Settle(void) { [[NSRunLoop mainRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.05]]; }
+
+static void TestCollapsePinnedPill(void) {
+    NSMutableArray<NSString *> *regular = [NSMutableArray arrayWithObject:@".newtab"];
+    for (int i = 1; i <= 20; i++) [regular addObject:[NSString stringWithFormat:@".tab(%08d-0000-0000-0000-000000000000)", i]];
+    FakeRows(@[ @[ @".tab(a0000000-0000-0000-0000-000000000000)", @".tab(b0000000-0000-0000-0000-000000000000)", @".tab(c0000000-0000-0000-0000-000000000000)", @".sep" ], regular ]);
+    NSUserDefaults *defaults = [[NSUserDefaults alloc] initWithSuiteName:@"com.diapatches"];
+    [defaults setObject:@[ @"space-pill" ] forKey:@"collapsedPinned"];
+
+    DPFakeVisibleWindow *w = [[DPFakeVisibleWindow alloc] initWithContentRect:NSMakeRect(0, 0, 300, 400) styleMask:NSWindowStyleMaskTitled backing:NSBackingStoreBuffered defer:NO];
+    w.releasedWhenClosed = NO;
+    _TtC7TabList11TabListView *tabList = [[_TtC7TabList11TabListView alloc] initWithFrame:NSMakeRect(0, 0, 200, 400)];
+    tabList.space = [DPFakeSpace new];
+    tabList.space.spaceID = @"space-pill";
+    NSScrollView *scroll = [[NSScrollView alloc] initWithFrame:NSMakeRect(0, 0, 200, 400)];
+    _TtCC7TabList11TabListView14CollectionView *cv = [[_TtCC7TabList11TabListView14CollectionView alloc] initWithFrame:NSMakeRect(0, 0, 200, 889)];
+    _TtC7TabList27TabListCollectionViewLayout *layout = [_TtC7TabList27TabListCollectionViewLayout new];
+    DPFakeRowsDS *ds = [DPFakeRowsDS new];
+    ds->_impl = [DPFakeRowSource new];
+    cv.dataSource = ds;
+    cv.collectionViewLayout = layout;
+    scroll.documentView = cv;
+    [tabList addSubview:scroll];
+    [w.contentView addSubview:tabList];
+    gFakeList = cv;
+    void (^relayout)(void) = ^{
+        [layout prepareLayout];
+        cv.frame = NSMakeRect(0, 0, 200, layout.collectionViewContentSize.height);
+    };
+
+    // Folded: 3 pinned rows of 37 leave the 28 pt line, and the 8th tab (raw row y 408) sits at 325, inside the 400 pt list.
+    DPCollapsePinned.on = YES;
+    relayout();
+    Settle();
+    Check(layout.collectionViewContentSize.height == 806 && cv.frame.size.height == 806, @"CollapsePinned: folded list is 83 pt shorter");
+    Check(RowsAgree(layout), @"CollapsePinned: Dia's cached rows are where the list shows them when folded");
+    Check(PillEdge(layout, scroll, 8) == nil, @"CollapsePinned: no scroll-to-tab pill for an active tab in view under folded pinned rows");
+    Check([PillEdge(layout, scroll, 20) isEqual:@"bottom"], @"CollapsePinned: pill shows below for an active tab past the bottom of the list");
+    Check(tabList.scrolled == 1, @"CollapsePinned: Dia judges the active tab again once the rows move");
+    relayout();
+    Settle();
+    Check(tabList.scrolled == 1, @"CollapsePinned: a layout that moves nothing leaves Dia's pill alone");
+    // A tab with a pull request status is taller and moves the rows below it, after we moved the rows.
+    DPPullRequestRepo.install();
+    DPPullRequestRepo.on = YES;
+    NSView *statusContent = [[objc_getClass(DPDiaTabContentView) alloc] initWithFrame:NSMakeRect(0, 0, 200, 51)];
+    NSView *statusSubtitle = [NSView new];
+    [statusContent addSubview:statusSubtitle];
+    DPSetPRStatus(statusSubtitle, @"00000003-0000-0000-0000-000000000000", @"Approved");
+    relayout();
+    CGFloat tall = NSHeight(RowFrame(1, 3));
+    Check(tall > 37 && RowFrame(1, 2).origin.y == 29 + 37 * 2 && RowFrame(1, 3).origin.y == 29 + 37 * 3 && RowFrame(1, 4).origin.y == NSMaxY(RowFrame(1, 3)), @"CollapsePinned: a taller pull request tab leaves no gap in the folded list");
+    Check(RowsAgree(layout) && layout.collectionViewContentSize.height == 806 + tall - 37, @"CollapsePinned: Dia's rows still match the list beside Pull Request Repo");
+    Check(PillEdge(layout, scroll, 8) == nil, @"CollapsePinned: a taller pull request tab does not bring the pill back");
+    DPResetPRRows();
+    DPPullRequestRepo.on = NO;
+    relayout();
+
+    ScrollTo(scroll, 406);
+    Check(PillEdge(layout, scroll, 20) == nil && [PillEdge(layout, scroll, 8) isEqual:@"top"], @"CollapsePinned: pill shows above once the active tab scrolls off the top");
+    ScrollTo(scroll, 0);
+    Check(DPCollapsePinned.verify(&DPCollapsePinned) == nil, @"CollapsePinned: verify passes with Dia's rows moved");
+
+    // Dia moved a row of its own after we did: verify says so.
+    NSCollectionViewLayoutAttributes *line = DiaRow(layout, 0, 3);
+    line.frame = NSOffsetRect(line.frame, 0, 5);
+    Check(DPCollapsePinned.verify(&DPCollapsePinned) != nil, @"CollapsePinned: verify notices Dia's rows apart from the list");
+    relayout();
+
+    // Dia rebuilds its rows without our hooks: the list still shows them in place.
+    SEL prepare = @selector(prepareLayout);
+    ((void (*)(id, SEL))DPDiaIMP(objc_getClass(DPDiaTabListLayout), prepare))(layout, prepare);
+    Check(RowFrame(0, 3).origin.y == 28 && layout.collectionViewContentSize.height == 806, @"CollapsePinned: rows Dia rebuilt on its own still show under the Pinned line");
+    relayout();
+    Check(RowsAgree(layout), @"CollapsePinned: our next layout moves Dia's rebuilt rows again");
+
+    // Unfolded the rows sit under the line, pinned ones included, and the 8th tab is at 436, past the bottom.
+    [defaults setObject:@[] forKey:@"collapsedPinned"];
+    relayout();
+    Settle();
+    Check(layout.collectionViewContentSize.height == 917 && RowsAgree(layout), @"CollapsePinned: unfolded list shows Dia's rows under the Pinned line");
+    Check([PillEdge(layout, scroll, 8) isEqual:@"bottom"] && PillEdge(layout, scroll, 3) == nil, @"CollapsePinned: pill follows the unfolded rows");
+    Check(tabList.scrolled == 2, @"CollapsePinned: Dia judges the active tab again when the list unfolds");
+
+    // Off, or paused: Dia's rows are its own again.
+    DPCollapsePinned.on = NO;
+    DPCollapsePinned.apply(&DPCollapsePinned);
+    relayout();
+    Settle();
+    Check(DiaRow(layout, 0, 0).frame.origin.y == 0 && layout.collectionViewContentSize.height == 889 && RowsAgree(layout), @"CollapsePinned: off leaves Dia's rows and list height stock");
+    Check([PillEdge(layout, scroll, 8) isEqual:@"bottom"] && PillEdge(layout, scroll, 3) == nil, @"CollapsePinned: off leaves the pill to Dia");
+    Check(tabList.scrolled == 3 && DPCollapsePinned.verify(&DPCollapsePinned) == nil, @"CollapsePinned: Dia judges the active tab again once it is off");
+
+    [defaults removeObjectForKey:@"collapsedPinned"];
+    gFakeHeights = nil;
+    gFakeNames = nil;
+    gFakeList = nil;
+    [w close];
 }
 
 // --- 5. UndoCloseTab off-tweak monitor guard ---
@@ -916,6 +1048,7 @@ int main(void) {
         TestHideTabGroupBackground();
         TestKeepFoldersOpen();
         TestCollapsePinnedWithHideTab();
+        TestCollapsePinnedPill();
         TestCollapsePinned();
         TestUndoCloseTabAndSavePageAs();
         TestProfileEmoji();
