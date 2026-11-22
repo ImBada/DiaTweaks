@@ -129,7 +129,7 @@ static void DPCutOffAIServers(void) {
 }
 
 static void DPOfferRelaunch(DPPatch *patch) {
-    if (patch->on == gCutOff || patch->on != DPSavedOn(patch)) return;
+    if (DPTesting || patch->on == gCutOff || patch->on != DPSavedOn(patch)) return;
     NSAlert *alert = [NSAlert new];
     alert.messageText = patch->on ? @"Relaunch Dia to cut off its AI servers" : @"Relaunch Dia to reconnect its AI servers";
     alert.informativeText = patch->on ? @"Until then, AI is hidden, but Dia can still reach its AI servers." : @"Until then, chat can’t reach them.";

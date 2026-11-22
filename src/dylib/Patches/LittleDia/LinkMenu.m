@@ -20,7 +20,14 @@ static BOOL DPPage_willShowMenu(id self, SEL _cmd, id page, id menu, id element)
     return DPCallOriginal(DPPage_willShowMenu, self, page, menu, element);
 }
 
-static void DPAddLinkItem(NSMenu *menu) {
+static BOOL DPIsWebLinkMenu(NSMenu *menu, NSView *view) {
+    if (!view || DPIsKind(view, "RenderWidgetHostViewCocoa") || DPIsKind(view, "WebContentsViewCocoa")) return YES;
+    for (NSMenuItem *item in menu.itemArray)
+        if ([item.title rangeOfString:@"Open Link" options:NSCaseInsensitiveSearch | NSAnchoredSearch].location != NSNotFound) return YES;
+    return NO;
+}
+
+static void DPAddLinkItem(NSMenu *menu, NSView *view) {
     BOOL tagged = DPTaggedMenus.count && [DPTaggedMenus containsObject:menu];
     if (!gLink && !tagged) return;
     if (tagged) {
@@ -28,6 +35,7 @@ static void DPAddLinkItem(NSMenu *menu) {
             if (DPGet(old, &DPItemKey)) [menu removeItem:old];
         [DPTaggedMenus removeObject:menu];
     }
+    if (!gLink || !DPIsWebLinkMenu(menu, view)) return;
     NSURL *url = gLink;
     BOOL fresh = gLinkAt.timeIntervalSinceNow > -2;
     gLink = nil;
@@ -43,17 +51,17 @@ static void DPAddLinkItem(NSMenu *menu) {
 }
 
 static void DPMenu_popUpContext(id self, SEL _cmd, NSMenu *menu, NSEvent *event, NSView *view) {
-    DPAddLinkItem(menu);
+    DPAddLinkItem(menu, view);
     DPCallOriginal(DPMenu_popUpContext, self, menu, event, view);
 }
 
 static void DPMenu_popUpContextFont(id self, SEL _cmd, NSMenu *menu, NSEvent *event, NSView *view, NSFont *font) {
-    DPAddLinkItem(menu);
+    DPAddLinkItem(menu, view);
     DPCallOriginal(DPMenu_popUpContextFont, self, menu, event, view, font);
 }
 
 static BOOL DPMenu_popUpAt(NSMenu *self, SEL _cmd, NSMenuItem *item, NSPoint location, NSView *view) {
-    DPAddLinkItem(self);
+    DPAddLinkItem(self, view);
     return DPCallOriginal(DPMenu_popUpAt, self, item, location, view);
 }
 
@@ -70,7 +78,7 @@ void DPInstallLittleDiaLinkMenu(void) {
 
 NSString *DPLittleDiaLinkMenuProblem(void) {
     Class page = objc_getClass(DPDiaWebContent);
-    if (class_getMethodImplementation(page, @selector(webContents:willShowContextMenu:withElement:)) != (IMP)DPPage_willShowMenu)
+    if (!DPIsHooked(page, @selector(webContents:willShowContextMenu:withElement:), (IMP)DPPage_willShowMenu))
         return @"link menus don't reach Little Dia";
     return nil;
 }

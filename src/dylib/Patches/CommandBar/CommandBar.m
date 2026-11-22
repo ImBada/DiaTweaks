@@ -459,7 +459,7 @@ id DPWatchKeys(DPCommandBarOverlay *overlay) {
     NSEventMask mask = NSEventMaskKeyDown | NSEventMaskLeftMouseUp | NSEventMaskLeftMouseDown | NSEventMaskRightMouseDown;
     return [NSEvent addLocalMonitorForEventsMatchingMask:mask handler:^NSEvent *(NSEvent *event) {
         DPCommandBarOverlay *overlay = weak;
-        if (!overlay || event.window != overlay.host) return event;
+        if (!overlay || event.window != overlay.host || overlay.host.attachedSheet) return event;
         if (event.type == NSEventTypeLeftMouseDown || event.type == NSEventTypeRightMouseDown) return DPHiding() ? DPTabLayoutMouseDown(overlay, event) : event;
         BOOL click = event.type == NSEventTypeLeftMouseUp;
         if (click) DPTabLayoutMouseUp(overlay);
@@ -741,8 +741,17 @@ static void DPPlusButton_mouseDown(NSView *self, SEL _cmd, NSEvent *event) {
     if (!DPHiding() || !DPIsKind(self.superview, DPDiaTabStripTabs) || !DPClickedNewTab(self.window)) DPCallOriginal(DPPlusButton_mouseDown, self, event);
 }
 
+static BOOL DPOverPinnedHeader(NSView *tabList, id gesture) {
+    Class headerCls = NSClassFromString(@"DPPinnedHeader");
+    if (!headerCls || ![gesture respondsToSelector:@selector(locationInView:)]) return NO;
+    NSView *header = DPFindView(tabList, ^BOOL(NSView *view) { return [view isKindOfClass:headerCls]; });
+    if (!header || header.isHiddenOrHasHiddenAncestor || !header.superview) return NO;
+    return NSPointInRect([gesture locationInView:header.superview], header.frame);
+}
+
 static void DPTabList_backgroundDoubleClick(NSView *self, SEL _cmd, id gesture) {
-    if (!DPHiding() || !DPClickedNewTab(self.window)) DPCallOriginal(DPTabList_backgroundDoubleClick, self, gesture);
+    if (DPOverPinnedHeader(self, gesture) || !DPHiding() || !DPClickedNewTab(self.window))
+        DPCallOriginal(DPTabList_backgroundDoubleClick, self, gesture);
 }
 
 static BOOL DPToolbarShowing(NSWindow *window);
@@ -787,14 +796,14 @@ static NSEvent *DPCommandBarKey(NSEvent *event) {
     if (!hasShortcutMod) return event;
     BOOL newTab = DPIsShortcut(event, @"New Tab");
     if (!(newTab || DPIsShortcut(event, @"Open Command Bar"))) return event;
+    DPCommandBarOverlay *overlay = DPGet(window, &DPOverlayKey);
+    if (!newTab && !overlay && DPVisiblePeekTakesCommandL(window)) return event;
     DPSet(window, &DPClosedAtKey, nil);
     DPNotMakingSpare();
-    DPCommandBarOverlay *overlay = DPGet(window, &DPOverlayKey);
     if (event.isARepeat) {
         if (overlay) DPFocusBar(overlay);
         return nil;
     }
-    if (!overlay && !newTab && DPVisiblePeekTakesCommandL(window)) return event;
     if (DPWaitForDia(window, event, newTab)) return nil;
     if (newTab && DPIsKind(overlay.page, DPDiaPopover) && !DPSpareIn(window)) {
         DPExpectNewTab(window);

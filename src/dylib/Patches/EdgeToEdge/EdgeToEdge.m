@@ -42,11 +42,11 @@ CGFloat DPBaseCornerRadius(NSView *container) {
 static void DPSetCornerRadius(NSView *container, CGFloat inset) {
     CGFloat *radius = DPIvar(container, "cornerRadius");
     if (!radius) return;
-    CGFloat delta = inset + DPWindowCornerGrowth(container.window);
-    if (delta == 0 && !DPGet(container, &DPRadiusKey)) return;
-    CGFloat base = DPBaseCornerRadius(container), target = MAX(0, base + delta);
-    if (delta != 0) DPOverride(container, &DPRadiusKey, @(base), @(target));
-    else DPSet(container, &DPRadiusKey, nil);
+    CGFloat growth = DPWindowCornerGrowth(container.window);
+    if (inset == 0 && growth == 0 && !DPGet(container, &DPRadiusKey)) return;
+    CGFloat base = DPBaseCornerRadius(container), target = MAX(0, base + inset + growth);
+    if (target != base) DPOverride(container, &DPRadiusKey, @(base), @(target));
+    else if (DPGet(container, &DPRadiusKey)) DPSet(container, &DPRadiusKey, nil);
     if (*radius == target) return;
     *radius = target;
     container.needsLayout = YES;

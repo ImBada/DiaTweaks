@@ -77,6 +77,7 @@ typedef struct DPHookFrame {
 
 void DPHook(const char *className, SEL sel, IMP replacement);
 void DPHookClass(Class cls, SEL sel, IMP replacement);
+BOOL DPIsHooked(Class cls, SEL sel, IMP replacement);
 IMP DPDiaIMP(Class cls, SEL sel);
 IMP DPOriginalIMP(id object, SEL sel, IMP replacement);
 IMP DPPushOriginalIMP(id object, SEL sel, IMP replacement, DPHookFrame *frame);

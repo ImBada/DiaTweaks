@@ -114,7 +114,7 @@ void DPInstallLittleDiaShortcuts(void) {
 NSString *DPLittleDiaShortcutsProblem(void) {
     Class popup = objc_getClass(DPDiaPopupController), item = objc_getClass(DPDiaCallbackMenuItem);
     for (const SEL *each = DPPopupActions(); *each; each++)
-        if (class_getMethodImplementation(popup, *each) != (IMP)DPPopup_action) return [NSString stringWithFormat:@"%@ doesn't reach Little Dia", NSStringFromSelector(*each)];
-    if (class_getMethodImplementation(item, @selector(performWithSender:)) != (IMP)DPCallback_perform) return @"Refresh doesn't reach Little Dia";
+        if (!DPIsHooked(popup, *each, (IMP)DPPopup_action)) return [NSString stringWithFormat:@"%@ doesn't reach Little Dia", NSStringFromSelector(*each)];
+    if (!DPIsHooked(item, @selector(performWithSender:), (IMP)DPCallback_perform)) return @"Refresh doesn't reach Little Dia";
     return nil;
 }

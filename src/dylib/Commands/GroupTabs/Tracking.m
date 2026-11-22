@@ -53,7 +53,7 @@ static id DPBrowser_createWebContents(id self, SEL _cmd, id params) {
 // Link/script tabs bypass Dia's browser callbacks and inherit their opener's browser.
 static void DPWebContent_didCreate(id self, SEL _cmd, id webContents, id newContents, NSURL *url, NSInteger disposition) {
     DPCallOriginal(DPWebContent_didCreate, self, webContents, newContents, url, disposition);
-    DPRemember(newContents, nil, DPBrowserOfContents(webContents), nil);
+    if (disposition != 0) DPRemember(newContents, nil, DPBrowserOfContents(webContents), nil);
 }
 
 static id DPContents_clone(id self, SEL _cmd) {

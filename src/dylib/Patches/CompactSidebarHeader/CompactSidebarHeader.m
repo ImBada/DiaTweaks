@@ -22,7 +22,7 @@ static NSRect DPCorneredRow(NSView *row, NSRect frame) {
     if (!DPCompactSidebarHeader.on) return frame;
     NSView *lights = DPGet(row, &DPButtonsKey);
     NSWindow *window = row.window;
-    if (lights.superview != row || !window || (window.styleMask & NSWindowStyleMaskFullScreen)) return frame;
+    if (lights.superview != row || lights.hiddenOrHasHiddenAncestor || !window || (window.styleMask & NSWindowStyleMaskFullScreen)) return frame;
     NSRect old = row.frame, close = DPCloseButtonInWindow(lights);
     BOOL flipped = row.superview.isFlipped;
     close.origin.x += frame.origin.x - NSMinX(old);
@@ -53,7 +53,7 @@ static void DPHeader_layout(NSView *self, SEL _cmd) {
     DPNoteButtons(self);
     DPCallOriginal(DPHeader_layout, self);
     NSView *lights = DPNoteButtons(self), *row = lights.superview;
-    if (!lights || row == self) return;
+    if (!lights || lights.hiddenOrHasHiddenAncestor || row == self) return;
     NSRect cornered = DPCorneredRow(row, row.frame);
     if (!NSEqualRects(cornered, row.frame) && DPMayAdjust(row)) row.frame = cornered;
     // At launch Dia lays the header out before the buttons are in it, then not again until the sidebar changes.
@@ -116,7 +116,7 @@ static NSString *DPVerifyCompactSidebarHeader(DPPatch *patch) {
         CGFloat trimmed = NSHeight(DPLaidOutHeader(header)) - NSHeight(header.frame);
         if (fabs(trimmed - (patch->on ? DPHeaderTrim : 0)) > 0.5) return patch->on ? @"header is full height" : @"header is still trimmed";
         NSView *lights = DPFindView(header, ^BOOL(NSView *v) { return DPIsKind(v, DPDiaTrafficLights); });
-        NSRect close = lights ? DPCloseButtonInWindow(lights) : NSZeroRect;
+        NSRect close = lights && !lights.hiddenOrHasHiddenAncestor ? DPCloseButtonInWindow(lights) : NSZeroRect;
         BOOL cornered = fabs(NSMinX(close) - DPTopTabsButtonInset) < 0.5 && fabs(NSMinY(close) - DPTopTabsButtonInset) < 0.5;
         BOOL fullScreen = (header.window.styleMask & NSWindowStyleMaskFullScreen) != 0;
         if (patch->on && !fullScreen && !NSIsEmptyRect(close) && !cornered) return @"window buttons aren't where top tabs put them";

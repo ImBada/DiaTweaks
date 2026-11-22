@@ -48,6 +48,18 @@ static void DPMaskCorners(NSView *container, CALayer *layer, CGFloat left, CGFlo
 
 static CGPathRef DPReshapePath(id owner, char *key, CGPathRef current, NSView *container, CGFloat base, CGFloat grow, CGFloat left, CGFloat right) {
     if (!current || CGRectGetWidth(CGPathGetBoundingBox(current)) < NSWidth(container.bounds) * 0.9) return NULL;
+    if (fabs(grow - 1) < 0.001 && left == 0 && right == 0) {
+        NSArray *saved = DPGet(owner, key);
+        if (!saved) return NULL;
+        CGPathRef dia = (__bridge CGPathRef)saved[0];
+        BOOL match = [saved[1] isEqual:(__bridge id)current];
+        DPSet(owner, key, nil);
+        if (!DPGet(owner, &DPPathKey) && !DPGet(owner, &DPShadowPathKey)) {
+            DPSet(owner, &DPPastPathsKey, nil);
+            [DPPathOwners removeObjectForKey:owner];
+        }
+        return match && !CGPathEqualToPath(dia, current) ? (CGPathRef)CFAutorelease(CGPathCreateCopy(dia)) : NULL;
+    }
     id dia = DPDiaValue(owner, key, (__bridge id)current);
     if (dia == (__bridge id)current) dia = CFBridgingRelease(CGPathCreateCopy(current));
     CGPathRef path = DPReshapeCorners((__bridge CGPathRef)dia, base * 1.6, grow * (1 - right), grow * (1 - left));

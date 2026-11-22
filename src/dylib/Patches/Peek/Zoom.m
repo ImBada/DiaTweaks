@@ -62,6 +62,6 @@ NSString *DPPeekZoomProblem(void) {
     Class controller = objc_getClass(DPDiaWindowController);
     SEL actions[] = {@selector(zoomIn:), @selector(zoomInAlternate:), @selector(zoomOut:), @selector(resetZoom:)};
     for (NSUInteger i = 0; i < 4; i++)
-        if (class_getMethodImplementation(controller, actions[i]) != (IMP)DPWindow_zoom) return @"zoom doesn't reach Peek";
-    return class_getMethodImplementation(controller, @selector(validateMenuItem:)) == (IMP)DPWindow_validate ? nil : @"zoom menu items don't reach Peek";
+        if (!DPIsHooked(controller, actions[i], (IMP)DPWindow_zoom)) return @"zoom doesn't reach Peek";
+    return DPIsHooked(controller, @selector(validateMenuItem:), (IMP)DPWindow_validate) ? nil : @"zoom menu items don't reach Peek";
 }

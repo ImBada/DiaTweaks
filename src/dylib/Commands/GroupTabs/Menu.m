@@ -4,7 +4,14 @@ static const NSInteger DPGroupMenuTag = 0xD1A7001, DPExpandMenuTag = 0xD1A7004, 
                        DPUngroupAllMenuTag = 0xD1A7003, DPGroupSelectedMenuTag = 0xD1A7006;
 static const NSInteger DPFollowerTags[] = {DPGroupSelectedMenuTag, DPExpandMenuTag, DPCollapseMenuTag, DPUngroupMenuTag, DPUngroupAllMenuTag};
 static const NSInteger DPFollowerCount = sizeof(DPFollowerTags) / sizeof(DPFollowerTags[0]);
+static NSHashTable<NSMenu *> *DPGroupMenus;
 static BOOL DPInserting;
+
+static void DPTrackGroupMenu(NSMenu *menu) {
+    if (!menu) return;
+    if (!DPGroupMenus) DPGroupMenus = [NSHashTable weakObjectsHashTable];
+    [DPGroupMenus addObject:menu];
+}
 
 static BOOL DPIsFollowerTag(NSInteger tag) {
     return tag >= DPUngroupMenuTag && tag <= DPGroupSelectedMenuTag;
@@ -68,6 +75,7 @@ static void DPPlaceFollowerItems(NSMenu *menu) {
         count++;
     }
     if (group == NSNotFound) return;
+    DPTrackGroupMenu(menu);
     if (count == DPFollowerCount && DPFollowersInPlace(menu, group) == DPFollowerCount) return DPSyncMenuVisibility(menu);
     DPInserting = YES;
     for (NSInteger i = menu.numberOfItems - 1; i >= 0; i--) {
@@ -110,8 +118,14 @@ static void DPPlaceGroupItem(NSMenu *menu) {
         DPInserting = NO;
     }
     NSInteger end = menu.numberOfItems;
-    for (NSInteger i = anchor + 1; i < menu.numberOfItems; i++)
-        if ([menu itemAtIndex:i].isSeparatorItem) { end = i; break; }
+    for (NSInteger i = anchor + 1; i < menu.numberOfItems; i++) {
+        NSMenuItem *each = [menu itemAtIndex:i];
+        if (each.isSeparatorItem || [each.title isEqualToString:@"Unload Tab"] || [each.title isEqualToString:@"Close"]
+            || [each.title isEqualToString:@"Close Tab"] || [each.title isEqualToString:@"Delete"]) {
+            end = i;
+            break;
+        }
+    }
     if (existing != NSNotFound && existing == end - 1 - DPFollowersInPlace(menu, existing)) return DPPlaceFollowerItems(menu);
     DPInserting = YES;
     NSMenuItem *item = existing != NSNotFound ? [menu itemAtIndex:existing] : DPGroupMenuItem();
@@ -121,6 +135,7 @@ static void DPPlaceGroupItem(NSMenu *menu) {
     }
     [menu insertItem:item atIndex:end];
     DPInserting = NO;
+    DPTrackGroupMenu(menu);
     DPPlaceFollowerItems(menu);
 }
 
@@ -177,6 +192,7 @@ static void DPApplyGroupTabs(DPPatch *patch) {
         [top.submenu itemWithTag:DPGroupMenuTag].hidden = !patch->on;
         for (NSInteger i = 0; i < DPFollowerCount; i++) [top.submenu itemWithTag:DPFollowerTags[i]].hidden = !patch->on;
     }
+    for (NSMenu *menu in DPGroupMenus.allObjects) DPSyncMenuVisibility(menu);
 }
 
 static NSString *DPVerifyGroupTabs(DPPatch *patch) {

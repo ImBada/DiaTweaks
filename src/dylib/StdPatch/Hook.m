@@ -120,6 +120,20 @@ void DPPopOriginalIMP(DPHookFrame *frame) {
     DPActiveFrame = frame->previous;
 }
 
+BOOL DPIsHooked(Class cls, SEL sel, IMP replacement) {
+    if (!cls || !sel || !replacement) return NO;
+    IMP current = class_getMethodImplementation(cls, sel);
+    if (current == replacement) return YES;
+    size_t count = atomic_load_explicit(&DPHookCount, memory_order_acquire);
+    for (size_t hops = 0; hops < count && current; hops++) {
+        IMP next = DPFindOriginal(cls, sel, current, NULL);
+        if (!next) break;
+        if (next == replacement) return YES;
+        current = next;
+    }
+    return NO;
+}
+
 IMP DPDiaIMP(Class cls, SEL sel) {
     if (!cls || !sel) return NULL;
     size_t count = atomic_load_explicit(&DPHookCount, memory_order_acquire);

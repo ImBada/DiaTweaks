@@ -5,21 +5,23 @@ void DPForEachOption(DPPatch *patch, void (^body)(DPPatch *option)) {
         if (DPRequired(DPPatches[i]) == patch) body(DPPatches[i]);
 }
 
+static BOOL DPShownOn(DPPatch *patch) { return patch && (DPPaused ? DPSavedOn(patch) : patch->on); }
+
 NSString *DPWhyDisabled(DPPatch *patch) {
     if (patch->unavailable) return @"Unavailable on this Dia version.";
     DPPatch *required = DPRequired(patch), *cover = DPPatchNamed(patch->coveredBy);
-    if (required && !required->on) return [NSString stringWithFormat:@"Needs %@.", required->title];
-    return cover && cover->on ? [NSString stringWithFormat:@"%@ hides this too.", cover->title] : nil;
+    if (required && !DPShownOn(required)) return [NSString stringWithFormat:@"Needs %@.", required->title];
+    return DPShownOn(cover) ? [NSString stringWithFormat:@"%@ hides this too.", cover->title] : nil;
 }
 
 NSString *DPWhyHiddenBy(DPPatch *disabler) {
-    if (!disabler || !disabler->on) return nil;
+    if (!DPShownOn(disabler)) return nil;
     for (NSUInteger i = 0; i < DPPatchCount; i++)
-        if (DPRequired(DPPatches[i]) == disabler && DPPatches[i]->on) return nil;
+        if (DPRequired(DPPatches[i]) == disabler && DPShownOn(DPPatches[i])) return nil;
     return [NSString stringWithFormat:@"Hidden while %@ is on", disabler->title];
 }
 
-NSString *DPWhyHidden(DPPatch *patch) { return patch->on ? DPWhyHiddenBy(DPPatchNamed(patch->disabledBy)) : nil; }
+NSString *DPWhyHidden(DPPatch *patch) { return DPShownOn(patch) ? DPWhyHiddenBy(DPPatchNamed(patch->disabledBy)) : nil; }
 
 NSURL *DPWikiURL(DPPatch *patch) {
     NSString *page = [patch->title stringByReplacingOccurrencesOfString:@" " withString:@"-"];
@@ -71,7 +73,7 @@ void DPSetTweaksPaused(BOOL paused, NSWindow *window) {
     DPSetPaused(paused);
     if (!paused && DPPausedAtLaunch && !DPSafeMode) return DPRelaunchToResume();
     DPApplySavedSettings();
-    if (!waiting.count) return;
+    if (!waiting.count || DPTesting) return;
     NSAlert *alert = [NSAlert new];
     alert.messageText = @"Relaunch Dia to finish pausing?";
     alert.informativeText = [NSString stringWithFormat:@"%@ only %@ after a relaunch. Every other tweak is already off.",

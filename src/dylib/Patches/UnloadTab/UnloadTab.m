@@ -71,6 +71,13 @@ static BOOL DPTabOpen(NSView *tab, NSString *tabID) {
     return tabID && tab.window && [tabID isEqualToString:DPActiveTabID(tab.window)];
 }
 
+static char DPUnloadItemKey;
+
+static void DPRemoveUnloadItems(NSMenu *menu) {
+    for (NSMenuItem *item in [menu.itemArray copy])
+        if (DPGet(item, &DPUnloadItemKey)) [menu removeItem:item];
+}
+
 static void DPAddUnloadMenuItem(NSMenu *menu, NSView *tab, NSString *tabID, id page, NSView *closePane) {
     BOOL open = DPTabOpen(tab, tabID);
     BOOL visible = page ? DPPageIsVisible(page) : open;
@@ -102,6 +109,7 @@ static void DPAddUnloadMenuItem(NSMenu *menu, NSView *tab, NSString *tabID, id p
         DPMarkOwnClose();
         DPCloseKeepingTab(targetClose);
     });
+    DPSet(item, &DPUnloadItemKey, @YES);
     item.image = [NSImage imageWithSystemSymbolName:@"moon.zzz" accessibilityDescription:nil];
     // By name: CI's SDK predates macOS 27. 1 is NSMenuItemImageVisibilityVisible.
     if (@available(macOS 27, *)) DPSetValueForKey(item, @"preferredImageVisibility", @1);
@@ -114,7 +122,9 @@ static void DPAddUnloadMenuItem(NSMenu *menu, NSView *tab, NSString *tabID, id p
 
 static NSMenu *DPTab_menuForEvent(NSView *self, SEL _cmd, NSEvent *event) {
     NSMenu *menu = DPCallOriginal(DPTab_menuForEvent, self, event);
-    if (!menu || !DPUnloadTab.on || [menu itemWithTitle:@"Unload Tab"]) return menu;
+    if (!menu) return nil;
+    DPRemoveUnloadItems(menu);
+    if (!DPUnloadTab.on || [menu itemWithTitle:@"Unload Tab"]) return menu;
     DPRecordVisiblePanePages();
     NSView *pane = DPFindView(self, ^BOOL(NSView *view) { return DPIsKind(view, DPDiaTabContentView); });
     if (pane && DPIsClosedPinned(pane)) return menu;
@@ -131,7 +141,9 @@ static NSMenu *DPTab_menuForEvent(NSView *self, SEL _cmd, NSEvent *event) {
 
 static NSMenu *DPPinnedTab_menuForEvent(NSView *self, SEL _cmd, NSEvent *event) {
     NSMenu *menu = DPCallOriginal(DPPinnedTab_menuForEvent, self, event);
-    if (!menu || !DPUnloadTab.on || [menu itemWithTitle:@"Unload Tab"]) return menu;
+    if (!menu) return nil;
+    DPRemoveUnloadItems(menu);
+    if (!DPUnloadTab.on || [menu itemWithTitle:@"Unload Tab"]) return menu;
     DPRecordVisiblePanePages();
     NSString *tabID = nil, *contentID = nil;
     if (!DPPinnedTabInfo(self, &tabID, &contentID)) return menu;

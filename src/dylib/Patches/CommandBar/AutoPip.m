@@ -37,8 +37,16 @@ void DPHoldAutoPip(void) {
     });
 }
 
+static BOOL DPOverPinnedHeader(NSView *tabList, id gesture) {
+    Class headerCls = NSClassFromString(@"DPPinnedHeader");
+    if (!headerCls || ![gesture respondsToSelector:@selector(locationInView:)]) return NO;
+    NSView *header = DPFindView(tabList, ^BOOL(NSView *view) { return [view isKindOfClass:headerCls]; });
+    if (!header || header.isHiddenOrHasHiddenAncestor || !header.superview) return NO;
+    return NSPointInRect([gesture locationInView:header.superview], header.frame);
+}
+
 static void DPTabList_backgroundDoubleClick(NSView *self, SEL _cmd, id gesture) {
-    DPHoldAutoPip();
+    if (!DPOverPinnedHeader(self, gesture)) DPHoldAutoPip();
     DPCallOriginal(DPTabList_backgroundDoubleClick, self, gesture);
 }
 

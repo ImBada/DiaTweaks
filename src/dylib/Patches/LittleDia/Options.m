@@ -84,12 +84,20 @@ NSArray<NSView *> *DPLittleDiaRows(void) {
 
 extern DPPatch DPLittleDiaEscape;
 
-// Peek's own monitor takes Escape too and may run first or second, so this one stands aside while a Peek is open.
+static BOOL DPHasCommandBarOverlay(NSWindow *window) {
+    Class overlayCls = NSClassFromString(@"DPCommandBarOverlay");
+    if (!overlayCls) return NO;
+    for (NSView *sub in window.contentView.subviews)
+        if ([sub isKindOfClass:overlayCls] && !sub.isHidden) return YES;
+    return NO;
+}
+
+// Peek's and CommandBar's monitors take Escape too and may run first or second, so stand aside while either or a sheet is open.
 static BOOL DPEscapeCloses(NSEvent *event) {
     if (!DPLittleDia.on || !DPLittleDiaEscape.on || event.keyCode != 53 || event.isARepeat) return NO;
     NSEventModifierFlags mods = event.modifierFlags & (NSEventModifierFlagCommand | NSEventModifierFlagShift | NSEventModifierFlagOption | NSEventModifierFlagControl);
     NSWindow *window = event.window;
-    if (mods || !window.isKeyWindow || !DPIsLittleDiaWindow(window) || (window.styleMask & NSWindowStyleMaskFullScreen) || DPPeekCardIn(window)) return NO;
+    if (mods || !window.isKeyWindow || window.attachedSheet || !DPIsLittleDiaWindow(window) || (window.styleMask & NSWindowStyleMaskFullScreen) || DPPeekCardIn(window) || DPHasCommandBarOverlay(window)) return NO;
     NSResponder *responder = window.firstResponder;
     if ([responder isKindOfClass:NSText.class] && [(NSText *)responder isFieldEditor]) return NO;
     if ([responder conformsToProtocol:@protocol(NSTextInputClient)] && [(id<NSTextInputClient>)responder hasMarkedText]) return NO;

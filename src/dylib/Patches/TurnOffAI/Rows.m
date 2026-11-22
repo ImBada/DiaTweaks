@@ -7,6 +7,7 @@
 
 static char DPAIRowsKey, DPPickKey;
 static CFTimeInterval gArrowAt;
+static NSHashTable<NSTableView *> *DPAITables;
 
 static BOOL DPFoldsRows(NSTableView *table) {
     id owner = table.delegate;
@@ -137,7 +138,13 @@ static void DPFindAIRows(NSTableView *table) {
     }
     BOOL changed = ![rows isEqualToIndexSet:DPGet(table, &DPAIRowsKey) ?: [NSIndexSet indexSet]];
     DPSet(table, &DPAIRowsKey, rows);
-    if (rows.count) [table hideRowsAtIndexes:rows withAnimation:NSTableViewAnimationEffectNone];
+    if (rows.count) {
+        if (!DPAITables) DPAITables = [NSHashTable weakObjectsHashTable];
+        [DPAITables addObject:table];
+        [table hideRowsAtIndexes:rows withAnimation:NSTableViewAnimationEffectNone];
+    } else {
+        [DPAITables removeObject:table];
+    }
     finding = NO;
     if (!DPIsKind(table.delegate, DPDiaCommandBarSuggestions)) return;
     if (!DPTurnOffAI.on) DPSet(table, &DPPickKey, nil);
@@ -182,14 +189,19 @@ static void DPTable_selectRows(NSTableView *self, SEL _cmd, NSIndexSet *rows, BO
 }
 
 void DPApplyAIRows(void) {
+    NSHashTable<NSTableView *> *tables = [NSHashTable weakObjectsHashTable];
     for (NSWindow *window in NSApp.windows)
         DPFindView(window.contentView, ^BOOL(NSView *view) {
-            if ([view isKindOfClass:NSTableView.class] && DPFoldsRows((NSTableView *)view)) DPFindAIRows((NSTableView *)view);
+            if ([view isKindOfClass:NSTableView.class]) [tables addObject:(NSTableView *)view];
             return NO;
         });
+    for (NSTableView *table in DPAITables.allObjects) [tables addObject:table];
+    for (NSTableView *table in tables.allObjects)
+        if (DPFoldsRows(table) || [DPGet(table, &DPAIRowsKey) count]) DPFindAIRows(table);
 }
 
 void DPInstallAIRows(void) {
+    DPAITables = [NSHashTable weakObjectsHashTable];
     DPHookClass(NSTableView.class, @selector(endUpdates), (IMP)DPTable_endUpdates);
     DPHookClass(NSTableView.class, @selector(reloadData), (IMP)DPTable_reloadData);
     DPHookClass(NSTableView.class, @selector(selectRowIndexes:byExtendingSelection:), (IMP)DPTable_selectRows);

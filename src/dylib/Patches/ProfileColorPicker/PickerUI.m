@@ -122,7 +122,7 @@ static void DPThemePicker_themeClicked(NSView *self, SEL _cmd, id sender) {
 }
 
 NSString *DPVerifyProfileColorUI(DPPatch *patch) {
-    if (class_getMethodImplementation(objc_getClass(DPDiaThemePicker), @selector(themeClicked:)) != (IMP)DPThemePicker_themeClicked)
+    if (!DPIsHooked(objc_getClass(DPDiaThemePicker), @selector(themeClicked:), (IMP)DPThemePicker_themeClicked))
         return @"theme picker hook didn't install";
     for (NSViewController *pane in DPColorPanes.allObjects) {
         if (!pane.isViewLoaded || !pane.view.window.isVisible) continue;

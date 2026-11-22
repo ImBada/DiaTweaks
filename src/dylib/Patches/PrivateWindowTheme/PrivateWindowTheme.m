@@ -69,7 +69,7 @@ static void DPGradient_updateLayer(NSView *self, SEL _cmd) {
 static void DPApplyPrivateTheme(DPPatch *patch) { DPThemePrivateWindows(); }
 
 static NSString *DPVerifyPrivateTheme(DPPatch *patch) {
-    if (class_getMethodImplementation(objc_getClass(DPDiaGradientView), @selector(updateLayer)) != (IMP)DPGradient_updateLayer) return @"window colors don't reach it";
+    if (!DPIsHooked(objc_getClass(DPDiaGradientView), @selector(updateLayer), (IMP)DPGradient_updateLayer)) return @"window colors don't reach it";
     NSArray *source = DPThemeSource().colors;
     for (NSWindow *window in NSApp.windows) {
         NSView *gradient = DPIsKind(window, DPDiaWindow) && DPIsPrivate(window) ? DPWindowGradient(window) : nil;
@@ -82,6 +82,9 @@ static NSString *DPVerifyPrivateTheme(DPPatch *patch) {
 static void DPInstallPrivateTheme(void) {
     DPHook(DPDiaGradientView, @selector(updateLayer), (IMP)DPGradient_updateLayer);
     [NSNotificationCenter.defaultCenter addObserverForName:NSWindowDidBecomeMainNotification object:nil queue:nil usingBlock:^(NSNotification *_) {
+        if (DPPrivateWindowTheme.on) DPThemePrivateWindows();
+    }];
+    [NSNotificationCenter.defaultCenter addObserverForName:@"DPProfileColorDidChange" object:nil queue:nil usingBlock:^(NSNotification *_) {
         if (DPPrivateWindowTheme.on) DPThemePrivateWindows();
     }];
 }

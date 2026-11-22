@@ -185,9 +185,9 @@ static void DPApplyPeek(DPPatch *patch) {
 
 static NSString *DPVerifyPeek(DPPatch *patch) {
     Class delegate = objc_getClass(DPDiaWebContent);
-    if (class_getMethodImplementation(delegate, @selector(webContents:decidePolicyForNavigationAction:)) != (IMP)DPWebContent_decidePolicy)
+    if (!DPIsHooked(delegate, @selector(webContents:decidePolicyForNavigationAction:), (IMP)DPWebContent_decidePolicy))
         return @"link clicks don't reach Peek";
-    if (class_getMethodImplementation(delegate, @selector(webContents:didCreateNewWebContent:targetURL:disposition:)) != (IMP)DPWebContent_didCreate)
+    if (!DPIsHooked(delegate, @selector(webContents:didCreateNewWebContent:targetURL:disposition:), (IMP)DPWebContent_didCreate))
         return @"new windows don't reach Peek";
     if (!patch->on && DPPeekAllCards(nil).count) return @"Peek cards stayed open when turned off";
     if (patch->on) {

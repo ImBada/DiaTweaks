@@ -14,6 +14,8 @@
 #import "Patches/LittleDia/LittleDia.h"
 #import "Patches/TurnOffAI/TurnOffAI.h"
 
+BOOL DPTesting = YES;
+
 extern DPPatch DPWindowMaterial, DPTranslucentSidebar, DPCollapsePinned, DPHideTabGroupBackground;
 extern DPPatch DPProfileEmoji, DPCompactTabRows, DPCompactWithChat;
 

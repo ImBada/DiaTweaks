@@ -108,6 +108,9 @@ static void DPFold(NSString *space, BOOL collapsed);
 - (void)viewDidChangeEffectiveAppearance { [super viewDidChangeEffectiveAppearance]; [self restyle]; }
 @end
 
+static NSCollectionViewLayoutAttributes *DPLayout_item(NSCollectionViewLayout *self, SEL _cmd, NSIndexPath *path);
+static NSArray *DPLayout_elements(NSCollectionViewLayout *self, SEL _cmd, NSRect rect);
+
 static void DPMeasure(NSCollectionViewLayout *layout) {
     NSCollectionView *list = layout.collectionView;
     DPPinnedHeader *header = DPGet(list, &DPHeaderKey);
@@ -123,11 +126,15 @@ static void DPMeasure(NSCollectionViewLayout *layout) {
     NSRect first = NSZeroRect, line = NSZeroRect;
     CGFloat row = DPRowHeight;
     if (shown) {
+        // Call our underlying IMPs directly so outer hooks (e.g. frozen CommandBar lists) don't feed shifted frames back into header.top.
+        SEL itemSel = @selector(layoutAttributesForItemAtIndexPath:), elementsSel = @selector(layoutAttributesForElementsInRect:);
+        NSCollectionViewLayoutAttributes *(*rawItem)(id, SEL, NSIndexPath *) = (void *)DPOriginalIMP(layout, itemSel, (IMP)DPLayout_item);
+        NSArray *(*rawElements)(id, SEL, NSRect) = (void *)DPOriginalIMP(layout, elementsSel, (IMP)DPLayout_elements);
         DPRaw = YES;
-        first = [layout layoutAttributesForItemAtIndexPath:[NSIndexPath indexPathForItem:0 inSection:0]].frame;
-        line = [layout layoutAttributesForItemAtIndexPath:[NSIndexPath indexPathForItem:rows inSection:0]].frame;
+        first = rawItem ? rawItem(layout, itemSel, [NSIndexPath indexPathForItem:0 inSection:0]).frame : NSZeroRect;
+        line = rawItem ? rawItem(layout, itemSel, [NSIndexPath indexPathForItem:rows inSection:0]).frame : NSZeroRect;
         NSCountedSet<NSNumber *> *heights = [NSCountedSet set];
-        for (NSCollectionViewLayoutAttributes *a in [layout layoutAttributesForElementsInRect:NSMakeRect(-1e5, -1e5, 2e5, 1e7)])
+        for (NSCollectionViewLayoutAttributes *a in (rawElements ? rawElements(layout, elementsSel, NSMakeRect(-1e5, -1e5, 2e5, 1e7)) : nil))
             if (a.representedElementCategory == NSCollectionElementCategoryItem && NSHeight(a.frame) >= 20) [heights addObject:@(round(NSHeight(a.frame) * 2) / 2)];
         NSNumber *common = nil;
         for (NSNumber *each in heights) if (!common || [heights countForObject:each] > [heights countForObject:common]) common = each;

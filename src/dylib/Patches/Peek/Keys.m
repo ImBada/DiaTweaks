@@ -55,11 +55,18 @@ static BOOL DPPeekExternalTextFocus(DPPeekCard *peek, id responder) {
     return NO;
 }
 
+// Sheets, CommandBar overlays, and non-chat Dia popovers sit above Peek and own Escape/window shortcuts first.
+static BOOL DPPeekYieldsToOverlay(NSWindow *window) {
+    if (window.attachedSheet || DPPeekCoveredByCommandBar(window)) return YES;
+    return DPFindView(window.contentView, ^BOOL(NSView *view) {
+        return DPIsKind(view, DPDiaPopover) && !view.isHiddenOrHasHiddenAncestor && !DPIsFloatingChat(view);
+    }) != nil;
+}
+
 NSEvent *DPPeekHandleKeyEvent(DPPeekCard *peek, NSEvent *event) {
-    if (!peek || !DPPeek.on || event.window != peek.window) return event;
+    if (!peek || !DPPeek.on || event.window != peek.window || DPPeekYieldsToOverlay(event.window)) return event;
     DPPeekSyncTabs(event.window);
     if (DPPeekCardIn(event.window) != peek) return event;
-    if (DPPeekCoveredByCommandBar(peek.window)) return event;
     NSEventModifierFlags mods = event.modifierFlags & NSEventModifierFlagDeviceIndependentFlagsMask & ~(NSEventModifierFlagCapsLock | NSEventModifierFlagNumericPad);
     // A page's field is not an NSText; Escape there must cancel an input method's composition, not close the card.
     id responder = peek.window.firstResponder;

@@ -2,6 +2,7 @@
 
 DPPatch *const *DPPatches;
 NSUInteger DPPatchCount;
+BOOL DPTesting = YES;
 
 void DPAddLaunchFlag(NSString *flag) {}
 void DPDropLaunchFlag(NSString *flag) {}
