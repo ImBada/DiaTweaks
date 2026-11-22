@@ -6,7 +6,6 @@ extern DPPatch DPCollapsePinned;
 static NSString *const DPCollapsedKey = @"collapsedPinned";
 static const CGFloat DPRowHeight = 37, DPHeaderHeight = 28, DPRowInset = 15, DPTitleInset = 36, DPChevronInset = 11, DPGap = 8;
 static NSUserDefaults *DPCollapseDefaults;
-static BOOL DPRaw;
 static char DPHeaderKey;
 
 static NSString *DPSpaceOf(NSView *list) {
@@ -108,9 +107,6 @@ static void DPFold(NSString *space, BOOL collapsed);
 - (void)viewDidChangeEffectiveAppearance { [super viewDidChangeEffectiveAppearance]; [self restyle]; }
 @end
 
-static NSCollectionViewLayoutAttributes *DPLayout_item(NSCollectionViewLayout *self, SEL _cmd, NSIndexPath *path);
-static NSArray *DPLayout_elements(NSCollectionViewLayout *self, SEL _cmd, NSRect rect);
-
 static void DPMeasure(NSCollectionViewLayout *layout) {
     NSCollectionView *list = layout.collectionView;
     DPPinnedHeader *header = DPGet(list, &DPHeaderKey);
@@ -126,11 +122,11 @@ static void DPMeasure(NSCollectionViewLayout *layout) {
     NSRect first = NSZeroRect, line = NSZeroRect;
     CGFloat row = DPRowHeight;
     if (shown) {
-        // Call our underlying IMPs directly so outer hooks (e.g. frozen CommandBar lists) don't feed shifted frames back into header.top.
+        // Dia's own IMPs, whatever hooks sit around ours, so frozen or parked rows never feed shifted frames back into header.top.
         SEL itemSel = @selector(layoutAttributesForItemAtIndexPath:), elementsSel = @selector(layoutAttributesForElementsInRect:);
-        NSCollectionViewLayoutAttributes *(*rawItem)(id, SEL, NSIndexPath *) = (void *)DPOriginalIMP(layout, itemSel, (IMP)DPLayout_item);
-        NSArray *(*rawElements)(id, SEL, NSRect) = (void *)DPOriginalIMP(layout, elementsSel, (IMP)DPLayout_elements);
-        DPRaw = YES;
+        Class layoutClass = objc_getClass(DPDiaTabListLayout);
+        NSCollectionViewLayoutAttributes *(*rawItem)(id, SEL, NSIndexPath *) = (void *)DPDiaIMP(layoutClass, itemSel);
+        NSArray *(*rawElements)(id, SEL, NSRect) = (void *)DPDiaIMP(layoutClass, elementsSel);
         first = rawItem ? rawItem(layout, itemSel, [NSIndexPath indexPathForItem:0 inSection:0]).frame : NSZeroRect;
         line = rawItem ? rawItem(layout, itemSel, [NSIndexPath indexPathForItem:rows inSection:0]).frame : NSZeroRect;
         NSCountedSet<NSNumber *> *heights = [NSCountedSet set];
@@ -139,7 +135,6 @@ static void DPMeasure(NSCollectionViewLayout *layout) {
         NSNumber *common = nil;
         for (NSNumber *each in heights) if (!common || [heights countForObject:each] > [heights countForObject:common]) common = each;
         if (common) row = common.doubleValue;
-        DPRaw = NO;
         shown = NSHeight(line) > 0 && NSHeight(line) < 20;
     }
     if (!shown) {
@@ -167,7 +162,7 @@ static void DPMeasure(NSCollectionViewLayout *layout) {
 }
 
 static DPPinnedHeader *DPShownHeader(NSCollectionViewLayout *layout) {
-    if (!DPCollapsePinned.on || DPRaw) return nil;
+    if (!DPCollapsePinned.on) return nil;
     DPPinnedHeader *header = DPGet(layout.collectionView, &DPHeaderKey);
     return header.shown ? header : nil;
 }

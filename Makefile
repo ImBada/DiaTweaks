@@ -198,7 +198,8 @@ SIDEBAR_TAB_BUGS := src/dylib/Patches/HideSleepingTabs/HideSleepingTabs.m src/dy
 	src/dylib/Patches/PinnedTabCloseButton/PinnedTabs.m src/dylib/Patches/CompactSidebarHeader/CompactSidebarHeader.m \
 	src/dylib/Patches/TidyTabs/TidyTabs.m src/dylib/Patches/TidyTabs/Layout.m src/dylib/Patches/TidyTabs/Hover.m \
 	src/dylib/Patches/TidyTabs/Row.m src/dylib/Patches/TidyTabs/Separator.m src/dylib/Patches/TidyTabs/Brush.m src/dylib/Patches/TidyTabs/Wave.m \
-	src/dylib/Patches/CommandBar/Tabs.m src/dylib/Commands/GroupTabs/Messages.m \
+	src/dylib/Patches/CommandBar/Tabs.m src/dylib/Patches/CommandBar/HideTab.m src/dylib/Patches/CommandBar/HideTabRows.m \
+	src/dylib/Patches/CommandBar/HideTabLayout.m src/dylib/Patches/CommandBar/HideTabParked.m src/dylib/Commands/GroupTabs/Messages.m \
 	src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m
 
 build/sidebar-tab-bugs: tests/sidebar-tab-bugs.m $(SIDEBAR_TAB_BUGS) $(wildcard src/dylib/StdPatch/*.h) | build
