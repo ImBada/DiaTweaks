@@ -53,8 +53,6 @@ void DPInstallRestyle(void) {
                                            NSWindowWillExitFullScreenNotification, NSWindowDidExitFullScreenNotification];
     for (NSNotificationName name in names)
         [NSNotificationCenter.defaultCenter addObserverForName:name object:nil queue:nil usingBlock:^(NSNotification *_) {
-            dispatch_async(dispatch_get_main_queue(), ^{
-                for (NSView *container in DPContainers.allObjects) DPRestyleContainer(container);
-            });
+            dispatch_async(dispatch_get_main_queue(), ^{ DPRelayoutContainers(); });
         }];
 }

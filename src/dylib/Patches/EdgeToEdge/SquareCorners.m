@@ -130,9 +130,10 @@ BOOL DPFullScreen(NSView *container) {
 static CALayer *DPCornerShape(NSView *container, CGFloat *base, CGFloat *grow, CGFloat *left, CGFloat *right) {
     CALayer *layer = DPRoundedContent(container).layer;
     if (!layer) return nil;
-    *right = DPFullScreen(container) ? DPEdgeToEdge.progress : 0;
+    CGFloat amount = DPEdgeToEdgeAmount(container);
+    *right = DPFullScreen(container) ? amount : 0;
     BOOL beside = DPBesideSidebar(container);
-    *left = beside ? DPSquareSidebarCorners.progress * DPEdgeToEdge.progress : *right;
+    *left = beside ? DPSquareSidebarCorners.progress * amount : *right;
     CGFloat growth = DPWindowCornerGrowth(container.window);
     if (growth > 0 && layer.cornerRadius > 0 && beside) *left = 1 - (1 - *left) * (layer.cornerRadius - growth) / layer.cornerRadius;
     *base = DPBaseCornerRadius(container) ?: layer.cornerRadius;
@@ -273,7 +274,7 @@ static NSString *DPVerifySquareCorners(DPPatch *patch) {
         CALayer *layer = DPRoundedContent(container).layer;
         if (!layer) return @"no rounded web content found";
         if (!DPBesideSidebar(container)) continue;
-        BOOL square = patch->on && DPEdgeToEdge.on;
+        BOOL square = patch->on && DPEdgeToEdgeAmount(container) > 0.5;
         if (DPCornersRound(layer, NO) == square) return square ? @"corners by the sidebar are round" : @"corners by the sidebar are square";
     }
     return nil;

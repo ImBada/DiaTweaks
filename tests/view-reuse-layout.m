@@ -75,6 +75,7 @@ void DPDismissConnectAppPrompts(void) {}
 void DPAddLaunchFlag(NSString *flag) {}
 void DPDropLaunchFlag(NSString *flag) {}
 BOOL DPSavedOn(DPPatch *patch) { return NO; }
+BOOL DPAnimating(void) { return NO; }
 void DPHandOffAndQuit(NSArray<NSString *> *args) {}
 BOOL DPShortcutRecording(void) { return NO; }
 void DPRestoreStack(NSWindow *little, NSDictionary *noted) {}

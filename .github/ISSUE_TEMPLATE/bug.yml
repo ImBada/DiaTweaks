@@ -18,6 +18,7 @@ body:
       multiple: true
       options:
         - Edge-to-Edge Web Pages
+        - Only in Full Screen
         - Square Corners Next to Sidebar
         - Hide Toolbar
         - Show Toolbar on Hover

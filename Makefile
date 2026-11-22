@@ -105,6 +105,15 @@ build/little-dia-route: tests/little-dia-route.m src/dylib/Patches/LittleDia/Rou
 build/chat-card: tests/chat-card.m src/dylib/Patches/EdgeToEdge/ChatCard.m src/dylib/Patches/EdgeToEdge/EdgeToEdge.h src/dylib/StdPatch/Views.m $(wildcard src/dylib/StdPatch/*.h) | build
 	clang $(CFLAGS) -Isrc/dylib -framework AppKit -framework QuartzCore -o $@ tests/chat-card.m src/dylib/StdPatch/Views.m
 
+build/edge-to-edge-fullscreen: tests/edge-to-edge-fullscreen.m $(wildcard src/dylib/Patches/EdgeToEdge/*.m) src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m $(wildcard src/dylib/StdPatch/*.h) | build
+	clang $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -Isrc/dylib -framework AppKit -framework QuartzCore -o $@ tests/edge-to-edge-fullscreen.m $(wildcard src/dylib/Patches/EdgeToEdge/*.m) src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m
+
+check-edge-to-edge-fullscreen: build/edge-to-edge-fullscreen
+	build/edge-to-edge-fullscreen
+
+check: check-edge-to-edge-fullscreen
+.PHONY: check-edge-to-edge-fullscreen
+
 build/little-dia-focus: tests/little-dia-focus.m src/dylib/Patches/LittleDia/Window.m src/dylib/Patches/LittleDia/LittleDia.h src/dylib/Commands/GroupTabs/Messages.m src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m $(wildcard src/dylib/StdPatch/*.h) | build
 	clang $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -Isrc/dylib -framework AppKit -o $@ tests/little-dia-focus.m src/dylib/Commands/GroupTabs/Messages.m src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m
 

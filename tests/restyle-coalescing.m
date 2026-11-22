@@ -8,6 +8,7 @@ static NSValue *requested;
 void DPApplySquareCorners(NSView *view) { restyles++; }
 NSView *DPChatCard(NSView *view) { return chatVisible ? chatCard : nil; }
 NSValue *DPRequestedFrame(NSView *view) { return requested; }
+void DPRelayoutContainers(void) {}
 #import "Patches/EdgeToEdge/Restyle.m"
 
 @interface CountingContainer : NSView
