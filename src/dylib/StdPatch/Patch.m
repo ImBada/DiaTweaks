@@ -221,7 +221,7 @@ BOOL DPWriteManifest(NSString *path) {
     DPReadPatches();
     NSMutableArray<NSDictionary *> *patches = [NSMutableArray arrayWithCapacity:DPPatchCount];
     for (NSUInteger i = 0; i < DPPatchCount; i++) {
-        DPPatch *patch = DPPatches[i], *required = DPRequired(patch), *disabler = DPPatchNamed(patch->disabledBy);
+        DPPatch *patch = DPPatches[i], *required = DPRequired(patch), *disabler = DPPatchNamed(patch->disabledBy), *cover = DPPatchNamed(patch->coveredBy);
         [patches addObject:@{
             @"key": patch->key,
             @"title": patch->title,
@@ -229,6 +229,7 @@ BOOL DPWriteManifest(NSString *path) {
             @"defaultOn": @(patch->defaultOn),
             @"requires": required ? required->key : NSNull.null,
             @"disabledBy": disabler ? disabler->key : NSNull.null,
+            @"coveredBy": cover ? cover->key : NSNull.null,
             @"relaunch": @(patch->relaunch),
             @"section": patch->section ?: NSNull.null,
             @"tint": patch->tint ?: NSNull.null,

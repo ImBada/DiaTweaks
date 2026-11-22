@@ -7,6 +7,7 @@ case "${1-}" in
     *) echo "usage: ./install.sh [--yes]" >&2; exit 2 ;;
 esac
 support="${DIAPATCH_HOME:-$HOME/Library/Application Support/DiaPatches}"
+support=${support%/}
 incoming="$support/.incoming"
 trap 'rm -rf "$incoming"' EXIT
 trap 'exit 130' INT TERM
@@ -55,7 +56,7 @@ if [ -n "$cli" ]; then
     else dir="$HOME/.local/bin"
     fi
     link="$dir/diatweaks"
-    case $(readlink "$link") in
+    case $(readlink "$link" 2>/dev/null || true) in
         "$support"/*) ;;
         *) if [ -L "$link" ] || [ -e "$link" ]; then echo "Left $link alone: it isn't DiaTweaks'."; link=; fi ;;
     esac

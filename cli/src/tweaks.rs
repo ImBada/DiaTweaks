@@ -24,13 +24,12 @@ pub fn list(env: &Env) -> Result<()> {
         .map(|patch| patch.key.len())
         .max()
         .unwrap_or(0);
-    for (patch, on) in manifest.patches.iter().zip(state) {
-        ui::say(format_args!(
-            "{:<4} {:<width$}  {}",
-            on_off(on),
-            patch.key,
-            patch.title
-        ));
+    for (index, (patch, &on)) in manifest.patches.iter().zip(&state).enumerate() {
+        let mut line = format!("{:<4} {:<width$}  {}", on_off(on), patch.key, patch.title);
+        if let Some(cover) = manifest.covered_by(index, &state) {
+            let _ = write!(line, " ({} hides this too)", manifest.title(cover));
+        }
+        ui::say(line);
     }
     Ok(())
 }
@@ -77,9 +76,17 @@ fn is_live_dia(env: &Env) -> bool {
         && dia::safe_mode(&env.support) == SafeMode::Off
 }
 
-fn needs_relaunch(manifest: &Manifest, index: usize, wanted_on: bool, icon_linked: bool) -> bool {
+fn needs_relaunch(
+    manifest: &Manifest,
+    index: usize,
+    wanted_on: bool,
+    icon_linked: bool,
+    brief_patched: bool,
+) -> bool {
     let patch = &manifest.patches[index];
-    patch.relaunch || (patch.key == "appIcon" && wanted_on != icon_linked)
+    patch.relaunch
+        || (patch.key == "appIcon" && wanted_on != icon_linked)
+        || (patch.key == "briefLanguage" && wanted_on != brief_patched)
 }
 
 fn finish_changes(
@@ -91,11 +98,14 @@ fn finish_changes(
     saved_prefix: bool,
 ) {
     let icon_linked = dia::has_linked_icon_catalog(&env.app);
+    let brief_patched = dia::has_brief_language(&env.app);
     let live = is_live_dia(env);
     let relaunching: Vec<&str> = if live {
         changes
             .iter()
-            .filter(|&&index| needs_relaunch(manifest, index, wanted[index], icon_linked))
+            .filter(|&&index| {
+                needs_relaunch(manifest, index, wanted[index], icon_linked, brief_patched)
+            })
             .map(|&index| manifest.title(index))
             .collect()
     } else {
@@ -117,6 +127,16 @@ fn finish_changes(
             } else if !wanted[index] && icon_linked {
                 ui.warn(
                     "Dia's default icon is restored; run `diatweaks update` to restore its sealed asset catalog.",
+                );
+            }
+        }
+        if let Some(&index) = changes
+            .iter()
+            .find(|&&index| manifest.patches[index].key == "briefLanguage")
+        {
+            if wanted[index] != brief_patched {
+                ui.warn(
+                    "Morning Brief Language needs a rebuild to update Dia's prompt. Run `diatweaks update` to apply it.",
                 );
             }
         }
@@ -197,7 +217,9 @@ fn hint(manifest: &Manifest, current: &[bool], index: usize) -> String {
     if let Some(required) = manifest.requirement(index) {
         let _ = write!(hint, " Needs {}.", manifest.title(required));
     }
-    if let Some(disabler) = manifest.hidden_by(index, current) {
+    if let Some(cover) = manifest.covered_by(index, current) {
+        let _ = write!(hint, " {} hides this too.", manifest.title(cover));
+    } else if let Some(disabler) = manifest.hidden_by(index, current) {
         let _ = write!(
             hint,
             " No difference while {} is on.",
@@ -250,7 +272,15 @@ fn notes(manifest: &Manifest, current: &[bool], wanted: &[bool]) -> Vec<String> 
                 ));
             }
         }
-        if let Some(disabler) = manifest.hidden_by(index, wanted) {
+        if let Some(cover) = manifest.covered_by(index, wanted) {
+            if wanted[index] && changed(index) {
+                notes.push(format!(
+                    "{} hides {} too.",
+                    manifest.title(cover),
+                    manifest.title(index)
+                ));
+            }
+        } else if let Some(disabler) = manifest.hidden_by(index, wanted) {
             if wanted[index] && changed(index) {
                 notes.push(format!(
                     "{} makes no difference while {} is on.",
@@ -341,7 +371,7 @@ mod tests {
     }
 
     #[test]
-    fn needs_relaunch_tracks_relaunch_and_app_icon_link_state() {
+    fn needs_relaunch_tracks_relaunch_app_icon_and_brief_language() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("patches.json");
         fs::write(
@@ -351,19 +381,33 @@ mod tests {
                 "patches": [
                     {"key": "turnOffAI", "title": "Turn Off AI", "detail": "A", "defaultOn": false, "requires": null, "disabledBy": null, "relaunch": true},
                     {"key": "appIcon", "title": "App Icon", "detail": "I", "defaultOn": false, "requires": null, "disabledBy": null},
-                    {"key": "hideToolbar", "title": "Hide Toolbar", "detail": "H", "defaultOn": false, "requires": null, "disabledBy": null}
+                    {"key": "hideToolbar", "title": "Hide Toolbar", "detail": "H", "defaultOn": false, "requires": null, "disabledBy": null},
+                    {"key": "briefLanguage", "title": "Morning Brief Language", "detail": "B", "defaultOn": false, "requires": null, "disabledBy": "turnOffAI"},
+                    {"key": "hideChatButton", "title": "Hide Chat Button", "detail": "C", "defaultOn": false, "requires": null, "disabledBy": "hideToolbar", "coveredBy": "turnOffAI"}
                 ]
             }"#,
         )
         .unwrap();
         let manifest = Manifest::load(&path).unwrap();
 
-        assert!(needs_relaunch(&manifest, 0, true, false));
-        assert!(needs_relaunch(&manifest, 0, false, true));
-        assert!(needs_relaunch(&manifest, 1, true, false));
-        assert!(!needs_relaunch(&manifest, 1, true, true));
-        assert!(needs_relaunch(&manifest, 1, false, true));
-        assert!(!needs_relaunch(&manifest, 1, false, false));
-        assert!(!needs_relaunch(&manifest, 2, true, false));
+        assert!(needs_relaunch(&manifest, 0, true, false, false));
+        assert!(needs_relaunch(&manifest, 0, false, true, true));
+        assert!(needs_relaunch(&manifest, 1, true, false, false));
+        assert!(!needs_relaunch(&manifest, 1, true, true, false));
+        assert!(needs_relaunch(&manifest, 1, false, true, false));
+        assert!(!needs_relaunch(&manifest, 1, false, false, false));
+        assert!(!needs_relaunch(&manifest, 2, true, false, false));
+        assert!(needs_relaunch(&manifest, 3, true, false, false));
+        assert!(!needs_relaunch(&manifest, 3, true, false, true));
+        assert!(needs_relaunch(&manifest, 3, false, false, true));
+        assert!(!needs_relaunch(&manifest, 3, false, false, false));
+
+        // coveredBy warns when enabling a tweak already covered by Turn Off AI (without duplicate disabledBy warning).
+        let covered_notes = notes(
+            &manifest,
+            &[true, false, true, false, false],
+            &[true, false, true, false, true],
+        );
+        assert_eq!(covered_notes, vec!["Turn Off AI hides Hide Chat Button too."]);
     }
 }

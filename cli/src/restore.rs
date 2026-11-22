@@ -1,3 +1,8 @@
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
+
 use anyhow::{anyhow, bail, Result};
 
 use crate::{
@@ -8,6 +13,41 @@ use crate::{
     signals::Cancelled,
     ui::{self, Ui},
 };
+
+// Stash staged-update markers while quitting Dia so DPInstallOnQuit doesn't spawn a racing `diapatch apply`.
+struct StagedMarkers(Vec<(PathBuf, PathBuf)>);
+
+impl StagedMarkers {
+    fn stash(support: &Path) -> Self {
+        let mut stashed = Vec::new();
+        for (rel, tmp) in [
+            ("staged/ready", "staged/.ready.restore"),
+            (
+                "staged/DiaTweaks/release.plist",
+                "staged/DiaTweaks/.release.plist.restore",
+            ),
+        ] {
+            let src = support.join(rel);
+            let dst = support.join(tmp);
+            if fs::rename(&src, &dst).is_ok() {
+                stashed.push((src, dst));
+            }
+        }
+        Self(stashed)
+    }
+
+    fn restore(self) {
+        for (src, dst) in self.0 {
+            let _ = fs::rename(dst, src);
+        }
+    }
+
+    fn discard(self) {
+        for (_, dst) in self.0 {
+            let _ = fs::remove_file(dst);
+        }
+    }
+}
 
 pub fn run(env: &Env, ui: &Ui, mut purge: bool) -> Result<()> {
     let diapatch = Diapatch::find(env)?;
@@ -53,7 +93,12 @@ pub fn run(env: &Env, ui: &Ui, mut purge: bool) -> Result<()> {
     let spinner = ui.spinner("Restoring the original Dia");
     let was_running = dia::is_running(&env.app);
     if was_running {
-        spinner.check(dia::quit(&env.app))?;
+        let markers = StagedMarkers::stash(&env.support);
+        if let Err(err) = dia::quit(&env.app) {
+            markers.restore();
+            return Err(spinner.fail(err));
+        }
+        markers.discard();
     }
     let mut args = vec!["uninstall"];
     if was_running {
@@ -85,4 +130,36 @@ pub fn run(env: &Env, ui: &Ui, mut purge: bool) -> Result<()> {
         "Dia is the original app again. Run `diatweaks update` to patch it again."
     });
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn staged_markers_stash_restores_on_cancel_and_discards_on_quit() {
+        let dir = tempfile::tempdir().unwrap();
+        let ready = dir.path().join("staged/ready");
+        let tweaks = dir.path().join("staged/DiaTweaks/release.plist");
+        fs::create_dir_all(tweaks.parent().unwrap()).unwrap();
+        fs::write(&ready, "12345").unwrap();
+        fs::write(&tweaks, "plist").unwrap();
+
+        let stashed = StagedMarkers::stash(dir.path());
+        assert!(!ready.exists());
+        assert!(!tweaks.exists());
+        stashed.restore();
+        assert_eq!(fs::read_to_string(&ready).unwrap(), "12345");
+        assert_eq!(fs::read_to_string(&tweaks).unwrap(), "plist");
+
+        let stashed = StagedMarkers::stash(dir.path());
+        stashed.discard();
+        assert!(!ready.exists());
+        assert!(!tweaks.exists());
+        assert!(!dir.path().join("staged/.ready.restore").exists());
+        assert!(!dir
+            .path()
+            .join("staged/DiaTweaks/.release.plist.restore")
+            .exists());
+    }
 }

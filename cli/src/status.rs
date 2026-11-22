@@ -84,7 +84,9 @@ fn report(env: &Env, spinner: &Spinner) -> Result<Vec<String>> {
                 manifest.title(required)
             );
         }
-        if let Some(disabler) = manifest.hidden_by(index, &state) {
+        if let Some(cover) = manifest.covered_by(index, &state) {
+            let _ = write!(line, " ({} hides this too)", manifest.title(cover));
+        } else if let Some(disabler) = manifest.hidden_by(index, &state) {
             let _ = write!(
                 line,
                 " (no difference while {} is on)",

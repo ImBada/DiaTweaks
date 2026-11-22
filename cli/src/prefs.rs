@@ -138,4 +138,82 @@ mod tests {
             CFPreferencesAppSynchronize(reloaded.domain.as_concrete_TypeRef());
         }
     }
+
+    #[test]
+    fn prefs_preserves_dictionaries_and_arrays_and_ignores_non_bools() {
+        use core_foundation::{array::CFArray, dictionary::CFDictionary};
+
+        let domain = format!("com.diapatches.test.containers.{}", std::process::id());
+        let prefs = Prefs::new(&domain);
+
+        let dict = CFDictionary::from_CFType_pairs(&[(
+            CFString::new("space-1"),
+            CFString::new("#112233"),
+        )]);
+        let array = CFArray::from_CFTypes(&[CFString::new("--disable-gpu")]);
+        let dict_key = CFString::new("profileColors");
+        let array_key = CFString::new("launchFlagsArgs");
+        unsafe {
+            CFPreferencesSetAppValue(
+                dict_key.as_concrete_TypeRef(),
+                dict.as_CFTypeRef(),
+                prefs.domain.as_concrete_TypeRef(),
+            );
+            CFPreferencesSetAppValue(
+                array_key.as_concrete_TypeRef(),
+                array.as_CFTypeRef(),
+                prefs.domain.as_concrete_TypeRef(),
+            );
+        }
+        prefs.set("profileColorPicker", true);
+        prefs.set("launchFlags", true);
+        assert!(prefs.save().is_ok());
+
+        let reloaded = Prefs::new(&domain);
+        assert_eq!(reloaded.get("profileColorPicker"), Some(true));
+        assert_eq!(reloaded.get("launchFlags"), Some(true));
+        // Non-boolean container values must return None cleanly instead of panicking.
+        assert_eq!(reloaded.get("profileColors"), None);
+        assert_eq!(reloaded.get("launchFlagsArgs"), None);
+
+        // Verify sibling container values survive toggling booleans intact.
+        let raw_dict = unsafe {
+            CFPreferencesCopyAppValue(
+                dict_key.as_concrete_TypeRef(),
+                reloaded.domain.as_concrete_TypeRef(),
+            )
+        };
+        assert!(!raw_dict.is_null());
+        let raw_dict = unsafe { CFType::wrap_under_create_rule(raw_dict) };
+        assert!(raw_dict.downcast::<CFDictionary>().is_some());
+
+        let raw_array = unsafe {
+            CFPreferencesCopyAppValue(
+                array_key.as_concrete_TypeRef(),
+                reloaded.domain.as_concrete_TypeRef(),
+            )
+        };
+        assert!(!raw_array.is_null());
+        let raw_array = unsafe { CFType::wrap_under_create_rule(raw_array) };
+        assert!(raw_array.downcast::<CFArray>().is_some());
+
+        for key in [
+            "profileColorPicker",
+            "launchFlags",
+            "profileColors",
+            "launchFlagsArgs",
+        ] {
+            let k = CFString::new(key);
+            unsafe {
+                CFPreferencesSetAppValue(
+                    k.as_concrete_TypeRef(),
+                    std::ptr::null(),
+                    reloaded.domain.as_concrete_TypeRef(),
+                );
+            }
+        }
+        unsafe {
+            CFPreferencesAppSynchronize(reloaded.domain.as_concrete_TypeRef());
+        }
+    }
 }

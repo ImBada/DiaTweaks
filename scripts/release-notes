@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 cd "$(dirname "$0")/.."
-tag=$1
+tag=${1:?usage: scripts/release-notes <tag>}
 repo=${GITHUB_REPOSITORY:-JaceThings/DiaTweaks}
 previous=$(git describe --tags --abbrev=0 "$tag^" 2>/dev/null || true)
 range=${previous:+$previous..}$tag

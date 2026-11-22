@@ -6,6 +6,7 @@ make -s
 cargo build --release --quiet --manifest-path cli/Cargo.toml
 stage=$(mktemp -d)
 trap 'rm -rf "$stage"' EXIT
+trap 'exit 130' INT TERM
 cp build/diapatch build/DiaPatches.dylib build/patches.json "${CARGO_TARGET_DIR:-cli/target}/release/diatweaks" "$stage/"
 cp -R assets/app-icons "$stage/"
 rm -f build/DiaTweaks.zip

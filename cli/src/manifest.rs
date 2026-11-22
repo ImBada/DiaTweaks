@@ -21,6 +21,8 @@ pub struct Patch {
     pub requires: Option<String>,
     pub disabled_by: Option<String>,
     #[serde(default)]
+    pub covered_by: Option<String>,
+    #[serde(default)]
     pub relaunch: bool,
 }
 
@@ -55,7 +57,7 @@ impl Manifest {
         let links = manifest
             .patches
             .iter()
-            .flat_map(|patch| [&patch.requires, &patch.disabled_by])
+            .flat_map(|patch| [&patch.requires, &patch.disabled_by, &patch.covered_by])
             .flatten();
         for key in links {
             if manifest.index(key).is_none() {
@@ -99,6 +101,17 @@ impl Manifest {
             .disabled_by
             .as_deref()
             .and_then(|key| self.index(key))
+    }
+
+    pub fn cover(&self, index: usize) -> Option<usize> {
+        self.patches[index]
+            .covered_by
+            .as_deref()
+            .and_then(|key| self.index(key))
+    }
+
+    pub fn covered_by(&self, index: usize, state: &[bool]) -> Option<usize> {
+        self.cover(index).filter(|&cover| state[cover])
     }
 
     pub fn hidden_by(&self, index: usize, state: &[bool]) -> Option<usize> {
@@ -220,5 +233,37 @@ mod tests {
         assert!(err.contains("hideToolbar"));
         assert_eq!(manifest.hidden_by(1, &[true, false]), Some(0));
         assert_eq!(manifest.hidden_by(1, &[false, true]), None);
+    }
+
+    #[test]
+    fn loads_and_validates_covered_by() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("patches.json");
+        fs::write(
+            &path,
+            r#"{
+                "version": 1,
+                "patches": [
+                    {"key": "turnOffAI", "title": "Turn Off AI", "detail": "A", "defaultOn": false, "requires": null, "disabledBy": null, "coveredBy": null},
+                    {"key": "hideChatButton", "title": "Hide Chat Button", "detail": "C", "defaultOn": false, "requires": null, "disabledBy": null, "coveredBy": "turnOffAI"}
+                ]
+            }"#,
+        )
+        .unwrap();
+        let manifest = Manifest::load(&path).unwrap();
+        assert_eq!(manifest.covered_by(1, &[true, false]), Some(0));
+        assert_eq!(manifest.covered_by(1, &[false, true]), None);
+
+        fs::write(
+            &path,
+            r#"{
+                "version": 1,
+                "patches": [
+                    {"key": "hideChatButton", "title": "Hide Chat Button", "detail": "C", "defaultOn": false, "requires": null, "disabledBy": null, "coveredBy": "missing"}
+                ]
+            }"#,
+        )
+        .unwrap();
+        assert!(Manifest::load(&path).is_err());
     }
 }

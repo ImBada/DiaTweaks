@@ -5,6 +5,7 @@ manifest=build/patches.json
 [ -f "$manifest" ] || { echo "$manifest is missing: run make first" >&2; exit 1; }
 wiki=$(mktemp -d)
 trap 'rm -rf "$wiki"' EXIT
+trap 'exit 130' INT TERM
 git clone -q --depth 1 https://github.com/JaceThings/DiaTweaks.wiki.git "$wiki"
 
 count=$(plutil -extract patches raw -o - "$manifest")

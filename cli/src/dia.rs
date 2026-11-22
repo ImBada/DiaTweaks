@@ -196,7 +196,7 @@ pub fn safe_mode(support: &Path) -> SafeMode {
         .and_then(plist::Value::as_signed_integer)
         .unwrap_or(0);
     match level {
-        0 => SafeMode::Off,
+        ..=0 => SafeMode::Off,
         1 => SafeMode::TweaksOff,
         _ => {
             let parked = state
@@ -233,6 +233,13 @@ pub fn has_linked_icon_catalog(app: &Path) -> bool {
         && dictionary(app.join("Contents/Info.plist"))
             .and_then(|info| info.get("CFBundleIconName")?.as_string().map(str::to_owned))
             .is_some_and(|name| name == "DiaChosenIcon")
+}
+
+pub fn has_brief_language(app: &Path) -> bool {
+    fs::read_to_string(
+        app.join("Contents/Resources/agent-server-resources/dist/prompts/skills/morning-brief/SKILL.md"),
+    )
+    .is_ok_and(|text| text.contains("## Output language: "))
 }
 
 pub fn sync_icon(env: &Env) {
@@ -372,5 +379,26 @@ mod tests {
         assert!(has_linked_icon_catalog(&app));
         write_icon("AppIcon");
         assert!(!has_linked_icon_catalog(&app));
+    }
+
+    #[test]
+    fn brief_language_and_safe_mode_bounds() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = dir.path().join("Dia.app");
+        let skill = app.join(
+            "Contents/Resources/agent-server-resources/dist/prompts/skills/morning-brief/SKILL.md",
+        );
+        fs::create_dir_all(skill.parent().unwrap()).unwrap();
+        fs::write(&skill, "base prompt").unwrap();
+        assert!(!has_brief_language(&app));
+        fs::write(&skill, "base prompt\n\n## Output language: Japanese\n").unwrap();
+        assert!(has_brief_language(&app));
+
+        fs::write(
+            dir.path().join("safe-mode.plist"),
+            "<plist version=\"1.0\"><dict><key>level</key><integer>-1</integer></dict></plist>",
+        )
+        .unwrap();
+        assert_eq!(safe_mode(dir.path()), SafeMode::Off);
     }
 }
