@@ -15,15 +15,25 @@ static const uint32_t kMaxMessageLength = 1024 * 1024;
 static const NSUInteger kMaxHelperMessageLength = 16 * 1024 * 1024;
 
 static FILE *gFromHelper, *gToHelper;
+static pthread_mutex_t gHelperLock = PTHREAD_MUTEX_INITIALIZER;
 static _Atomic pid_t gHelper;
 static _Atomic int gCancelled;
 
 static NSDictionary *readFromHelper(void) {
     if (!gFromHelper) return nil;
     NSMutableData *data = [NSMutableData data];
-    for (int c; (c = fgetc(gFromHelper)) != 0;) {
-        if (c == EOF || data.length >= kMaxHelperMessageLength) return nil;
-        [data appendBytes:&(char){ c } length:1];
+    for (;;) {
+        int c = fgetc(gFromHelper);
+        if (c == 0) break;
+        if (c == EOF) {
+            if (ferror(gFromHelper) && errno == EINTR) {
+                clearerr(gFromHelper);
+                continue;
+            }
+            return nil;
+        }
+        if (data.length >= kMaxHelperMessageLength) return nil;
+        [data appendBytes:&(char){ (char)c } length:1];
     }
     id object = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
     return [object isKindOfClass:NSDictionary.class] ? object : nil;
@@ -106,13 +116,21 @@ static NSDictionary *failure(NSString *message) { return @{ @"error" : @{ @"name
 // The extension holds our stdin open until it has the answer, so EOF means the page gave up.
 static void *watchForCancel(void *_) {
     char byte;
-    while (read(STDIN_FILENO, &byte, 1) > 0) {}
+    for (ssize_t n;;) {
+        n = read(STDIN_FILENO, &byte, 1);
+        if (n > 0 || (n < 0 && errno == EINTR)) continue;
+        break;
+    }
     gCancelled = 1;
+    pthread_mutex_lock(&gHelperLock);
     pid_t helper = gHelper;
+    if (helper > 0) kill(helper, SIGTERM);
+    pthread_mutex_unlock(&gHelperLock);
     if (helper <= 0) return NULL;
-    kill(helper, SIGTERM);
     for (int i = 0; i < 30 && gHelper == helper; i++) usleep(100000);
+    pthread_mutex_lock(&gHelperLock);
     if (gHelper == helper) kill(helper, SIGKILL);
+    pthread_mutex_unlock(&gHelperLock);
     return NULL;
 }
 
@@ -141,8 +159,14 @@ static void signInAsDia(NSString *userData) {
 }
 
 static void skipIntro(NSString *data) {
-    NSString *preferences = [data stringByAppendingPathComponent:@"Library/Preferences/company.thebrowser.dia"];
-    [[NSTask launchedTaskWithLaunchPath:@"/usr/bin/defaults" arguments:@[ @"write", preferences, @"hasPresentedOnboardingIntro", @"-bool", @"YES" ]] waitUntilExit];
+    NSString *prefsDir = [data stringByAppendingPathComponent:@"Library/Preferences"];
+    [NSFileManager.defaultManager createDirectoryAtPath:prefsDir withIntermediateDirectories:YES attributes:nil error:nil];
+    NSString *preferences = [prefsDir stringByAppendingPathComponent:@"company.thebrowser.dia"];
+    NSTask *task = [NSTask new];
+    task.executableURL = [NSURL fileURLWithPath:@"/usr/bin/defaults"];
+    task.arguments = @[ @"write", preferences, @"hasPresentedOnboardingIntro", @"-bool", @"YES" ];
+    task.standardInput = task.standardOutput = task.standardError = NSFileHandle.fileHandleWithNullDevice;
+    if ([task launchAndReturnError:NULL]) [task waitUntilExit];
 }
 
 static void forgetWindows(NSString *userData) {
@@ -212,13 +236,27 @@ static pid_t launchHelper(NSString *home, int toHelper[2], int fromHelper[2]) {
     while (environ[envCount]) envCount++;
     const char **envp = calloc(envCount + 2, sizeof *envp);
     if (!envp) return 0;
-    memcpy(envp, environ, envCount * sizeof *envp);
-    envp[envCount] = fixedHome.UTF8String;
+    size_t out = 0;
+    envp[out++] = fixedHome.UTF8String;
+    for (size_t i = 0; i < envCount; i++) {
+        if (!strncmp(environ[i], "CFFIXED_USER_HOME=", 18)) continue;
+        envp[out++] = environ[i];
+    }
+
+    // Move pipe ends above 4 so adddup2(..., 3) cannot clobber fromHelper[1] if stdio/lock used lower fds.
+    int childIn = toHelper[0] <= 4 ? fcntl(toHelper[0], F_DUPFD_CLOEXEC, 5) : toHelper[0];
+    int childOut = fromHelper[1] <= 4 ? fcntl(fromHelper[1], F_DUPFD_CLOEXEC, 5) : fromHelper[1];
+    if (childIn < 0 || childOut < 0) {
+        if (childIn >= 0 && childIn != toHelper[0]) close(childIn);
+        if (childOut >= 0 && childOut != fromHelper[1]) close(childOut);
+        free(envp);
+        return 0;
+    }
 
     posix_spawn_file_actions_t files;
     posix_spawn_file_actions_init(&files);
-    posix_spawn_file_actions_adddup2(&files, toHelper[0], 3);
-    posix_spawn_file_actions_adddup2(&files, fromHelper[1], 4);
+    posix_spawn_file_actions_adddup2(&files, childIn, 3);
+    posix_spawn_file_actions_adddup2(&files, childOut, 4);
     posix_spawn_file_actions_addopen(&files, 0, "/dev/null", O_RDONLY, 0);
     posix_spawn_file_actions_addopen(&files, 1, "/dev/null", O_WRONLY, 0);
     posix_spawn_file_actions_addopen(&files, 2, "/dev/null", O_WRONLY, 0);
@@ -230,6 +268,8 @@ static pid_t launchHelper(NSString *home, int toHelper[2], int fromHelper[2]) {
     int status = posix_spawn(&pid, argv[0], &files, &attrs, (char *const *)argv, (char *const *)envp);
     posix_spawn_file_actions_destroy(&files);
     posix_spawnattr_destroy(&attrs);
+    if (childIn != toHelper[0]) close(childIn);
+    if (childOut != fromHelper[1]) close(childOut);
     free(envp);
     return status == 0 ? pid : 0;
 }
@@ -502,8 +542,10 @@ int DPRunPasskeyHost(NSString *home) {
         close(lock);
         return writeMessage(failure(@"Couldn't start the passkey copy of Dia.")), 1;
     }
+    pthread_mutex_lock(&gHelperLock);
     gHelper = pid;
     if (gCancelled) kill(pid, SIGTERM);
+    pthread_mutex_unlock(&gHelperLock);
     close(toHelper[0]), toHelper[0] = -1;
     close(fromHelper[1]), fromHelper[1] = -1;
 
@@ -516,9 +558,11 @@ int DPRunPasskeyHost(NSString *home) {
         if (gToHelper) fclose(gToHelper), gToHelper = NULL;
         closePair(toHelper);
         closePair(fromHelper);
+        pthread_mutex_lock(&gHelperLock);
         gHelper = 0;
         kill(pid, SIGKILL);
-        waitpid(pid, NULL, 0);
+        pthread_mutex_unlock(&gHelperLock);
+        while (waitpid(pid, NULL, 0) < 0 && errno == EINTR) {}
         close(lock);
         return writeMessage(failure(@"Couldn't connect to the passkey copy of Dia.")), 1;
     }
@@ -527,11 +571,23 @@ int DPRunPasskeyHost(NSString *home) {
     // Dia kills this process once it has the answer, so the copy has to quit before then.
     send(@"Browser.close", nil, nil);
     BOOL exited = NO;
-    for (int i = 0; i < 50 && !(exited = waitpid(pid, NULL, WNOHANG) != 0); i++) usleep(100000);
-    gHelper = 0;
+    for (int i = 0; i < 50; i++) {
+        pthread_mutex_lock(&gHelperLock);
+        pid_t w = waitpid(pid, NULL, WNOHANG);
+        if (w == pid || (w < 0 && errno == ECHILD)) {
+            gHelper = 0;
+            exited = YES;
+        }
+        pthread_mutex_unlock(&gHelperLock);
+        if (exited) break;
+        usleep(100000);
+    }
     if (!exited) {
+        pthread_mutex_lock(&gHelperLock);
+        gHelper = 0;
         kill(pid, SIGKILL);
-        waitpid(pid, NULL, 0);
+        pthread_mutex_unlock(&gHelperLock);
+        while (waitpid(pid, NULL, 0) < 0 && errno == EINTR) {}
     }
     fclose(gFromHelper), gFromHelper = NULL;
     fclose(gToHelper), gToHelper = NULL;

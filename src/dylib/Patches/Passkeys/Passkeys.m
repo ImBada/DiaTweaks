@@ -77,6 +77,7 @@ static NSString *DPPasskeysProblem(DPPatch *patch) {
 static BOOL gExtensionLoaded;
 
 static void DPShowHelper(NSNotification *note) {
+    if (!DPPasskeys.on) return;
     NSRunningApplication *helper = [NSRunningApplication runningApplicationWithProcessIdentifier:[note.object intValue]];
     void (^show)(void) = ^{ [helper activateFromApplication:NSRunningApplication.currentApplication options:NSApplicationActivateAllWindows]; };
     if (![note.name hasSuffix:@"signIn"]) return show();

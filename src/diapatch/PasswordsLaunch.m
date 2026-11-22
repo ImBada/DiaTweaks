@@ -1,4 +1,6 @@
+#import <Security/Security.h>
 #import <libproc.h>
+#import <mach-o/loader.h>
 #import <poll.h>
 #import <spawn.h>
 #import <sys/clonefile.h>
@@ -70,13 +72,20 @@ static pid_t launchOriginal(NSString *app, NSString *folder, NSString *socket) {
                            "--no-default-browser-check", "--use-mock-keychain", "--mute-audio", NULL };
     NSString *fixedHome = [@"CFFIXED_USER_HOME=" stringByAppendingString:folder];
     NSString *handoff = [NSString stringWithFormat:@"%s=%@", DPHandoffVariable, socket];
+    NSString *handoffPrefix = [NSString stringWithFormat:@"%s=", DPHandoffVariable];
     size_t envCount = 0;
     while (environ[envCount]) envCount++;
     const char **envp = calloc(envCount + 3, sizeof *envp);
     if (!envp) return 0;
-    envp[0] = fixedHome.UTF8String;
-    envp[1] = handoff.UTF8String;
-    memcpy(envp + 2, environ, envCount * sizeof *envp);
+    size_t out = 0;
+    envp[out++] = fixedHome.UTF8String;
+    envp[out++] = handoff.UTF8String;
+    const char *handoffPrefixStr = handoffPrefix.UTF8String;
+    size_t handoffPrefixLen = strlen(handoffPrefixStr);
+    for (size_t i = 0; i < envCount; i++) {
+        if (!strncmp(environ[i], "CFFIXED_USER_HOME=", 18) || !strncmp(environ[i], handoffPrefixStr, handoffPrefixLen)) continue;
+        envp[out++] = environ[i];
+    }
 
     posix_spawn_file_actions_t files;
     posix_spawn_file_actions_init(&files);
@@ -114,6 +123,8 @@ static int acceptSubprocess(int listener, pid_t *dia, pid_t *peer) {
 static BOOL handOver(int client, NSString *helper, int argc, const char *argv[]) {
     NSDictionary *launch = @{ @"helper" : helper, @"arguments" : strings(argv + 1, argc - 1), @"environment" : strings((const char *const *)environ, -1) };
     NSData *payload = [NSJSONSerialization dataWithJSONObject:launch options:0 error:nil];
+    if (!payload.length) return NO;
+    setsockopt(client, SOL_SOCKET, SO_SNDTIMEO, &(struct timeval){ .tv_sec = 5 }, sizeof(struct timeval));
     uint32_t length = (uint32_t)payload.length;
     int fds[3] = { STDIN_FILENO, STDOUT_FILENO, STDERR_FILENO };
     char control[CMSG_SPACE(sizeof fds)] = { 0 };
@@ -122,11 +133,16 @@ static BOOL handOver(int client, NSString *helper, int argc, const char *argv[])
     struct cmsghdr *header = CMSG_FIRSTHDR(&message);
     *header = (struct cmsghdr){ .cmsg_len = CMSG_LEN(sizeof fds), .cmsg_level = SOL_SOCKET, .cmsg_type = SCM_RIGHTS };
     memcpy(CMSG_DATA(header), fds, sizeof fds);
-    if (sendmsg(client, &message, 0) != sizeof length) return NO;
+    ssize_t head;
+    do {
+        head = sendmsg(client, &message, 0);
+    } while (head < 0 && errno == EINTR);
+    if (head != sizeof length) return NO;
     for (NSUInteger sent = 0; sent < payload.length;) {
         ssize_t n = write(client, (const char *)payload.bytes + sent, payload.length - sent);
+        if (n < 0 && errno == EINTR) continue;
         if (n <= 0) return NO;
-        sent += n;
+        sent += (NSUInteger)n;
     }
     return YES;
 }
@@ -134,7 +150,11 @@ static BOOL handOver(int client, NSString *helper, int argc, const char *argv[])
 static BOOL becameHelper(int client, pid_t peer, NSString *helperPath) {
     char byte, path[PROC_PIDPATHINFO_MAXSIZE], helper[PATH_MAX];
     setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &(struct timeval){ .tv_sec = 5 }, sizeof(struct timeval));
-    while (read(client, &byte, 1) > 0) {}
+    for (ssize_t n;;) {
+        n = read(client, &byte, 1);
+        if (n > 0 || (n < 0 && errno == EINTR)) continue;
+        break;
+    }
     if (!realpath(helperPath.fileSystemRepresentation, helper)) return NO;
     for (int tries = 0; tries < 50; tries++, usleep(10000))
         if (proc_pidpath(peer, path, sizeof path) > 0 && !strcmp(path, helper)) return YES;
@@ -144,18 +164,105 @@ static BOOL becameHelper(int client, pid_t peer, NSString *helperPath) {
 // 1Password's helper checks its browser a few ms after starting, so the browser must outlive it.
 static const useconds_t kBrowserCheck = 300000;
 
+static BOOL sameStat(const struct stat *a, const struct stat *b) {
+    return a->st_size == b->st_size
+        && a->st_mtimespec.tv_sec == b->st_mtimespec.tv_sec
+        && a->st_mtimespec.tv_nsec == b->st_mtimespec.tv_nsec;
+}
+
+static NSData *machOUUID(NSString *path) {
+    int fd = open(path.fileSystemRepresentation, O_RDONLY | O_CLOEXEC);
+    if (fd < 0) return nil;
+    struct mach_header_64 header;
+    if (read(fd, &header, sizeof header) != sizeof header || header.magic != MH_MAGIC_64 || header.sizeofcmds > 1024 * 1024) {
+        close(fd);
+        return nil;
+    }
+    NSMutableData *cmds = [NSMutableData dataWithLength:header.sizeofcmds];
+    ssize_t got = cmds ? read(fd, cmds.mutableBytes, header.sizeofcmds) : -1;
+    close(fd);
+    if (got != (ssize_t)header.sizeofcmds) return nil;
+    const uint8_t *bytes = cmds.bytes;
+    for (uint64_t offset = 0, i = 0; i < header.ncmds; i++) {
+        if (offset + sizeof(struct load_command) > header.sizeofcmds) break;
+        const struct load_command *lc = (const void *)(bytes + offset);
+        if (lc->cmdsize < sizeof(struct load_command) || offset + lc->cmdsize > header.sizeofcmds) break;
+        if (lc->cmd == LC_UUID && lc->cmdsize >= sizeof(struct uuid_command))
+            return [NSData dataWithBytes:((const struct uuid_command *)lc)->uuid length:sizeof(((struct uuid_command *)lc)->uuid)];
+        offset += lc->cmdsize;
+    }
+    return nil;
+}
+
+static NSData *codeHashOnDisk(NSString *app) {
+    SecStaticCodeRef code = NULL;
+    NSData *cdhash = nil;
+    if (SecStaticCodeCreateWithPath((__bridge CFURLRef)[NSURL fileURLWithPath:app], kSecCSDefaultFlags, &code) == errSecSuccess
+        && SecStaticCodeCheckValidity(code, kSecCSDoNotValidateResources, NULL) == errSecSuccess) {
+        CFDictionaryRef info = NULL;
+        if (SecCodeCopySigningInformation(code, kSecCSDefaultFlags, &info) == errSecSuccess)
+            cdhash = ((__bridge NSDictionary *)info)[(__bridge NSString *)kSecCodeInfoUnique];
+        if (info) CFRelease(info);
+    }
+    if (code) CFRelease(code);
+    return cdhash;
+}
+
 static BOOL copyMatches(NSString *pristine, NSString *clone, struct stat *original) {
     NSString *executable = @"Contents/MacOS/Dia";
+    NSString *origExe = [pristine stringByAppendingPathComponent:executable];
+    NSString *cloneExe = [clone stringByAppendingPathComponent:executable];
     struct stat copy;
-    return stat([pristine stringByAppendingPathComponent:executable].fileSystemRepresentation, original) == 0
-        && stat([clone stringByAppendingPathComponent:executable].fileSystemRepresentation, &copy) == 0
-        && original->st_size == copy.st_size && original->st_mtime == copy.st_mtime;
+    if (stat(origExe.fileSystemRepresentation, original) != 0 || stat(cloneExe.fileSystemRepresentation, &copy) != 0 || !sameStat(original, &copy))
+        return NO;
+
+    NSDictionary *origInfo = [NSDictionary dictionaryWithContentsOfFile:[pristine stringByAppendingPathComponent:@"Contents/Info.plist"]];
+    if (origInfo) {
+        NSDictionary *cloneInfo = [NSDictionary dictionaryWithContentsOfFile:[clone stringByAppendingPathComponent:@"Contents/Info.plist"]];
+        if (!cloneInfo) return NO;
+        for (NSString *key in @[ @"CFBundleShortVersionString", @"CFBundleVersion" ]) {
+            id expected = origInfo[key];
+            if (expected && ![expected isEqual:cloneInfo[key]]) return NO;
+        }
+    }
+
+    NSData *origUUID = machOUUID(origExe);
+    if (origUUID) {
+        NSData *cloneUUID = machOUUID(cloneExe);
+        if (!cloneUUID || ![origUUID isEqualToData:cloneUUID]) return NO;
+    }
+
+    struct stat origRes, cloneRes;
+    NSString *codeRes = @"Contents/_CodeSignature/CodeResources";
+    if (stat([pristine stringByAppendingPathComponent:codeRes].fileSystemRepresentation, &origRes) == 0) {
+        if (stat([clone stringByAppendingPathComponent:codeRes].fileSystemRepresentation, &cloneRes) != 0 || !sameStat(&origRes, &cloneRes))
+            return NO;
+    }
+
+    NSData *origHash = codeHashOnDisk(pristine);
+    if (origHash) {
+        NSData *cloneHash = codeHashOnDisk(clone);
+        if (!cloneHash || ![origHash isEqualToData:cloneHash]) return NO;
+    }
+    return YES;
 }
 
 static void stripQuarantine(NSString *path) {
     // Only strip it when present: macOS warns when a process changes an app it didn't make.
     if (getxattr(path.fileSystemRepresentation, "com.apple.quarantine", NULL, 0, 0, 0) >= 0)
         removexattr(path.fileSystemRepresentation, "com.apple.quarantine", 0);
+}
+
+static BOOL cloneBundle(NSString *from, NSString *to) {
+    if (clonefile(from.fileSystemRepresentation, to.fileSystemRepresentation, 0) == 0) return YES;
+    if (errno != EXDEV && errno != ENOTSUP) return NO;
+    NSTask *task = [NSTask new];
+    task.executableURL = [NSURL fileURLWithPath:@"/usr/bin/ditto"];
+    task.arguments = @[ from, to ];
+    task.standardInput = task.standardOutput = task.standardError = NSFileHandle.fileHandleWithNullDevice;
+    if (![task launchAndReturnError:NULL]) return NO;
+    [task waitUntilExit];
+    return task.terminationStatus == 0;
 }
 
 // Its sandbox reads only apps under /Applications, hence the clone.
@@ -172,18 +279,27 @@ static NSString *applicationsCopyIn(NSString *copyFolder, NSString *pristine) {
         if (errno != EINTR) return close(lock), nil;
     }
 
+    // Sweep orphaned temp staging bundles from previously killed copies while holding LOCK_EX.
+    for (NSString *entry in [files contentsOfDirectoryAtPath:copyFolder error:nil])
+        if ([entry hasPrefix:@"Dia.app."]) [files removeItemAtPath:[copyFolder stringByAppendingPathComponent:entry] error:nil];
+
     NSString *result = clone;
     if (!copyMatches(pristine, clone, &original)) {
         NSString *fresh = [clone stringByAppendingFormat:@".%d", getpid()];
         [files removeItemAtPath:fresh error:nil];
-        BOOL cloned = clonefile(pristine.fileSystemRepresentation, fresh.fileSystemRepresentation, 0) == 0;
+        BOOL cloned = cloneBundle(pristine, fresh);
         if (cloned) stripQuarantine(fresh);
         const char *src = fresh.fileSystemRepresentation, *dst = clone.fileSystemRepresentation;
         BOOL placed = NO;
         if (cloned) {
-            if ([files fileExistsAtPath:clone]) {
-                placed = renamex_np(src, dst, RENAME_SWAP) == 0
-                    || (errno == ENOTSUP && [files removeItemAtPath:clone error:nil] && rename(src, dst) == 0);
+            struct stat dstInfo;
+            if (lstat(dst, &dstInfo) == 0) {
+                if (S_ISDIR(dstInfo.st_mode)) {
+                    placed = renamex_np(src, dst, RENAME_SWAP) == 0
+                        || (errno == ENOTSUP && [files removeItemAtPath:clone error:nil] && rename(src, dst) == 0);
+                } else {
+                    placed = unlink(dst) == 0 && rename(src, dst) == 0;
+                }
             } else {
                 placed = rename(src, dst) == 0;
             }
@@ -214,8 +330,12 @@ pid_t DPStartHelperThroughOriginal(NSString *home, NSString *helperPath, BOOL ch
     if (listener >= 0) close(listener), unlink(socket.fileSystemRepresentation);
     if (client >= 0 && handOver(client, helperPath, argc, argv) && becameHelper(client, peer, helperPath)) helper = peer;
     if (client >= 0) close(client);
+    if (!helper && peer > 0) kill(peer, SIGKILL);
     if (helper && checksBrowser) usleep(kBrowserCheck);
-    if (dia) kill(dia, SIGKILL), waitpid(dia, NULL, 0);
+    if (dia) {
+        kill(dia, SIGKILL);
+        while (waitpid(dia, NULL, 0) < 0 && errno == EINTR) {}
+    }
     if (dia) DPForgetApp(app);
     [NSFileManager.defaultManager removeItemAtPath:folder error:nil];
     logLine(home, [NSString stringWithFormat:helper ? @"the original Dia started %@ in %.2f s" : @"the original Dia didn't start %@ (%.2f s)",

@@ -238,6 +238,22 @@ static void testBriefLanguage(NSString *dir) {
     [NSData.data writeToFile:[home stringByAppendingPathComponent:@"paused"] atomically:YES];
     expect(DPPrepareBriefLanguage(app, home) == nil, @"paused skips patching SKILL.md");
     expect([[NSString stringWithContentsOfFile:skillPath encoding:NSUTF8StringEncoding error:NULL] isEqual:@"base"], @"SKILL.md untouched when paused");
+    [NSFileManager.defaultManager removeItemAtPath:[home stringByAppendingPathComponent:@"paused"] error:NULL];
+
+    // Safe mode level > 0: skips patching SKILL.md just like AppIcon.
+    [@{ @"level" : @1 } writeToFile:[home stringByAppendingPathComponent:@"safe-mode.plist"] atomically:YES];
+    expect(DPPrepareBriefLanguage(app, home) == nil, @"safe mode skips patching SKILL.md");
+    expect([[NSString stringWithContentsOfFile:skillPath encoding:NSUTF8StringEncoding error:NULL] isEqual:@"base"], @"SKILL.md untouched in safe mode");
+    [NSFileManager.defaultManager removeItemAtPath:[home stringByAppendingPathComponent:@"safe-mode.plist"] error:NULL];
+
+    // Idempotent re-application replaces prior output language heading instead of duplicating.
+    expect([DPPrepareBriefLanguage(app, home) isEqual:@"set the Morning Brief's language to Japanese"], @"sets Japanese before switch");
+    CFPreferencesSetAppValue(CFSTR("briefLanguageChoice"), CFSTR("French"), cfdom);
+    CFPreferencesAppSynchronize(cfdom);
+    expect([DPPrepareBriefLanguage(app, home) isEqual:@"set the Morning Brief's language to French"], @"switches to French cleanly");
+    NSString *switched = [NSString stringWithContentsOfFile:skillPath encoding:NSUTF8StringEncoding error:NULL];
+    expect([switched containsString:@"## Output language: French"] && ![switched containsString:@"## Output language: Japanese"],
+           @"re-applying BriefLanguage replaces previous language section without duplicating");
 
     // Clean up isolated preferences domain.
     CFPreferencesSetAppValue(CFSTR("briefLanguage"), NULL, cfdom);

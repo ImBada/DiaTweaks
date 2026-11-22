@@ -69,7 +69,8 @@ static void waitForExit(pid_t pid) {
     if (queue < 0) return;
     struct kevent change, event;
     EV_SET(&change, pid, EVFILT_PROC, EV_ADD | EV_ONESHOT, NOTE_EXIT, 0, NULL);
-    if (kevent(queue, &change, 1, NULL, 0, NULL) == 0) kevent(queue, NULL, 0, &event, 1, NULL);
+    if (kevent(queue, &change, 1, NULL, 0, NULL) == 0)
+        while (kevent(queue, NULL, 0, &event, 1, NULL) < 0 && errno == EINTR) {}
     close(queue);
 }
 

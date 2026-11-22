@@ -116,14 +116,18 @@ static NSString *DPICloudPasswordsProblem(DPPatch *patch) {
 static void DPStopOriginalDia(void) {
     char path[PROC_PIDPATHINFO_MAXSIZE];
     NSString *pristine = DPAppSupport(@"DiaPatches/pristine/Dia.app/Contents/MacOS/Dia").stringByResolvingSymlinksInPath;
-    int capacity = proc_listallpids(NULL, 0) + 64;
-    pid_t pids[capacity];
+    int listed = proc_listallpids(NULL, 0);
+    int capacity = (listed > 0 ? listed : 0) + 64;
+    pid_t *pids = calloc((size_t)capacity, sizeof *pids);
+    if (!pids) return;
     int count = proc_listallpids(pids, capacity * (int)sizeof *pids);
+    if (count > capacity) count = capacity;
     for (int i = 0; i < count; i++) {
         if (proc_pidpath(pids[i], path, sizeof path) <= 0 || (strcmp(path, pristine.fileSystemRepresentation) && ![@(path) hasPrefix:@"/Applications/.DiaTweaks/"])) continue;
         kill(pids[i], SIGKILL);
         for (int tries = 0; tries < 50 && kill(pids[i], 0) == 0; tries++) usleep(20000);
     }
+    free(pids);
 }
 
 static void DPInstallICloudPasswords(void) {

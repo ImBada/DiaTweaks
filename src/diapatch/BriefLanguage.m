@@ -27,7 +27,11 @@ static BOOL DPKnownLanguage(NSString *name) {
 }
 
 static NSString *DPChosenLanguage(NSString *home) {
-    if (home && [NSFileManager.defaultManager fileExistsAtPath:[home stringByAppendingPathComponent:@"paused"]]) return nil;
+    if (home) {
+        if ([NSFileManager.defaultManager fileExistsAtPath:[home stringByAppendingPathComponent:@"paused"]]) return nil;
+        NSDictionary *safeMode = [NSDictionary dictionaryWithContentsOfFile:[home stringByAppendingPathComponent:@"safe-mode.plist"]];
+        if ([safeMode[@"level"] integerValue] > 0) return nil;
+    }
     const char *custom = getenv("DIATWEAKS_DOMAIN");
     NS_VALID_UNTIL_END_OF_SCOPE NSString *name = custom && *custom ? @(custom) : @"com.diapatches";
     CFStringRef domain = (__bridge CFStringRef)name;
@@ -45,6 +49,8 @@ NSString *DPPrepareBriefLanguage(NSString *app, NSString *home) {
     NSString *path = [app stringByAppendingPathComponent:DPBriefPrompt];
     NSString *prompt = [NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:NULL];
     if (!prompt) return @"kept the Morning Brief's language: this Dia has no brief prompt";
+    NSRange existing = [prompt rangeOfString:[@"\n\n" stringByAppendingString:DPBriefHeading] options:NSBackwardsSearch];
+    if (existing.location != NSNotFound) prompt = [prompt substringToIndex:existing.location];
     NSString *rule = [NSString stringWithFormat:
         @"\n\n%@%@\n"
         @"Write every piece of text the user reads in %@: titles, bodies, labels, notes, blurbs, greetings, and each cta_label and cta_prompt. "

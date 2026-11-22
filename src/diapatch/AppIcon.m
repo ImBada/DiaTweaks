@@ -94,7 +94,9 @@ static NSString *DPWriteBase(NSString *catalog, NSString *folder, NSString *home
         NSString *problem = DPMergeCatalog(icon, incoming);
         if (problem) return [files removeItemAtPath:incoming error:NULL], [NSString stringWithFormat:@"%@: %@", icon.lastPathComponent, problem];
     }
-    return rename(incoming.fileSystemRepresentation, base.fileSystemRepresentation) == 0 ? nil : @"couldn't save the catalog";
+    if (rename(incoming.fileSystemRepresentation, base.fileSystemRepresentation) != 0)
+        return [files removeItemAtPath:incoming error:NULL], @"couldn't save the catalog";
+    return nil;
 }
 
 static void DPPruneBuilds(NSString *keep, NSString *alsoKeep) {
@@ -162,7 +164,7 @@ NSString *DPPrepareIcons(NSString *app, NSString *installed, NSString *home) {
     [files removeItemAtPath:link error:NULL];
     NSString *current = [folder stringByAppendingPathComponent:@"current.car"];
     if (![files createSymbolicLinkAtPath:link withDestinationPath:current error:NULL] || rename(link.fileSystemRepresentation, catalog.fileSystemRepresentation) != 0)
-        return @"kept Dia's icons: couldn't link the catalog";
+        return [files removeItemAtPath:link error:NULL], @"kept Dia's icons: couldn't link the catalog";
     NSURL *url = [NSURL fileURLWithPath:DPInfoPath(app)];
     NSMutableDictionary *info = [[NSMutableDictionary alloc] initWithContentsOfURL:url error:NULL];
     info[DPOwnIconKey] = DPOwnIcon(app);

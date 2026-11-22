@@ -1,6 +1,8 @@
 #import <Foundation/Foundation.h>
 #include <fcntl.h>
+#include <mach-o/loader.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <sys/wait.h>
 #include <sys/xattr.h>
 #include <unistd.h>
@@ -10,6 +12,7 @@ BOOL DPRunsThisDiapatch(audit_token_t token) { return NO; }
 pid_t DPParentOf(pid_t pid) { return 0; }
 
 #import "PasswordsLaunch.m"
+#import "PasswordsHandoff.m"
 #define send passkeysSend
 #import "Passkeys.m"
 #undef send
@@ -249,6 +252,165 @@ static void testPasskeyHostErrorPathsAndFDCleanup(void) {
     [fm removeItemAtPath:root error:nil];
 }
 
+static void writeInfoPlist(NSString *app, NSString *shortVersion, NSString *build) {
+    NSString *path = [app stringByAppendingPathComponent:@"Contents/Info.plist"];
+    [NSFileManager.defaultManager createDirectoryAtPath:path.stringByDeletingLastPathComponent withIntermediateDirectories:YES attributes:nil error:nil];
+    NSDictionary *info = @{
+        @"CFBundleIdentifier" : @"company.thebrowser.dia",
+        @"CFBundleExecutable" : @"Dia",
+        @"CFBundlePackageType" : @"APPL",
+        @"CFBundleShortVersionString" : shortVersion,
+        @"CFBundleVersion" : build,
+    };
+    NSCAssert([info writeToFile:path atomically:YES], @"writeInfoPlist failed");
+}
+
+static NSData *makeMachOWithUUID(uint8_t tag) {
+    struct mach_header_64 hdr = {
+        .magic = MH_MAGIC_64,
+        .cputype = CPU_TYPE_ARM64,
+        .filetype = MH_EXECUTE,
+        .ncmds = 1,
+        .sizeofcmds = sizeof(struct uuid_command),
+    };
+    struct uuid_command uuid = { .cmd = LC_UUID, .cmdsize = sizeof(struct uuid_command) };
+    memset(uuid.uuid, tag, sizeof uuid.uuid);
+    NSMutableData *data = [NSMutableData dataWithLength:sizeof hdr + sizeof uuid];
+    memcpy(data.mutableBytes, &hdr, sizeof hdr);
+    memcpy((uint8_t *)data.mutableBytes + sizeof hdr, &uuid, sizeof uuid);
+    return data;
+}
+
+static void setExactMtime(NSString *path, time_t sec, long nsec) {
+    struct timespec ts[2] = { { sec, nsec }, { sec, nsec } };
+    NSCAssert(utimensat(AT_FDCWD, path.fileSystemRepresentation, ts, 0) == 0, @"utimensat failed");
+}
+
+static int runTool(NSArray<NSString *> *argv) {
+    NSTask *task = [NSTask new];
+    task.executableURL = [NSURL fileURLWithPath:argv[0]];
+    task.arguments = [argv subarrayWithRange:NSMakeRange(1, argv.count - 1)];
+    task.standardInput = task.standardOutput = task.standardError = NSFileHandle.fileHandleWithNullDevice;
+    if (![task launchAndReturnError:NULL]) return -1;
+    [task waitUntilExit];
+    return task.terminationStatus;
+}
+
+static void testApplicationsCopyUpgradeInvalidation(void) {
+    NSFileManager *fm = NSFileManager.defaultManager;
+    NSString *root = makeTempDir();
+    NSString *pristine = [root stringByAppendingPathComponent:@"pristine/Dia.app"];
+    NSString *copyFolder = [root stringByAppendingPathComponent:@"copy"];
+    NSString *clone = [copyFolder stringByAppendingPathComponent:@"Dia.app"];
+    NSString *pristineExe = [pristine stringByAppendingPathComponent:@"Contents/MacOS/Dia"];
+    NSString *cloneExe = [clone stringByAppendingPathComponent:@"Contents/MacOS/Dia"];
+
+    // 1. Hotfix build update: SAME executable size + SAME exact mtime + SAME short version, DIFFERENT CFBundleVersion.
+    [fm createDirectoryAtPath:pristineExe.stringByDeletingLastPathComponent withIntermediateDirectories:YES attributes:nil error:nil];
+    NSCAssert([makeMachOWithUUID(0x11) writeToFile:pristineExe atomically:YES], @"write uuid 0x11");
+    setExactMtime(pristineExe, 1700000000, 123456000);
+    writeInfoPlist(pristine, @"1.58.0", @"91177");
+    // Pre-existing orphaned temp bundle from a killed prior copy must be swept.
+    NSString *orphan = [copyFolder stringByAppendingPathComponent:@"Dia.app.999999"];
+    writeBundle(orphan, @"orphan");
+    NSCAssert([applicationsCopyIn(copyFolder, pristine) isEqualToString:clone], @"initial clone with Info.plist");
+    assertNoTempBundles(copyFolder);
+
+    writeInfoPlist(pristine, @"1.58.0", @"91178");
+    NSCAssert([applicationsCopyIn(copyFolder, pristine) isEqualToString:clone], @"hotfix build refreshes clone");
+    NSDictionary *cloneInfo = [NSDictionary dictionaryWithContentsOfFile:[clone stringByAppendingPathComponent:@"Contents/Info.plist"]];
+    NSCAssert([cloneInfo[@"CFBundleVersion"] isEqual:@"91178"], @"clone updated to hotfix build 91178, got %@", cloneInfo[@"CFBundleVersion"]);
+
+    // 2. Short version update (1.58.0 -> 1.59.0) with same build/size/mtime refreshes clone.
+    writeInfoPlist(pristine, @"1.59.0", @"91178");
+    NSCAssert([applicationsCopyIn(copyFolder, pristine) isEqualToString:clone], @"short version change refreshes clone");
+    cloneInfo = [NSDictionary dictionaryWithContentsOfFile:[clone stringByAppendingPathComponent:@"Contents/Info.plist"]];
+    NSCAssert([cloneInfo[@"CFBundleShortVersionString"] isEqual:@"1.59.0"], @"clone updated to 1.59.0");
+
+    // 3. Mach-O LC_UUID change with identical size, mtime, and Info.plist refreshes clone.
+    NSCAssert([makeMachOWithUUID(0x22) writeToFile:pristineExe atomically:YES], @"write uuid 0x22");
+    setExactMtime(pristineExe, 1700000000, 123456000);
+    NSCAssert([applicationsCopyIn(copyFolder, pristine) isEqualToString:clone], @"LC_UUID change refreshes clone");
+    NSCAssert([machOUUID(cloneExe) isEqualToData:machOUUID(pristineExe)], @"clone LC_UUID matches updated pristine");
+
+    // 4. Signed bundle: tampering with clone's code signature (restoring exact size & mtime) invalidates cache.
+    NSString *src = [root stringByAppendingPathComponent:@"stub.c"];
+    NSCAssert([@"int main(void){return 0;}\n" writeToFile:src atomically:YES encoding:NSUTF8StringEncoding error:nil], @"write stub.c");
+    NSCAssert(runTool(@[ @"/usr/bin/clang", @"-arch", @"arm64", src, @"-o", pristineExe ]) == 0, @"compile arm64 stub");
+    writeInfoPlist(pristine, @"1.59.0", @"91402");
+    NSCAssert(runTool(@[ @"/usr/bin/codesign", @"--force", @"--sign", @"-", pristine ]) == 0, @"sign pristine stub");
+    NSCAssert([applicationsCopyIn(copyFolder, pristine) isEqualToString:clone], @"clone signed bundle");
+    NSData *origHash = codeHashOnDisk(pristine);
+    NSCAssert(origHash != nil && [origHash isEqualToData:codeHashOnDisk(clone)], @"signed clone matches pristine cdhash");
+
+    // Corrupt clone's signature by removing CodeResources; applicationsCopyIn must repair it.
+    NSString *cloneRes = [clone stringByAppendingPathComponent:@"Contents/_CodeSignature/CodeResources"];
+    [fm removeItemAtPath:cloneRes error:nil];
+    struct stat st;
+    NSCAssert(!copyMatches(pristine, clone, &st), @"missing CodeResources invalidates clone");
+    NSCAssert([applicationsCopyIn(copyFolder, pristine) isEqualToString:clone], @"repairs damaged signed clone");
+    NSCAssert([fm fileExistsAtPath:cloneRes] && [origHash isEqualToData:codeHashOnDisk(clone)], @"repaired signed clone is valid");
+
+    // 5. Broken symlink at destination clone path is replaced cleanly.
+    [fm removeItemAtPath:clone error:nil];
+    NSCAssert([fm createSymbolicLinkAtPath:clone withDestinationPath:@"/nonexistent/broken" error:nil], @"create broken symlink");
+    NSCAssert([applicationsCopyIn(copyFolder, pristine) isEqualToString:clone], @"replaces broken symlink with fresh clone");
+    NSCAssert([origHash isEqualToData:codeHashOnDisk(clone)], @"clone valid after broken symlink replacement");
+
+    [fm removeItemAtPath:root error:nil];
+}
+
+static void testPasswordsHandoffWithClosedStdin(void) {
+    NSString *root = makeTempDir();
+    NSString *sock = [root stringByAppendingPathComponent:@"handoff.sock"];
+    int listener = listenAt(sock);
+    NSCAssert(listener >= 0, @"listenAt failed");
+
+    int helperIn[2], helperOut[2];
+    NSCAssert(pipe(helperIn) == 0 && pipe(helperOut) == 0, @"pipes failed");
+    const char *msg = "hello-from-stdin\n";
+    NSCAssert(write(helperIn[1], msg, strlen(msg)) == (ssize_t)strlen(msg), @"write helperIn failed");
+    close(helperIn[1]);
+
+    // Spawn child with fd 0 CLOSED so socket() inside DPRunPasswordsHandoff gets fd 0.
+    posix_spawn_file_actions_t actions;
+    posix_spawn_file_actions_init(&actions);
+    posix_spawn_file_actions_addclose(&actions, STDIN_FILENO);
+    const char *argv[] = { gSelfExe, "--child-handoff", sock.fileSystemRepresentation, NULL };
+    pid_t pid = 0;
+    NSCAssert(posix_spawn(&pid, gSelfExe, &actions, NULL, (char *const *)argv, environ) == 0, @"posix_spawn handoff child failed");
+    posix_spawn_file_actions_destroy(&actions);
+
+    int client = accept(listener, NULL, NULL);
+    close(listener);
+    NSCAssert(client >= 0, @"accept handoff child failed");
+
+    NSDictionary *launch = @{ @"helper" : @"/bin/cat", @"arguments" : @[], @"environment" : @[] };
+    NSData *payload = [NSJSONSerialization dataWithJSONObject:launch options:0 error:nil];
+    uint32_t length = (uint32_t)payload.length;
+    int fds[3] = { helperIn[0], helperOut[1], STDERR_FILENO };
+    char control[CMSG_SPACE(sizeof fds)] = { 0 };
+    struct iovec iov = { &length, sizeof length };
+    struct msghdr hdr = { .msg_iov = &iov, .msg_iovlen = 1, .msg_control = control, .msg_controllen = sizeof control };
+    struct cmsghdr *cmsg = CMSG_FIRSTHDR(&hdr);
+    *cmsg = (struct cmsghdr){ .cmsg_len = CMSG_LEN(sizeof fds), .cmsg_level = SOL_SOCKET, .cmsg_type = SCM_RIGHTS };
+    memcpy(CMSG_DATA(cmsg), fds, sizeof fds);
+    NSCAssert(sendmsg(client, &hdr, 0) == sizeof length, @"sendmsg failed");
+    NSCAssert(write(client, payload.bytes, payload.length) == (ssize_t)payload.length, @"write payload failed");
+    close(client);
+    close(helperIn[0]);
+    close(helperOut[1]);
+
+    char buf[64] = { 0 };
+    ssize_t got = read(helperOut[0], buf, sizeof buf - 1);
+    close(helperOut[0]);
+    int status = 0;
+    NSCAssert(waitpid(pid, &status, 0) == pid && WIFEXITED(status) && WEXITSTATUS(status) == 0, @"handoff cat exited %d", status);
+    NSCAssert(got == (ssize_t)strlen(msg) && !strcmp(buf, msg), @"helper received intact stdin even when fd 0 started closed (got '%s')", buf);
+
+    [NSFileManager.defaultManager removeItemAtPath:root error:nil];
+}
+
 int main(int argc, char *argv[]) {
     @autoreleasepool {
         gSelfExe = argv[0];
@@ -257,6 +419,10 @@ int main(int argc, char *argv[]) {
             NSString *clone = [copyFolder stringByAppendingPathComponent:@"Dia.app"];
             return [applicationsCopyIn(copyFolder, pristine) isEqualToString:clone] ? 0 : 1;
         }
+        if (argc == 3 && !strcmp(argv[1], "--child-handoff")) {
+            setenv(DPHandoffVariable, argv[2], 1);
+            return DPRunPasswordsHandoff();
+        }
         if (argc == 3 && !strcmp(argv[1], "--child-host")) {
             int before = countOpenFDs();
             int rc = DPRunPasskeyHost(@(argv[2]));
@@ -264,6 +430,8 @@ int main(int argc, char *argv[]) {
             return after != before ? 99 : rc;
         }
         testApplicationsCopy();
+        testApplicationsCopyUpgradeInvalidation();
+        testPasswordsHandoffWithClosedStdin();
         testPasskeyMessageValidation();
         testPasskeyHostErrorPathsAndFDCleanup();
         puts("all diapatch passkeys hardening checks passed");

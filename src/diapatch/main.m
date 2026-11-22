@@ -332,13 +332,15 @@ static NSString *localIdentity(NSString *keychain) {
 
 static NSString *createLocalIdentity(NSString *keychain) {
     note(@"creating the signing identity \"%@\" in %@", kLocalIdentity, keychain);
-    NSString *dir = [NSTemporaryDirectory() stringByAppendingPathComponent:@"diapatch-identity"];
+    NSString *dir = [NSTemporaryDirectory() stringByAppendingPathComponent:[NSString stringWithFormat:@"diapatch-identity-%d", getpid()]];
     NSString *config = [dir stringByAppendingPathComponent:@"req.cnf"], *key = [dir stringByAppendingPathComponent:@"key.pem"],
              *cert = [dir stringByAppendingPathComponent:@"cert.pem"], *p12 = [dir stringByAppendingPathComponent:@"id.p12"];
     NSString *request = @"[req]\ndistinguished_name = dn\nprompt = no\nx509_extensions = ext\n[dn]\nCN = DiaPatches Local Signing\n"
                         @"[ext]\nbasicConstraints = critical,CA:FALSE\nkeyUsage = critical,digitalSignature\n"
                         @"extendedKeyUsage = critical,codeSigning\nsubjectKeyIdentifier = hash\n";
-    BOOL ok = removeTree(dir) && makeDir(dir) && [request writeToFile:config atomically:NO encoding:NSUTF8StringEncoding error:NULL]
+    BOOL ok = removeTree(dir)
+        && [NSFileManager.defaultManager createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:@{ NSFilePosixPermissions : @0700 } error:NULL]
+        && [request writeToFile:config atomically:NO encoding:NSUTF8StringEncoding error:NULL]
         && check(@[ @"/usr/bin/openssl", @"req", @"-x509", @"-new", @"-newkey", @"rsa:2048", @"-nodes", @"-sha256", @"-days", @"7300",
                     @"-config", config, @"-keyout", key, @"-out", cert ])
         && check(@[ @"/usr/bin/openssl", @"pkcs12", @"-export", @"-inkey", key, @"-in", cert, @"-name", kLocalIdentity,
@@ -365,7 +367,7 @@ static BOOL sign(NSString *app) {
         }
     }
     // Entitlements tied to The Browser Company's profile make AMFI refuse to launch a re-signed Dia.
-    NSURL *entitlements = [NSURL fileURLWithPath:[NSTemporaryDirectory() stringByAppendingPathComponent:@"diapatch.entitlements"]];
+    NSURL *entitlements = [NSURL fileURLWithPath:[NSTemporaryDirectory() stringByAppendingPathComponent:[NSString stringWithFormat:@"diapatch-%d.entitlements", getpid()]]];
     NSDictionary *granted = @{
         @"com.apple.security.device.audio-input" : @YES,
         @"com.apple.security.device.camera" : @YES,
@@ -632,10 +634,11 @@ static NSString *agentService(void) { return [NSString stringWithFormat:@"gui/%d
 
 // bootout returns before a busy job has exited, hence the wait.
 static void removeRelay(void) {
+    for (NSString *name in @[ @"passwords-helper", @"passwords.sock", @"onepassword.sock" ]) removeTree(inHome(name));
+    if (env("DIAPATCH_HOME")) return;
     run(@[ @"/bin/launchctl", @"bootout", agentService() ], NULL);
     for (int i = 0; i < 100 && run(@[ @"/bin/launchctl", @"print", agentService() ], NULL) == 0; i++) usleep(100000);
     removeTree(agentPlist());
-    for (NSString *name in @[ @"passwords-helper", @"passwords.sock", @"onepassword.sock" ]) removeTree(inHome(name));
     removeTree(DPCopyFolder);
 }
 
@@ -794,6 +797,14 @@ static void removePasswordsHost(void) {
             removeTree(path);
             [NSFileManager.defaultManager moveItemAtPath:inHome(file) toPath:path error:NULL];
         }
+        NSString *kept = inHome(file);
+        if (exists(kept)) {
+            for (NSString *folder in folders) {
+                if (!exists(folder)) continue;
+                NSString *path = [folder stringByAppendingPathComponent:file];
+                if (!exists(path) && [NSFileManager.defaultManager moveItemAtPath:kept toPath:path error:NULL]) break;
+            }
+        }
     }
 }
 
@@ -828,7 +839,7 @@ static BOOL uninstall(BOOL purgeFiles) {
     if (needRestore && !exists(gPristine)) return fail(@"no official Dia at %@; reinstall Dia from https://www.diabrowser.com", gPristine);
     removeRelay();
     removePasswordsHost();
-    if (!removeTree(DPCopyFolder)) return NO;
+    if (!env("DIAPATCH_HOME") && !removeTree(DPCopyFolder)) return NO;
     NSString *signature = signatureOf(gApp);
     if (needRestore) {
         NSString *copy = [gPristine stringByAppendingString:@".restore"];
