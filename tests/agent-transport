@@ -1,0 +1,17 @@
+#!/bin/sh
+set -eu
+cd "$(dirname "$0")/.."
+temporary=$(mktemp -d "${TMPDIR:-/tmp}/agent-transport-test.XXXXXX")
+trap 'rm -rf "$temporary"' EXIT
+bundle="$temporary/TransportTests.app/Contents"
+mkdir -p "$bundle/MacOS" "$bundle/Resources/agent-server-resources/dist"
+patch=src/dylib/Patches/AgentTransport
+for mode in plain configured; do
+    flag=
+    [ "$mode" != configured ] || flag=-DCONFIGURED_AGENT
+    clang -arch arm64 $flag tests/agent-transport-helper.c -o "$bundle/Resources/agent-server-resources/dist/agent-server"
+    clang -arch arm64 -mmacosx-version-min=14.0 -fobjc-arc $flag -Isrc/dylib -framework AppKit \
+        tests/agent-transport.m tests/agent-transport-roundtrip.m "$patch/AgentRelay.m" "$patch/AgentSocket.m" "$patch/AgentFilters.m" \
+        "$patch/AgentFrames.m" "$patch/AgentWriter.m" src/dylib/StdPatch/Hook.m -o "$bundle/MacOS/TransportTests"
+    "$bundle/MacOS/TransportTests"
+done

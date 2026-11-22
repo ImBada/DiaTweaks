@@ -1,0 +1,26 @@
+#!/bin/sh
+set -eu
+cd "$(dirname "$0")/.."
+temporary=$(mktemp -d "${TMPDIR:-/tmp}/chat-models-test.XXXXXX")
+trap 'rm -rf "$temporary"' EXIT
+patch=src/dylib/Patches/DiaChatModel
+sdk=$(xcrun --show-sdk-path)
+for scenario in normal missing generic no-cases wrong-module; do
+    module=BoostFeatureFlags
+    flag=
+    expected=empty
+    case "$scenario" in
+        normal) expected=models ;;
+        missing) flag=-DMISSING_CATALOG ;;
+        generic) flag=-DGENERIC_CATALOG ;;
+        no-cases) flag=-DNO_CASES ;;
+        wrong-module) module=UnrelatedModule ;;
+    esac
+    swiftc -target arm64-apple-macos14.0 -parse-as-library -module-name "$module" $flag \
+        -emit-object "$patch/NativeModels.swift" tests/chat-models.swift -o "$temporary/catalog.o" -wmo
+    clang -arch arm64 -mmacosx-version-min=14.0 -fobjc-arc -framework Foundation \
+        -L"$sdk/usr/lib/swift" -Wl,-rpath,/usr/lib/swift \
+        "$patch/NativeModels.m" "$patch/AgentRequest.m" tests/chat-models.m "$temporary/catalog.o" -o "$temporary/check"
+    "$temporary/check" "$expected"
+done
+printf '%s\n' 'Chat Model: dynamic IDs and missing, generic, unrelated and unsupported catalogs passed'

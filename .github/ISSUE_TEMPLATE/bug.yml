@@ -61,6 +61,8 @@ body:
         - Hide New Tab Until Opened
         - Hide History Suggestions
         - Hide New Tab Logo
+        - Chat Model
+        - Fall Back to Dia Default
         - Turn Off AI
         - Morning Brief Language
         - Hide Chat Button
