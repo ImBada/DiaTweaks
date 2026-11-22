@@ -44,6 +44,7 @@ body:
         - Hide Site Not Working Prompt
         - Close Tabs from Tab Switcher
         - Unload Tabs
+        - Unload Pinned Splits
         - Undo Closing a Tab
         - Pin Tab Shortcut
         - Save Page As

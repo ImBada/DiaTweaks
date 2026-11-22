@@ -15,6 +15,7 @@
 #define DPDiaTabStripTabs       "TabStrip.TabStripContainerView"
 #define DPDiaWindowBackground   "_TtGC5ARCUI25WindowFrameBackgroundViewC15WindowTreatment24WindowBackgroundBaseView_"
 #define DPDiaWindow             "_TtC6Window14PlatformWindow"
+#define DPDiaWindowController   "_TtC6Window24PlatformWindowController"
 #define DPDiaLibraryButton      "_TtC10DiaLibrary17LibraryButtonView"
 #define DPDiaLibraryCell        "_TtC10TabSidebar15LibraryCellView"
 #define DPDiaPinnedExtension    "_TtC16PinnedExtensions19PinnedExtensionView"
