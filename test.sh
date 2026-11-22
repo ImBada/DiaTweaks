@@ -10,7 +10,8 @@ pid=$(pgrep -f "$dia\$" || true)
 while [ -n "$pid" ] && kill -0 $pid 2>/dev/null; do sleep 0.5; done
 # Dia skips its quit notification on SIGTERM, so safe mode would count this as a crash at launch.
 plutil -replace launching -bool NO "$support/safe-mode.plist" 2>/dev/null || true
-cp -f build/DiaPatches.dylib "$support/DiaPatches.dylib"
+# Replace the file rather than overwrite it, so a Dia that has the old one mapped never sees its pages change.
+cp build/DiaPatches.dylib "$support/.DiaPatches.dylib.$$" && mv -f "$support/.DiaPatches.dylib.$$" "$support/DiaPatches.dylib"
 rm -f "$report"
 DIAPATCH_TEST="$report" nohup "$dia" >/dev/null 2>&1 &
 test_pid=$!
