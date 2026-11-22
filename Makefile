@@ -231,6 +231,15 @@ WINDOW_PATCHES := src/dylib/Patches/WindowCorners/WindowCorners.m src/dylib/Patc
 build/window-patches: tests/window-patches.m $(WINDOW_PATCHES) src/dylib/Patches/DragWindowFromPage/DragWindowFromPage.m src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m $(wildcard src/dylib/StdPatch/*.h src/dylib/Patches/CompactCommandBar/*.h src/dylib/Patches/CommandBar/HideTab.h src/dylib/Patches/EdgeToEdge/EdgeToEdge.h) | build
 	clang $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -Isrc/dylib -framework AppKit -framework QuartzCore -o $@ tests/window-patches.m $(WINDOW_PATCHES) src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m
 
+build/zoom-on-double-click: tests/zoom-on-double-click.m src/dylib/Patches/ZoomOnDoubleClick/ZoomOnDoubleClick.m src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m $(wildcard src/dylib/StdPatch/*.h) | build
+	clang $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -Isrc/dylib -framework AppKit -framework QuartzCore -o $@ tests/zoom-on-double-click.m src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m
+
+check-zoom-on-double-click: build/zoom-on-double-click
+	build/zoom-on-double-click
+
+check: check-zoom-on-double-click
+.PHONY: check-zoom-on-double-click
+
 build/pinned-tab-close-button: tests/pinned-tab-close-button.m src/dylib/Patches/PinnedTabCloseButton/PinnedTabCloseButton.m src/dylib/Patches/PinnedTabCloseButton/PinnedTabs.h src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m $(wildcard src/dylib/StdPatch/*.h) | build
 	clang $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -Isrc/dylib -framework AppKit -o $@ $<
 

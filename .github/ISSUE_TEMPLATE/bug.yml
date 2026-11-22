@@ -76,6 +76,7 @@ body:
         - Window Material
         - Keep Windows Active
         - Drag Window from Page
+        - Zoom on Double-Click
         - Window Corners
         - App Icon
         - Hide Window Controls
