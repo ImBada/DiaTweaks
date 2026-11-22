@@ -9,6 +9,7 @@ __attribute__((constructor)) static void DPInit(void) {
     // Only honor DIAPATCH_MANIFEST inside diapatch so a stray env var won't exit Dia.
     const char *manifest = getenv("DIAPATCH_MANIFEST");
     if (manifest && [NSProcessInfo.processInfo.processName isEqualToString:@"diapatch"]) _exit(DPWriteManifest(@(manifest)) ? 0 : 1);
+    if (DPIsChildProcess()) return;
     DPBeginLaunch();
     if (DPSafeMode == 2) return;
     DPLoadPatches();

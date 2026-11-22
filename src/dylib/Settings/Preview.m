@@ -54,6 +54,7 @@ static void DPFetchPreview(NSArray<NSString *> *names, void (^done)(NSURL *file,
     if (!names.count) return done(nil, NO);
     NSURL *cached = DPCachedPreview(names[0]);
     NSURL *url = [NSURL URLWithString:[@DP_PREVIEWS stringByAppendingString:names[0]]];
+    if (!url) return done(nil, NO);
     [[NSURLSession.sharedSession dataTaskWithURL:url completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
         NSInteger status = [response isKindOfClass:NSHTTPURLResponse.class] ? [(NSHTTPURLResponse *)response statusCode] : 0;
         BOOL preview = status == 200 && DPIsPreview(data, names[0]);
@@ -160,7 +161,8 @@ static void DPFetchPreview(NSArray<NSString *> *names, void (^done)(NSURL *file,
     // Off in the top half, on in the bottom.
     if ([file.lastPathComponent hasSuffix:@"-onoff.webp"]) {
         CGImageRef image = [[[NSImage alloc] initWithContentsOfURL:file] CGImageForProposedRect:NULL context:nil hints:nil];
-        size_t width = CGImageGetWidth(image), half = CGImageGetHeight(image) / 2;
+        size_t width = image ? CGImageGetWidth(image) : 0, half = image ? CGImageGetHeight(image) / 2 : 0;
+        if (!width || !half) return [self show:nil];
         id off = (__bridge_transfer id)CGImageCreateWithImageInRect(image, CGRectMake(0, 0, width, half));
         id on = (__bridge_transfer id)CGImageCreateWithImageInRect(image, CGRectMake(0, half, width, half));
         if (!off || !on) return [self show:nil];
@@ -191,11 +193,24 @@ static void DPFetchPreview(NSArray<NSString *> *names, void (^done)(NSURL *file,
 - (void)viewDidMoveToWindow {
     [super viewDidMoveToWindow];
     [NSNotificationCenter.defaultCenter removeObserver:self name:NSWindowDidChangeOcclusionStateNotification object:nil];
-    if (self.window) [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(updatePlayback) name:NSWindowDidChangeOcclusionStateNotification object:self.window];
+    [NSNotificationCenter.defaultCenter removeObserver:self name:NSWindowWillCloseNotification object:nil];
+    if (self.window) {
+        [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(updatePlayback) name:NSWindowDidChangeOcclusionStateNotification object:self.window];
+        [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(stopPlayback) name:NSWindowWillCloseNotification object:self.window];
+    }
     [self updatePlayback];
 }
 
+- (void)stopPlayback {
+    [_link invalidate];
+    _link = nil;
+    [_flip invalidate];
+    _flip = nil;
+    [_player pause];
+}
+
 - (void)showState {
+    if (!_states.count) return;
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
     _media.contents = _states[((unsigned long long)floor(NSDate.date.timeIntervalSince1970)) & 1];
@@ -207,7 +222,7 @@ static void DPFetchPreview(NSArray<NSString *> *names, void (^done)(NSURL *file,
     _link = nil;
     [_flip invalidate];
     _flip = nil;
-    BOOL visible = self.window.occlusionState & NSWindowOcclusionStateVisible;
+    BOOL visible = (self.window.occlusionState & NSWindowOcclusionStateVisible) != 0;
     if (visible && _states) {
         [self showState];
         NSTimeInterval now = NSDate.date.timeIntervalSince1970;
@@ -235,6 +250,7 @@ static void DPFetchPreview(NSArray<NSString *> *names, void (^done)(NSURL *file,
     CGImageRef image = NULL;
     VTCreateCGImageFromCVPixelBuffer(buffer, NULL, &image);
     CVPixelBufferRelease(buffer);
+    if (!image) return;
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
     _media.contents = (__bridge_transfer id)image;

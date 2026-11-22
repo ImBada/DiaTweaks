@@ -116,7 +116,19 @@ int main(void) {
 
         // 4. Settings.m borrowBack: preserves original disabled state across repeated borrow calls, and allowResizing: restores zoom button.
         NSWindow *window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 600, 500) styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskResizable backing:NSBackingStoreBuffered defer:NO];
-        window.contentView = scroll;
+        NSViewController *plainVC = [NSViewController new];
+        plainVC.view = scroll;
+        window.contentViewController = plainVC;
+        DPPaneView *testPane = [[DPPaneView alloc] initWithTitle:@"Test" content:[DPHomeView new]];
+        [settings preparePane:testPane];
+        expect(YES, @"preparePane: ignores non-NSSplitViewController contentViewController safely");
+        settings.shown = testPane;
+        settings.originalTitle = nil;
+        settings.shownTitle = @"Test";
+        NSTextField *titleField = [NSTextField labelWithString:@"Test"];
+        settings.title = titleField;
+        [settings closeShownPane];
+        expect([titleField.stringValue isEqualToString:@"Test"], @"closeShownPane does not throw when originalTitle is nil");
         [window standardWindowButton:NSWindowZoomButton].enabled = YES;
         [settings allowResizing:YES];
         expect(![window standardWindowButton:NSWindowZoomButton].enabled, @"allowResizing:YES disables zoom button");

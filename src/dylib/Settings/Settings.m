@@ -19,7 +19,7 @@ static void DPRemoveDiaPaneItems(NSToolbar *toolbar) {
     NSMutableSet *identifiers = [NSMutableSet set];
     for (id item in (NSArray *)raw) {
         id identifier = DPValueForKey(item, @"itemIdentifier");
-        if (identifier) [identifiers addObject:identifier];
+        if ([identifier isKindOfClass:NSString.class]) [identifiers addObject:identifier];
     }
     for (NSInteger i = toolbar.items.count - 1; i >= 0; i--)
         if ([identifiers containsObject:toolbar.items[i].itemIdentifier]) [toolbar removeItemAtIndex:i];
@@ -93,7 +93,8 @@ static __weak DPPaneView *DPShownPane;
 }
 
 - (void)preparePane:(DPPaneView *)pane {
-    NSView *detail = ((NSSplitViewController *)self.table.window.contentViewController).splitViewItems.lastObject.viewController.view;
+    NSViewController *controller = self.table.window.contentViewController;
+    NSView *detail = [controller isKindOfClass:NSSplitViewController.class] ? ((NSSplitViewController *)controller).splitViewItems.lastObject.viewController.view : nil;
     if (!detail || pane.superview == detail) return;
     pane.hidden = YES;
     pane.frame = detail.bounds;
@@ -112,7 +113,7 @@ static __weak DPPaneView *DPShownPane;
     self.shown = DPShownPane = pane;
     __weak DPSettings *weakSelf = self;
     pane.titleChanged = ^(NSString *title, BOOL canGoBack) {
-        weakSelf.title.stringValue = weakSelf.shownTitle = title;
+        if (title) weakSelf.title.stringValue = weakSelf.shownTitle = title;
         [weakSelf borrowBack:canGoBack];
     };
     [self allowResizing:YES];
@@ -131,7 +132,7 @@ static __weak DPPaneView *DPShownPane;
             break;
         }
     self.originalTitle = self.title.stringValue;
-    self.title.stringValue = self.shownTitle = pane.title;
+    if (pane.title) self.title.stringValue = self.shownTitle = pane.title;
 }
 
 - (void)hidePane {
@@ -147,13 +148,14 @@ static __weak DPPaneView *DPShownPane;
     NSUInteger index = pane.searchItem ? [toolbar.items indexOfObject:pane.searchItem] : NSNotFound;
     if (index != NSNotFound) {
         [toolbar removeItemAtIndex:index];
-        if (index > 0 && [toolbar.items[index - 1].itemIdentifier isEqualToString:NSToolbarFlexibleSpaceItemIdentifier]) [toolbar removeItemAtIndex:index - 1];
+        if (index > 0 && index - 1 < toolbar.items.count && [toolbar.items[index - 1].itemIdentifier isEqualToString:NSToolbarFlexibleSpaceItemIdentifier])
+            [toolbar removeItemAtIndex:index - 1];
     }
     NSString *shown = self.title.stringValue;
     if (pane.showsPage) [self borrowBack:NO];
     [pane reset];
     self.shown = DPShownPane = nil;
-    if ([shown isEqualToString:self.shownTitle]) self.title.stringValue = self.originalTitle;
+    if (self.originalTitle && [shown isEqualToString:self.shownTitle]) self.title.stringValue = self.originalTitle;
 }
 
 - (void)borrowBack:(BOOL)borrow {

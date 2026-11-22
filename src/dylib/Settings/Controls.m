@@ -73,10 +73,10 @@ NSView *DPRow(NSView *leading, NSView *trailing) {
     NSRect frame = [self convertRect:toggle.bounds fromView:toggle];
     if (toggle.enabled && NSPointInRect(point, frame)) return;
     if (toggle.enabled && NSPointInRect(point, NSInsetRect(frame, -10, -10))) [toggle performClick:nil];
-    else self.open();
+    else if (self.open) self.open();
 }
 - (BOOL)accessibilityPerformPress {
-    self.open();
+    if (self.open) self.open();
     return YES;
 }
 @end

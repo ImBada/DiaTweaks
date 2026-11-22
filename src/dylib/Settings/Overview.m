@@ -92,8 +92,10 @@
 - (NSView *)rowForPatch:(DPPatch *)patch {
     NSTextField *note = DPLabel(@"", 11, NSFontWeightRegular, NSColor.secondaryLabelColor);
     note.hidden = YES;
+    SEL tintSel = patch->tint.length ? NSSelectorFromString(patch->tint) : NULL;
+    NSColor *tint = tintSel && [NSColor respondsToSelector:tintSel] ? [NSColor valueForKey:patch->tint] : NSColor.systemGrayColor;
     NSStackView *leading = [NSStackView stackViewWithViews:@[
-        DPIconTile(patch->symbol, DPValueForKey(NSColor.class, patch->tint) ?: NSColor.systemGrayColor),
+        DPIconTile(patch->symbol, tint),
         DPColumn(@[DPLabel(patch->title, 13, NSFontWeightRegular, NSColor.labelColor), note], 2),
     ]];
     leading.spacing = 10;
@@ -106,7 +108,9 @@
     trailing.spacing = 10;
 
     __weak DPOverviewView *weakSelf = self;
-    NSView *row = DPLinkRow(DPRow(leading, trailing), patch->title, ^{ weakSelf.open(patch->title, [[DPPageView alloc] initWithPatch:patch]); });
+    NSView *row = DPLinkRow(DPRow(leading, trailing), patch->title, ^{
+        if (weakSelf.open) weakSelf.open(patch->title, [[DPPageView alloc] initWithPatch:patch]);
+    });
     [self.searchText setObject:search forKey:row];
     return row;
 }
@@ -148,7 +152,7 @@
             NSArray<NSView *> *arranged = ((NSStackView *)row.superview).arrangedSubviews;
             NSUInteger index = [arranged indexOfObject:row];
             row.hidden = !visible;
-            if (index > 0) arranged[index - 1].hidden = !visible || !any;
+            if (index != NSNotFound && index > 0) arranged[index - 1].hidden = !visible || !any;
             any |= visible;
         }
         BOOL pauseSection = ((NSArray *)section[2]).firstObject == self.pausedRow;

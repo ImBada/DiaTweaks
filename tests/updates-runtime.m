@@ -204,11 +204,23 @@ int main(void) {
         [@"" writeToFile:logFile atomically:YES encoding:NSUTF8StringEncoding error:nil];
         DPHandOffAndQuit(@[@"uninstall"]);
         expect(DPTerminateCount == 1 && DPHandedOff, @"DPHandOffAndQuit marks handoff and terminates");
+        DPHandOffAndQuit(@[@"apply"]);
+        expect(DPTerminateCount == 1, @"second DPHandOffAndQuit is deduplicated and does not double-terminate");
         DPInstallOnQuit();
         usleep(150000);
         NSString *logAfterHandoff = [NSString stringWithContentsOfFile:logFile encoding:NSUTF8StringEncoding error:nil];
         expect([logAfterHandoff containsString:@"uninstall --wait"] && ![logAfterHandoff containsString:@"apply --wait"],
-               @"DPInstallOnQuit does not spawn racing apply after DPHandOffAndQuit uninstall");
+               @"DPInstallOnQuit and duplicate handoff do not spawn racing apply after DPHandOffAndQuit uninstall");
+
+        // 8. Malformed non-dictionary entries in check JSON and empty releaseNotes never crash or draw broken links.
+        writeStubCLI(cli, @"#!/bin/sh\nprintf '{\"dia\":null,\"tweaks\":{\"installed\":\"v1.1.9\",\"latest\":\"v1.2.0\",\"size\":10,\"staged\":null,\"available\":true,\"releaseNotes\":\"\",\"error\":null}}'\n");
+        checked = NO;
+        [updates check:^{ checked = YES; }];
+        pumpUntil(^BOOL { return checked; }, 5);
+        expect(![updates available:DPDia] && ![updates staged:DPDia] && [updates available:DPTweaks],
+               @"non-dictionary dia entry in check JSON handled safely without exception");
+        DPSoftwareUpdateView *emptyNotesView = [[DPSoftwareUpdateView alloc] initWithFrame:NSMakeRect(0, 0, 560, 400)];
+        expect(!hasLabelText(emptyNotesView, @"Release Notes"), @"empty releaseNotes string does not render broken Release Notes link");
 
         [NSUserDefaults.standardUserDefaults removePersistentDomainForName:DPTestDomain()];
         [NSFileManager.defaultManager removeItemAtPath:temp error:nil];

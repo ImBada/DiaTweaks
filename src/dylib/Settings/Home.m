@@ -92,8 +92,10 @@ static NSView *DPWebRow(NSString *title, NSString *path) {
     alert.informativeText = @"Dia will relaunch without patches, and its own updater takes over again. Run the installer to patch it again later.";
     [alert addButtonWithTitle:@"Restore and Relaunch"];
     [alert addButtonWithTitle:@"Cancel"];
-    [alert beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse response) {
+    void (^finish)(NSModalResponse) = ^(NSModalResponse response) {
         if (response == NSAlertFirstButtonReturn) DPHandOffAndQuit(@[@"uninstall"]);
-    }];
+    };
+    if (self.window) [alert beginSheetModalForWindow:self.window completionHandler:finish];
+    else finish([alert runModal]);
 }
 @end

@@ -93,8 +93,10 @@ static NSView *DPWideRow(NSView *view) {
         [headingText addObjectsFromArray:@[gap, DPLabel(_patch->hint, 11, NSFontWeightRegular, NSColor.secondaryLabelColor)]];
     }
     [headingText addObject:_note];
+    SEL tintSel = _patch->tint.length ? NSSelectorFromString(_patch->tint) : NULL;
+    NSColor *tint = tintSel && [NSColor respondsToSelector:tintSel] ? [NSColor valueForKey:_patch->tint] : NSColor.systemGrayColor;
     NSStackView *heading = [NSStackView stackViewWithViews:@[
-        DPIconTile(_patch->symbol, DPValueForKey(NSColor.class, _patch->tint) ?: NSColor.systemGrayColor),
+        DPIconTile(_patch->symbol, tint),
         DPColumn(headingText, 2),
     ]];
     heading.spacing = 10;
@@ -193,7 +195,7 @@ static void DPSetRowControlsEnabled(NSView *view, BOOL enabled) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             [NSAnimationContext runAnimationGroup:^(NSAnimationContext *context) {
                 context.duration = 0.2;
-                for (NSView *view in appeared) view.animator.alphaValue = 1;
+                for (NSView *view in appeared) if (view.window && !view.hidden) view.animator.alphaValue = 1;
             }];
         });
     _note.stringValue = DPWhyDisabled(_patch) ?: @"";

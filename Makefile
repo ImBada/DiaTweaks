@@ -71,6 +71,9 @@ build/hook-table: tests/hook-table.m src/dylib/StdPatch/Hook.m $(wildcard src/dy
 build/updates-runtime: tests/updates-runtime.m src/dylib/Updates/Updates.m src/dylib/Updates/Updates.h src/dylib/Settings/Controls.m src/dylib/Settings/SoftwareUpdate.m src/dylib/Settings/Settings.h src/dylib/StdPatch/Views.m $(wildcard src/dylib/StdPatch/*.h) | build
 	clang $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -Isrc/dylib -framework AppKit -framework QuartzCore -o $@ tests/updates-runtime.m src/dylib/StdPatch/Views.m
 
+build/settings-preview: tests/settings-preview.m src/dylib/Settings/Preview.m src/dylib/Settings/Controls.m src/dylib/Settings/Settings.h $(wildcard src/dylib/StdPatch/*.h) | build
+	clang $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -Isrc/dylib -framework AppKit -framework QuartzCore -framework AVFoundation -framework VideoToolbox -framework CoreMedia -framework CoreVideo -o $@ tests/settings-preview.m
+
 build/runtime-guards: tests/runtime-guards.m src/dylib/StdPatch/TypedURL.m src/dylib/StdPatch/Hide.m src/dylib/StdPatch/HideHosts.m src/dylib/StdPatch/Hide.h src/dylib/Settings/Settings.m src/dylib/Settings/Settings.h src/dylib/Commands/GroupTabs/Order.m src/dylib/Commands/GroupTabs/Grouping.m src/dylib/Commands/GroupTabs/Menu.m src/dylib/Commands/GroupTabs/GroupTabs.h src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m src/dylib/StdPatch/App.m $(GROUP_TABS) $(wildcard src/dylib/StdPatch/*.h) | build
 	clang $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -Isrc/dylib -framework AppKit -framework QuartzCore -o $@ tests/runtime-guards.m src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m src/dylib/StdPatch/App.m $(GROUP_TABS)
 
@@ -154,8 +157,8 @@ build/native-messaging: tests/native-messaging.m src/dylib/StdPatch/Hosts.m src/
 	clang $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -D_mh_dylib_header=_mh_execute_header -Isrc/dylib -Isrc/diapatch $(EXTENSION) -framework AppKit -o $@ \
 		tests/native-messaging.m src/dylib/StdPatch/Hosts.m src/dylib/Patches/Passkeys/Passkeys.m src/dylib/Patches/OnePassword/OnePassword.m
 
-build/diapatch-passkeys: tests/diapatch-passkeys.m src/diapatch/PasswordsLaunch.m src/diapatch/Passkeys.m $(wildcard src/diapatch/*.h) | build
-	clang $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -Isrc/diapatch -framework Foundation -framework CoreGraphics -o $@ tests/diapatch-passkeys.m
+build/diapatch-passkeys: tests/diapatch-passkeys.m src/diapatch/PasswordsLaunch.m src/diapatch/PasswordsHandoff.m src/diapatch/Passkeys.m $(wildcard src/diapatch/*.h) | build
+	clang $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -Isrc/diapatch -framework Foundation -framework CoreGraphics -framework Security -o $@ tests/diapatch-passkeys.m
 
 build/passkeys-origin: tests/passkeys-origin.m src/diapatch/Passkeys.m src/diapatch/Passkeys.h src/diapatch/LaunchServices.h | build
 	clang $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -Isrc -framework Foundation -framework CoreGraphics -o $@ tests/passkeys-origin.m
@@ -286,7 +289,7 @@ COMBINATORIAL := src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m src/dylib/
 build/combinatorial-stability: tests/combinatorial-stability.m $(COMBINATORIAL) src/dylib/SafeMode/SafeMode.m $(wildcard src/dylib/StdPatch/*.h) | build
 	clang $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -Isrc/dylib -framework AppKit -framework QuartzCore -o $@ tests/combinatorial-stability.m $(COMBINATORIAL)
 
-check: build/diapatch build/diapatch-tests build/group-tabs build/mouse-back-forward build/vertical-tab-glow build/split-client-hello build/peek-cursor build/peek-link build/peek-tabs build/peek-chat build/safe-mode build/pause build/hook-table build/updates-runtime build/runtime-guards build/tidy-tabs build/drag-offset build/small-tab-shape build/toolbar-permission build/launch-flags build/little-dia-stack build/little-dia-profile build/little-dia-over build/little-dia-focus build/tracking build/hide-toolbar-settle build/command-bar-swap build/command-bar-spare build/tab-titles build/show-address-field build/hide-chat-button build/hide-connect-app-prompt build/open-sidebar-instantly build/native-messaging build/diapatch-passkeys build/passkeys-origin build/app-icon-signing build/little-dia-route build/chat-card build/peek-lifecycle build/hide-toolbar-off build/command-bar-lifecycle build/window-patches build/pinned-tab-close-button build/sidebar-tab-bugs build/unload-tab build/profile-color-picker build/historical-regressions build/abi-kvc-kvo build/view-reuse-layout build/combinatorial-stability build/patches.json
+check: build/diapatch build/diapatch-tests build/group-tabs build/mouse-back-forward build/vertical-tab-glow build/split-client-hello build/peek-cursor build/peek-link build/peek-tabs build/peek-chat build/safe-mode build/pause build/hook-table build/updates-runtime build/settings-preview build/runtime-guards build/tidy-tabs build/drag-offset build/small-tab-shape build/toolbar-permission build/launch-flags build/little-dia-stack build/little-dia-profile build/little-dia-over build/little-dia-focus build/tracking build/hide-toolbar-settle build/command-bar-swap build/command-bar-spare build/tab-titles build/show-address-field build/hide-chat-button build/hide-connect-app-prompt build/open-sidebar-instantly build/native-messaging build/diapatch-passkeys build/passkeys-origin build/app-icon-signing build/little-dia-route build/chat-card build/peek-lifecycle build/hide-toolbar-off build/command-bar-lifecycle build/window-patches build/pinned-tab-close-button build/sidebar-tab-bugs build/unload-tab build/profile-color-picker build/historical-regressions build/abi-kvc-kvo build/view-reuse-layout build/combinatorial-stability build/patches.json
 	tests/tweaks-update
 	build/diapatch-tests
 	build/group-tabs
@@ -303,6 +306,7 @@ check: build/diapatch build/diapatch-tests build/group-tabs build/mouse-back-for
 	build/pause
 	build/hook-table
 	build/updates-runtime
+	build/settings-preview
 	build/runtime-guards
 	build/drag-offset
 	build/small-tab-shape

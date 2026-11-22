@@ -54,12 +54,12 @@ static void child(const char *support, const char *home) {
 static NSString *support, *home;
 static int failures;
 
-static DPLaunch *launch(void) {
+static DPLaunch *launchWithArgs(NSArray<NSString *> *extra) {
     DPLaunch *launch = [DPLaunch new];
     NSPipe *in = [NSPipe pipe], *out = [NSPipe pipe];
     launch.task = [NSTask new];
     launch.task.executableURL = [NSURL fileURLWithPath:NSBundle.mainBundle.executablePath];
-    launch.task.arguments = @[ @"child", support, home ];
+    launch.task.arguments = [@[ @"child", support, home ] arrayByAddingObjectsFromArray:extra];
     launch.task.standardInput = in;
     launch.task.standardOutput = out;
     launch.input = in.fileHandleForWriting;
@@ -70,6 +70,8 @@ static DPLaunch *launch(void) {
     launch.paused = [line containsString:@"paused 1"];
     return launch;
 }
+
+static DPLaunch *launch(void) { return launchWithArgs(@[]); }
 
 static NSDictionary *state(void) { return [NSDictionary dictionaryWithContentsOfFile:[support stringByAppendingPathComponent:@"safe-mode.plist"]]; }
 
@@ -88,7 +90,7 @@ static void leaveCrashed(DPLaunch *launch) {
 }
 
 int main(int argc, const char *argv[]) {
-    if (argc == 4 && !strcmp(argv[1], "child")) child(argv[2], argv[3]);
+    if (argc >= 4 && !strcmp(argv[1], "child")) child(argv[2], argv[3]);
     @autoreleasepool {
         NSString *temporary = [NSTemporaryDirectory() stringByAppendingPathComponent:[NSUUID UUID].UUIDString];
         support = [temporary stringByAppendingPathComponent:@"support"];
@@ -158,6 +160,43 @@ int main(int argc, const char *argv[]) {
         [pausedL2 end:@"quit"];
         expect([state()[@"level"] integerValue] == 2, @"a clean paused launch does not step down level 2");
         [NSFileManager.defaultManager removeItemAtPath:pause error:nil];
+
+        // Chromium helper child processes (--type=renderer / gpu-process / utility) must never touch safe-mode.plist.
+        [NSFileManager.defaultManager removeItemAtPath:[support stringByAppendingPathComponent:@"safe-mode.plist"] error:nil];
+        DPLaunch *browser = launch();
+        pid_t browserPid = browser.task.processIdentifier;
+        for (NSString *flag in @[ @"--type=renderer", @"--type=gpu-process", @"--type=utility", @"--utility-sub-type=network.mojom.NetworkService" ]) {
+            DPLaunch *helper = launchWithArgs(@[ flag ]);
+            expect(helper.level == 0, [NSString stringWithFormat:@"child %@ leaves DPSafeMode at 0", flag]);
+            leaveCrashed(helper);
+        }
+        expect([state()[@"pid"] intValue] == browserPid && [state()[@"crashes"] integerValue] == 0 && [state()[@"level"] integerValue] == 0,
+               @"crashed Chromium child processes never overwrite browser pid or increment SafeMode crashes");
+        [browser end:@"quit"];
+        expect(![state()[@"launching"] boolValue], @"browser still clears launching marker cleanly after child helper exits");
+
+        // Corrupt safe-mode.plist types (non-NSDate launched, out-of-range level) never crash and clamp level.
+        NSMutableDictionary *corrupt = [state() mutableCopy];
+        corrupt[@"launching"] = @YES;
+        corrupt[@"launched"] = @"not-a-date";
+        corrupt[@"pid"] = @"not-a-pid";
+        corrupt[@"level"] = @(-5);
+        [corrupt writeToFile:[support stringByAppendingPathComponent:@"safe-mode.plist"] atomically:YES];
+        DPLaunch *afterCorrupt = launch();
+        expect(afterCorrupt.level == 0, @"corrupt negative level and non-NSDate launched handled cleanly without crashing");
+        [afterCorrupt end:@"quit"];
+
+        // Compact JSON ("pid":123,) in .ips crash report is detected as a crash too.
+        DPLaunch *compactCrash = launch();
+        [compactCrash end:@"crash"];
+        NSString *folder = [home stringByAppendingPathComponent:@"Library/Logs/DiagnosticReports"];
+        [NSFileManager.defaultManager createDirectoryAtPath:folder withIntermediateDirectories:YES attributes:nil error:nil];
+        NSString *compactReport = [NSString stringWithFormat:@"%@-compact-%d.ips", NSProcessInfo.processInfo.processName, compactCrash.task.processIdentifier];
+        [[NSString stringWithFormat:@"{\"pid\":%d,\"other\":1}\n", compactCrash.task.processIdentifier]
+            writeToFile:[folder stringByAppendingPathComponent:compactReport] atomically:YES encoding:NSUTF8StringEncoding error:nil];
+        DPLaunch *afterCompact = launch();
+        expect([state()[@"crashes"] integerValue] == 1, @"compact .ips pid format is counted as a crash");
+        [afterCompact end:@"quit"];
 
         [NSFileManager.defaultManager removeItemAtPath:temporary error:nil];
     }

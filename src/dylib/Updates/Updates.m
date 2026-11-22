@@ -14,10 +14,20 @@ static NSTask *DPCLITask(NSArray<NSString *> *args) {
     NSTask *task = [NSTask new];
     task.executableURL = [NSURL fileURLWithPath:DPSupport(@"bin/diapatch")];
     task.arguments = args;
+    task.standardInput = NSFileHandle.fileHandleWithNullDevice;
     return task;
 }
 
-static BOOL DPLaunchCLI(NSArray<NSString *> *args) { return [DPCLITask(args) launchAndReturnError:nil]; }
+static BOOL DPLaunchCLI(NSArray<NSString *> *args) {
+    NSTask *task = DPCLITask(args);
+    task.standardOutput = task.standardError = NSFileHandle.fileHandleWithNullDevice;
+    return [task launchAndReturnError:nil];
+}
+
+static NSDictionary *DPUpdateEntry(NSDictionary *found, NSString *part) {
+    id entry = found[part];
+    return [entry isKindOfClass:NSDictionary.class] ? entry : nil;
+}
 
 static NSUserDefaults *DPUpdateDefaults(void) {
     static NSUserDefaults *defaults;
@@ -79,6 +89,7 @@ void DPRunCLI(NSArray<NSString *> *args, void (^completion)(NSString *output)) {
 }
 
 void DPHandOffAndQuit(NSArray<NSString *> *args) {
+    if (DPHandedOff) return;
     if (!DPLaunchCLI([args arrayByAddingObjectsFromArray:@[@"--wait", @(getpid()).stringValue, @"--relaunch"]])) return;
     DPHandedOff = YES;
     [NSApp terminate:nil];
@@ -119,11 +130,18 @@ void DPHandOffAndQuit(NSArray<NSString *> *args) {
     _checking = YES;
     [self changed];
     DPRunCLI(@[@"check", @"--json"], ^(NSString *output) {
-        id found = output ? [NSJSONSerialization JSONObjectWithData:[output dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil] : nil;
-        self->_found = [found isKindOfClass:NSDictionary.class] ? found : nil;
+        id raw = output ? [NSJSONSerialization JSONObjectWithData:[output dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil] : nil;
+        NSMutableDictionary *parsed = [raw isKindOfClass:NSDictionary.class] ? [NSMutableDictionary new] : nil;
+        if (parsed) {
+            for (NSString *part in @[DPDia, DPTweaks]) {
+                id entry = ((NSDictionary *)raw)[part];
+                if ([entry isKindOfClass:NSDictionary.class]) parsed[part] = entry;
+            }
+        }
+        self->_found = parsed;
         for (NSString *part in @[DPDia, DPTweaks])
             if ([self staged:part]) [self->_failed removeObjectForKey:part];
-        NSString *unpatchable = self->_found[DPDia][@"unpatchable"];
+        NSString *unpatchable = DPUpdateEntry(self->_found, DPDia)[@"unpatchable"];
         if ([unpatchable isKindOfClass:NSString.class]) {
             if (!self->_failed[DPDia] && !self->_whenDownloaded[DPDia]) self->_failed[DPDia] = self->_unpatchable = unpatchable;
         } else if (self->_unpatchable && [self->_failed[DPDia] isEqualToString:self->_unpatchable]) {
@@ -150,7 +168,7 @@ void DPHandOffAndQuit(NSArray<NSString *> *args) {
     for (NSString *part in _pretend) {
         BOOL dia = [part isEqual:DPDia], staged = [_pretend[part] isEqual:@"staged"];
         NSString *latest = dia ? @"1.56.0 (90000)" : @"v1.1.0";
-        NSMutableDictionary *entry = [found[part] ?: @{} mutableCopy];
+        NSMutableDictionary *entry = [DPUpdateEntry(found, part) ?: @{} mutableCopy];
         [entry addEntriesFromDictionary:@{
             @"latest" : latest, @"available" : @(!staged), @"staged" : staged ? latest : NSNull.null,
             @"size" : dia ? @704038560 : @960161,
@@ -164,12 +182,12 @@ void DPHandOffAndQuit(NSArray<NSString *> *args) {
 - (NSString *)checkProblem {
     NSMutableArray<NSString *> *names = [NSMutableArray new];
     for (NSString *part in @[DPDia, DPTweaks])
-        if ([_found[part][@"error"] isKindOfClass:NSString.class]) [names addObject:DPPartName(part)];
+        if ([DPUpdateEntry(_found, part)[@"error"] isKindOfClass:NSString.class]) [names addObject:DPPartName(part)];
     return names.count == 2 ? @"Couldn’t check for updates" : names.count ? [NSString stringWithFormat:@"Couldn’t check for %@ updates", names[0]] : nil;
 }
 
-- (BOOL)available:(NSString *)part { return [self.found[part][@"available"] boolValue]; }
-- (BOOL)staged:(NSString *)part { return [self.found[part][@"staged"] isKindOfClass:NSString.class]; }
+- (BOOL)available:(NSString *)part { return [DPUpdateEntry(self.found, part)[@"available"] boolValue]; }
+- (BOOL)staged:(NSString *)part { return [DPUpdateEntry(self.found, part)[@"staged"] isKindOfClass:NSString.class]; }
 - (BOOL)downloading:(NSString *)part { return _whenDownloaded[part] != nil; }
 - (BOOL)failed:(NSString *)part { return _failed[part] != nil; }
 - (NSString *)failure:(NSString *)part { return _failed[part].length ? _failed[part] : nil; }
@@ -182,7 +200,7 @@ void DPHandOffAndQuit(NSArray<NSString *> *args) {
         cacheDir = [NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES).firstObject stringByAppendingPathComponent:@"DiaPatches"];
     });
     NSString *file = [cacheDir stringByAppendingPathComponent:[part isEqual:DPDia] ? @"download/Dia.zip" : @"release/DiaTweaks.zip"];
-    id rawSize = self.found[part][@"size"];
+    id rawSize = DPUpdateEntry(self.found, part)[@"size"];
     double size = [rawSize isKindOfClass:NSNumber.class] ? [rawSize doubleValue] : 0;
     double got = [[NSFileManager.defaultManager attributesOfItemAtPath:file error:nil][NSFileSize] doubleValue];
     return size > 0 && got < size ? got / size : got > 0 ? -1 : 0;

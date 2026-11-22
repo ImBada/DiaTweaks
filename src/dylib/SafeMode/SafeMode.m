@@ -18,6 +18,16 @@ void DPSetPaused(BOOL paused) {
     else [NSFileManager.defaultManager removeItemAtURL:DPPauseURL error:nil];
 }
 
+BOOL DPIsChildProcess(void) {
+    NSProcessInfo *process = NSProcessInfo.processInfo;
+    NSString *name = process.processName;
+    if ([name hasPrefix:@"Dia Helper"] || [name isEqualToString:@"chrome_crashpad_handler"]) return YES;
+    NSArray<NSString *> *args = process.arguments;
+    for (NSUInteger i = 1; i < args.count; i++)
+        if ([args[i] hasPrefix:@"--type="] || [args[i] hasPrefix:@"--utility-sub-type="]) return YES;
+    return NO;
+}
+
 static NSString *DPBuildUUID(const struct mach_header_64 *header) {
     const struct load_command *command = (const void *)(header + 1);
     for (uint32_t i = 0; i < header->ncmds; i++, command = (const void *)((const uint8_t *)command + command->cmdsize))
@@ -27,17 +37,21 @@ static NSString *DPBuildUUID(const struct mach_header_64 *header) {
 
 static BOOL DPCrashed(NSDictionary *state) {
     NSDate *launched = state[@"launched"];
-    if (!launched) return YES;
+    if (![launched isKindOfClass:NSDate.class]) return YES;
+    NSNumber *pidNum = state[@"pid"];
+    if (![pidNum isKindOfClass:NSNumber.class]) return NO;
     NSFileManager *files = NSFileManager.defaultManager;
     NSString *prefix = [NSProcessInfo.processInfo.processName stringByAppendingString:@"-"];
-    NSString *pid = [NSString stringWithFormat:@"\"pid\" : %@,", state[@"pid"]];
+    NSString *pidSpaced = [NSString stringWithFormat:@"\"pid\" : %@,", pidNum];
+    NSString *pidCompact = [NSString stringWithFormat:@"\"pid\":%@,", pidNum];
     NSURL *reports = [files.homeDirectoryForCurrentUser URLByAppendingPathComponent:@"Library/Logs/DiagnosticReports"];
     for (NSURL *url in [files contentsOfDirectoryAtURL:reports includingPropertiesForKeys:@[NSURLContentModificationDateKey] options:0 error:nil]) {
         if (![url.lastPathComponent hasPrefix:prefix] || ![url.pathExtension isEqual:@"ips"]) continue;
-        NSDate *modified;
+        NSDate *modified = nil;
         [url getResourceValue:&modified forKey:NSURLContentModificationDateKey error:nil];
-        if ([modified compare:launched] != NSOrderedDescending) continue;
-        if ([[NSString stringWithContentsOfURL:url encoding:NSUTF8StringEncoding error:nil] containsString:pid]) return YES;
+        if (![modified isKindOfClass:NSDate.class] || [modified compare:launched] == NSOrderedAscending) continue;
+        NSString *contents = [NSString stringWithContentsOfURL:url encoding:NSUTF8StringEncoding error:nil];
+        if ([contents containsString:pidSpaced] || [contents containsString:pidCompact]) return YES;
     }
     return NO;
 }
@@ -56,15 +70,16 @@ static void DPSurvived(void) {
 }
 
 void DPBeginLaunch(void) {
-    Dl_info info;
-    dladdr((const void *)DPBeginLaunch, &info);
+    if (DPIsChildProcess()) return;
+    Dl_info info = { 0 };
+    if (!dladdr((const void *)DPBeginLaunch, &info) || !info.dli_fname || !info.dli_fbase) return;
     DPStateURL = [NSURL fileURLWithPath:[@(info.dli_fname).stringByDeletingLastPathComponent stringByAppendingPathComponent:@"safe-mode.plist"]];
     DPPauseURL = [DPStateURL.URLByDeletingLastPathComponent URLByAppendingPathComponent:@"paused"];
     DPPaused = DPPausedAtLaunch = DPPauseSaved();
     NSString *build = DPBuildUUID(info.dli_fbase);
     NSDictionary *saved = [NSDictionary dictionaryWithContentsOfURL:DPStateURL error:nil];
     DPState = [saved[@"build"] isEqual:build] ? [saved mutableCopy] : [NSMutableDictionary dictionaryWithObject:build forKey:@"build"];
-    DPSafeMode = [DPState[@"level"] integerValue];
+    DPSafeMode = MIN(MAX([DPState[@"level"] integerValue], 0), 2);
     DPOnQuit(^{ DPSurvived(); });
     // Crashes while paused neither count toward nor reset safe mode.
     if (DPPaused) return;
