@@ -279,6 +279,53 @@ int main(void) {
         // nil source -> DPPeekGive returns NO -> DPPeekDiscard closes page.
         CHECK(!DPPeekGive(unattached, delegate, nil, unattached.url, DPPeekTab), "DPPeekGive returns NO without source");
 
+        // 9. Regression: DPPeekMakePage sets dp_nonTabWebContents marker, and DPPeekGive clears it upon tab adoption.
+        DPFakePeekPage *made = (DPFakePeekPage *)DPPeekMakePage(window, source, ^(id p) {});
+        CHECK([objc_getAssociatedObject(made, NSSelectorFromString(@"dp_nonTabWebContents")) boolValue],
+              "DPPeekMakePage tags page with dp_nonTabWebContents");
+        gGiveCalls = 0;
+        CHECK(DPPeekGive(made, delegate, source, made.url, DPPeekTab) && gGiveCalls == 1,
+              "DPPeekGive adopts Peek page into real tab");
+        CHECK(objc_getAssociatedObject(made, NSSelectorFromString(@"dp_nonTabWebContents")) == nil,
+              "DPPeekGive clears dp_nonTabWebContents marker when promoting to real tab");
+
+        // 10. Regression: DPPeekDiscard(nil, nil) and DPPeekCloseWhenBlank(nil, 40) are safe no-ops.
+        gCloseCalls = 0;
+        DPPeekDiscard(nil, nil);
+        DPPeekCloseWhenBlank(nil, 40);
+        CHECK(gCloseCalls == 0, "nil page discard/closeWhenBlank is a safe no-op");
+
+        // 11. Regression: Closed window guard blocks DPPeekWarm and DPPeekOpenFrom after NSWindowWillCloseNotification.
+        DPPeek.on = YES;
+        gCloseCalls = 0;
+        DPPeekWarm(window, source, [NSURL URLWithString:@"https://closed-window.example/warm"]);
+        CHECK(DPPeekWarmPage == nil && DPPeekWarmView == nil, "DPPeekWarm refuses closed window");
+        DPFakePeekPage *closedWarm = [DPFakePeekPage new];
+        closedWarm.url = [NSURL URLWithString:@"about:blank"];
+        DPPeekOpenFrom(window, @"tab-1", [NSURL URLWithString:@"https://closed-window.example/"], NSMakeRect(0, 0, 20, 10), delegate, source, closedWarm, nil);
+        CHECK(DPPeekAllCards(window).count == 0 && gCloseCalls == 1,
+              "DPPeekOpenFrom refuses closed window and discards warm page");
+
+        // 12. Regression: Detached DPPeekGrowth mid-animation invokes completion and discards page instead of leaking.
+        DPPeekTestWindow *window2 = [[DPPeekTestWindow alloc] initWithContentRect:NSMakeRect(-30000, -30000, 600, 400)
+                                                                        styleMask:NSWindowStyleMaskTitled
+                                                                          backing:NSBackingStoreBuffered defer:NO];
+        _TtC11ContentPane15ContentPaneView *pane2 = [[_TtC11ContentPane15ContentPaneView alloc] initWithFrame:window2.contentView.bounds];
+        [window2.contentView addSubview:pane2];
+        DPFakePeekPage *expandPage = [DPFakePeekPage new];
+        expandPage.url = [NSURL URLWithString:@"about:blank"];
+        DPPeekCard *expanding = DPPeekShowCard(window2, expandPage, nil, NSMakeRect(10, 10, 40, 20));
+        expanding.sourceDelegate = delegate;
+        expanding.source = source;
+        gGiveCalls = gCloseCalls = 0;
+        [expanding close:DPPeekTab];
+        DPPeekGrowth *growth = DPGet(expanding, &DPGrowthKey);
+        CHECK(growth != nil, "expanding card creates DPPeekGrowth driver");
+        [expanding removeFromSuperview];
+        [growth step];
+        CHECK(gGiveCalls == 0 && gCloseCalls == 1 && expanding.page == nil && DPGet(expanding, &DPGrowthKey) == nil,
+              "detached DPPeekGrowth step invokes done and discards page without leaking");
+
         if (failures) return 1;
         puts("PASS: Peek glow fallback, off-tweak teardown, window close, and timer lifecycle");
     }

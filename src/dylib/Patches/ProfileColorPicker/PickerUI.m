@@ -23,10 +23,7 @@ NSString *DPAnchoredPanelSpaceID(NSWindow *window) {
 static void DPRemoveColorRow(NSViewController *pane) {
     NSArray<NSView *> *views = DPGet(pane, &DPRowViewsKey);
     for (NSView *view in views) {
-        if ([view isKindOfClass:DPProfileColorRow.class]) {
-            DPProfileColorRow *row = (DPProfileColorRow *)view;
-            if (row.well.isActive) [row.well deactivate];
-        }
+        if ([view isKindOfClass:DPProfileColorRow.class]) [(DPProfileColorRow *)view prepareForRemoval];
         [view removeFromSuperview];
     }
     DPSet(pane, &DPRowViewsKey, nil);
@@ -43,8 +40,7 @@ static void DPMountColorRow(NSViewController *pane) {
     NSArray<NSView *> *existing = DPGet(pane, &DPRowViewsKey);
     if (existing.count == 2 && existing[1].superview == rows) {
         DPProfileColorRow *row = (DPProfileColorRow *)existing[1];
-        row.spaceID = spaceID;
-        [row syncFromDefaults:NO];
+        [row switchToSpaceID:spaceID];
         return;
     }
     if (existing) DPRemoveColorRow(pane);
@@ -113,7 +109,13 @@ static void DPThemePicker_themeClicked(NSView *self, SEL _cmd, id sender) {
     if (!DPProfileColorPicker.on || openingDial) return;
     NSViewController *pane = DPOwningPaneForView(self);
     NSString *spaceID = pane ? DPProfilePaneSpaceID(pane) : nil;
-    if (!spaceID || !DPSavedProfileHexForSpace(spaceID)) return;
+    if (!spaceID) return;
+    NSArray<NSView *> *views = DPGet(pane, &DPRowViewsKey);
+    if (views.count == 2 && [views[1] isKindOfClass:DPProfileColorRow.class]) {
+        DPProfileColorWell *well = ((DPProfileColorRow *)views[1]).well;
+        if (well.isActive) [well deactivate];
+    }
+    if (!DPSavedProfileHexForSpace(spaceID)) return;
     DPSetProfileHexForSpace(spaceID, nil);
     DPSyncProfileColorUI(spaceID);
     DPRefreshProfileColors();

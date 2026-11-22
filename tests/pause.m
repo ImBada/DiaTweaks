@@ -85,6 +85,33 @@ static NSDictionary *DPStubShortcut(void) {
     return @{ @"keyCode" : @5, @"modifiers" : @(NSEventModifierFlagCommand), @"key" : @"G" };
 }
 
+@interface DPCustomEnabledRow : NSView
+@property (nonatomic) BOOL enabled;
+@property (nonatomic, strong) NSButton *childButton;
+@property (nonatomic) NSInteger setEnabledCount;
+@end
+@implementation DPCustomEnabledRow
+- (instancetype)initWithFrame:(NSRect)frame {
+    if (!(self = [super initWithFrame:frame])) return nil;
+    _childButton = [NSButton buttonWithTitle:@"Relaunch" target:nil action:nil];
+    _childButton.enabled = NO;
+    [self addSubview:_childButton];
+    return self;
+}
+- (void)setEnabled:(BOOL)enabled {
+    _enabled = enabled;
+    _setEnabledCount++;
+    // Intentionally keep _childButton disabled (e.g. invalid input or no pending changes).
+    _childButton.enabled = NO;
+}
+@end
+
+static DPCustomEnabledRow *gCustomRow;
+static NSArray<NSView *> *DPStubCustomRows(void) {
+    gCustomRow = [[DPCustomEnabledRow alloc] initWithFrame:NSMakeRect(0, 0, 300, 40)];
+    return @[ gCustomRow ];
+}
+
 DP_PATCH(DPStub) {
     .key = @"pauseTest",
     .title = @"Pause Test",
@@ -97,6 +124,7 @@ DP_PATCH(DPStub) {
     .choices = DPStubChoices,
     .shortcut = @"pauseTestShortcut",
     .defaultShortcut = DPStubShortcut,
+    .rows = DPStubCustomRows,
     .apply = DPApplyStub,
 };
 
@@ -202,6 +230,8 @@ int main(void) {
         expect(homePause != nil, @"Home shows a Pause Tweaks button");
         expect(stubSwitch.state == NSControlStateValueOn && stubSwitch.enabled, @"switch starts on and enabled");
         expect(picker.enabled && shortcut.enabled, @"page choice picker and shortcut button start enabled");
+        expect(gCustomRow && gCustomRow.enabled && !gCustomRow.childButton.enabled,
+               @"DPSetRowControlsEnabled stops at custom row setEnabled: without clobbering disabled child controls");
 
         // DPSetChoice syncs picker selection and DPApplySavedSettings re-applies external choice changes.
         DPSetChoice(&DPStub, @"two");

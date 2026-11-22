@@ -48,23 +48,37 @@ static void DPPeekNotifySource(id source, BOOL selection) {
 }
 
 - (void)handleKey:(NSString *)keyPath {
+    id page, source;
+    @synchronized (self) {
+        page = _page;
+        source = _source;
+    }
     DPPeekCard *peek = self.peek;
-    if (!DPPeek.on || !peek || peek.closing || peek.isHiddenOrHasHiddenAncestor || !self.source) return;
-    if ([keyPath isEqualToString:@"isLoading"] && [[(NSObject *)self.page valueForKey:@"isLoading"] boolValue]) return;
-    DPPeekNotifySource(self.source, [keyPath isEqualToString:@"selectedText"]);
+    if (!DPPeek.on || !page || !source || !peek || peek.closing || peek.isHiddenOrHasHiddenAncestor) return;
+    if ([keyPath isEqualToString:@"isLoading"] && [[(NSObject *)page valueForKey:@"isLoading"] boolValue]) return;
+    DPPeekNotifySource(source, [keyPath isEqualToString:@"selectedText"]);
 }
 
 - (void)observeValueForKeyPath:(NSString *)keyPath ofObject:(id)object change:(NSDictionary *)change context:(void *)context {
     if (context != &DPPeekChatKVOContext) return [super observeValueForKeyPath:keyPath ofObject:object change:change context:context];
     if (NSThread.isMainThread) [self handleKey:keyPath];
-    else dispatch_async(dispatch_get_main_queue(), ^{ [self handleKey:keyPath]; });
+    else {
+        __weak DPPeekChatBridge *weakSelf = self;
+        dispatch_async(dispatch_get_main_queue(), ^{ [weakSelf handleKey:keyPath]; });
+    }
 }
 
 - (void)detach {
-    id page = self.page;
-    self.page = nil;
-    for (NSString *key in self.keys) [page removeObserver:self forKeyPath:key context:&DPPeekChatKVOContext];
-    self.keys = nil;
+    id page;
+    NSArray<NSString *> *keys;
+    @synchronized (self) {
+        page = _page;
+        keys = _keys;
+        _page = nil;
+        _keys = nil;
+        _source = nil;
+    }
+    for (NSString *key in keys) [page removeObserver:self forKeyPath:key context:&DPPeekChatKVOContext];
 }
 
 - (void)dealloc { [self detach]; }
@@ -72,20 +86,30 @@ static void DPPeekNotifySource(id source, BOOL selection) {
 @end
 
 void DPPeekChatAttach(DPPeekCard *peek) {
-    [(DPPeekChatBridge *)peek.chatBridge detach];
-    peek.chatBridge = nil;
+    DPPeekChatDetachQuiet(peek);
     if (!DPPeek.on || !peek || peek.closing || !peek.page || !peek.source || peek.page == peek.source) return;
     peek.chatBridge = [[DPPeekChatBridge alloc] initWithPeek:peek];
     DPPeekNotifySource(peek.source, YES);
 }
 
+void DPPeekChatDetachBridge(id bridge) {
+    if ([bridge isKindOfClass:DPPeekChatBridge.class]) [(DPPeekChatBridge *)bridge detach];
+}
+
+void DPPeekChatDetachQuiet(DPPeekCard *peek) {
+    DPPeekChatBridge *bridge = peek.chatBridge;
+    if (!bridge) return;
+    peek.chatBridge = nil;
+    [bridge detach];
+}
+
 void DPPeekChatDetach(DPPeekCard *peek) {
     DPPeekChatBridge *bridge = peek.chatBridge;
     if (!bridge) return;
+    BOOL wasHidden = peek.isHiddenOrHasHiddenAncestor;
     id source = peek.source;
-    [bridge detach];
-    peek.chatBridge = nil;
-    DPPeekNotifySource(source, YES);
+    DPPeekChatDetachQuiet(peek);
+    if (!wasHidden) DPPeekNotifySource(source, YES);
 }
 
 void DPPeekChatVisibilityDidChange(DPPeekCard *peek) {

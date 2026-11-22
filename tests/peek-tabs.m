@@ -451,7 +451,43 @@ int main(void) {
         Check(pinPeek.closing && !pinPeek.superview && gCloseCalls == 1 && DPPeekAllCards(window).count == 0,
               "closing pinned tab's WebContents tears down hidden Peek immediately");
 
-        // 7. Source deallocation closes only its own Peek; multi-window close & Peek OFF clean everything.
+        // 7. Immediate parking when visible Peek source hides (switching to NTP/unloaded tab) and window.close() inside Peek.
+        {
+            sw.activeID = @"C";
+            ArcWebContents *ntpSource = [ArcWebContents new];
+            DPPeekOpenFrom(window, @"C", [NSURL URLWithString:@"https://ntp-switch.example"], NSMakeRect(100, 100, 80, 20), delegate, ntpSource, nil, nil);
+            DPPeekCard *ntpPeek = DPPeekCardIn(window);
+            ArcWebContents *ntpPeekPage = (ArcWebContents *)ntpPeek.page;
+            ntpPeekPage.url = [NSURL URLWithString:@"about:blank"];
+            Check(ntpPeek != nil && !ntpPeek.hidden, "Peek opens on Tab C before switching to NTP");
+            sw.activeID = @"pin-1";
+            // Simulate Dia hiding source WebContents when switching to a non-WebContents NTP/unloaded tab (no new page gets setVisibility:2).
+            [ntpSource setVisibility:0];
+            Check(ntpPeek.hidden && DPPeekCardIn(window) == nil, "hiding visible Peek source immediately parks Peek without waiting for sync timer");
+            // Return to C and simulate window.close() inside Peek's own WebContents.
+            sw.activeID = @"C";
+            DPPeekSyncTabs(window);
+            Check(!ntpPeek.hidden, "Peek restores on return to C");
+            gCloseCalls = 0;
+            [ntpPeekPage close];
+            Check(ntpPeek.closing && DPPeekCardIn(window) == nil,
+                  "window.close() on visible Peek page immediately begins closing Peek card");
+            [ntpPeek handOver];
+
+            // Parked (hidden) Peek receiving closeWithForegroundCommitTiming: synchronously tears down.
+            DPPeekOpenFrom(window, @"C", [NSURL URLWithString:@"https://parked-close.example"], NSMakeRect(100, 100, 80, 20), delegate, ntpSource, nil, nil);
+            DPPeekCard *parkedClose = DPPeekCardIn(window);
+            ArcWebContents *parkedClosePage = (ArcWebContents *)parkedClose.page;
+            parkedClosePage.url = [NSURL URLWithString:@"about:blank"];
+            sw.activeID = @"pin-1";
+            DPPeekSyncTabs(window);
+            Check(parkedClose.hidden, "parkedClose hidden on switch");
+            [parkedClosePage closeWithForegroundCommitTiming:0];
+            Check(parkedClose.closing && DPPeekAllCards(window).count == 0,
+                  "closeWithForegroundCommitTiming: on parked Peek page synchronously removes Peek card");
+        }
+
+        // 8. Source deallocation closes only its own Peek; multi-window close & Peek OFF clean everything.
         DPPeekTabWindow *window2 = [[DPPeekTabWindow alloc] initWithContentRect:NSMakeRect(-30000, -30000, 800, 500)
             styleMask:NSWindowStyleMaskTitled backing:NSBackingStoreBuffered defer:NO];
         window2.releasedWhenClosed = NO;

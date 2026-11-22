@@ -151,6 +151,8 @@ static NSRect DPPeekCardRect(NSRect area) {
 }
 
 - (void)dealloc {
+    DPPeekChatDetachBridge(_chatBridge);
+    _chatBridge = nil;
     if (_monitor) [NSEvent removeMonitor:_monitor];
     DPPeekUnwatchPane(_paneObserver);
     [self stopMotion];

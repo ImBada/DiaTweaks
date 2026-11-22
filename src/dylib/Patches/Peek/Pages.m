@@ -8,6 +8,11 @@ static __weak id DPPeekLastFactory;
 static id DPPeekWarmPage;
 static NSView *DPPeekWarmView;
 static NSURL *DPPeekWarmURL;
+static char DPPeekWindowClosedKey;
+
+static void DPPeekMarkNonTab(id page, BOOL nonTab) {
+    if (page) objc_setAssociatedObject(page, NSSelectorFromString(@"dp_nonTabWebContents"), nonTab ? @YES : nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
 
 static void DPPeekRemember(id factory, id page) {
     if (!page) return;
@@ -76,6 +81,7 @@ static BOOL DPPeekGive(id page, id delegate, id source, NSURL *url, DPPeekExit e
     SEL adopt = @selector(webContents:didCreateNewWebContent:targetURL:disposition:);
     if (!page || !source || ![url isKindOfClass:NSURL.class] || ![delegate respondsToSelector:adopt]) return NO;
     NSInteger disposition = exit == DPPeekSplit ? DPSplitView : DPForegroundTab;
+    DPPeekMarkNonTab(page, NO);
     DPPeekGiving = YES;
     ((void (*)(id, SEL, id, id, NSURL *, NSInteger))objc_msgSend)(delegate, adopt, source, page, url, disposition);
     DPPeekGiving = NO;
@@ -90,12 +96,14 @@ static void DPPeekDetach(id page, NSView *host) {
 
 // Some extensions crash Dia when a page closes while still showing a site, so it goes blank first.
 static void DPPeekCloseWhenBlank(id page, int checks) {
+    if (!page) return;
     if (checks && ![[[(NSObject *)page valueForKey:@"url"] absoluteString] isEqual:@"about:blank"])
         return (void)dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 50 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{ DPPeekCloseWhenBlank(page, checks - 1); });
     [page performSelector:@selector(close)];
 }
 
 static void DPPeekDiscard(id page, NSView *host) {
+    if (!page) return;
     DPPeekDetach(page, host);
     DPPeekLoad(page, [NSURL URLWithString:@"about:blank"]);
     DPPeekCloseWhenBlank(page, 40);
@@ -144,6 +152,7 @@ static id DPPeekMakePage(NSWindow *window, id source, void (^attach)(id page)) {
     if (!window || !factory || !configuration) return nil;
     id page = ((id (*)(id, SEL, id))objc_msgSend)(factory, @selector(createWebContents:), [configuration new]);
     if (!page) return nil;
+    DPPeekMarkNonTab(page, YES);
     if ([page respondsToSelector:@selector(bootstrapRendering)]) [page performSelector:@selector(bootstrapRendering)];
     attach(page);
     if ([page respondsToSelector:@selector(bootstrapRenderingComplete)]) [page performSelector:@selector(bootstrapRenderingComplete)];
@@ -151,6 +160,7 @@ static id DPPeekMakePage(NSWindow *window, id source, void (^attach)(id page)) {
 }
 
 void DPPeekWarm(NSWindow *window, id source, NSURL *url) {
+    if (!window || [DPGet(window, &DPPeekWindowClosedKey) boolValue]) return;
     if (DPPeekHasCards()) DPPeekSyncTabs(window);
     if ([url isEqual:DPPeekWarmURL] || DPPeekCardIn(window)) return;
     DPPeekCool();
@@ -182,8 +192,9 @@ void DPPeekCoolIn(NSWindow *window) {
 
 static void DPPeekOpenFrom(NSWindow *window, NSString *originTabID, NSURL *url, NSRect link, id delegate, id source, id warmPage, NSView *warmHost) {
     if (DPPeekHasCards()) DPPeekSyncTabs(window);
-    BOOL wrongTab = originTabID && ![originTabID isEqual:DPActiveTabID(window)];
-    if (!DPPeek.on || !window || !url || wrongTab || DPPeekCardIn(window) || DPPeekCardForOrigin(window, originTabID, source)) {
+    BOOL closed = !window || [DPGet(window, &DPPeekWindowClosedKey) boolValue];
+    BOOL wrongTab = originTabID && !closed && ![originTabID isEqual:DPActiveTabID(window)];
+    if (!DPPeek.on || closed || !url || wrongTab || DPPeekCardIn(window) || DPPeekCardForOrigin(window, originTabID, source)) {
         if (warmPage) DPPeekDiscard(warmPage, warmHost);
         return;
     }
@@ -229,6 +240,10 @@ void DPPeekCloseAll(void) {
 
 - (void)finish:(DPPeekExit)exit {
     NSObject *page = (NSObject *)self.page;
+    if (!page) {
+        [self handOver];
+        return;
+    }
     if (!self.window) {
         [self handOver];
         DPPeekDiscard(page, nil);
@@ -251,9 +266,11 @@ void DPPeekInstallPages(void) {
     DPHook(DPDiaBrowser, @selector(createWebContents:), (IMP)DPBrowser_create);
     DPHook(DPDiaWebContents, @selector(attachToPaneHostView:), (IMP)DPPage_attach);
     [NSNotificationCenter.defaultCenter addObserverForName:NSWindowWillCloseNotification object:nil queue:nil usingBlock:^(NSNotification *note) {
+        if (note.object) DPSet(note.object, &DPPeekWindowClosedKey, @YES);
         if (DPPeekWarmView.window == note.object) DPPeekCool();
         for (DPPeekCard *peek in DPPeekAllCards(note.object)) {
             id page = peek.page;
+            DPPeekChatDetachQuiet(peek);
             [peek handOver];
             DPPeekDiscard(page, nil);
         }

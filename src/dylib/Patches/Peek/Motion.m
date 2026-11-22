@@ -168,8 +168,10 @@ static char DPGrowthKey, DPInTimerKey;
 - (void)step {
     DPPeekCard *peek = self.peek;
     if (!peek || !peek.window || !peek.superview) {
+        void (^done)(void) = self.done;
         [self stop];
         if (peek) DPSet(peek, &DPGrowthKey, nil);
+        if (peek && done) done();
         return;
     }
     CFTimeInterval t = CACurrentMediaTime() - self.start;

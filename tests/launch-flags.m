@@ -327,6 +327,43 @@ static void testSettingsRow(void) {
               && [row textView:row.textView doCommandBySelector:@selector(insertBacktab:)]
               && ![row textView:row.textView doCommandBySelector:@selector(insertNewline:)],
               @"Tab/Shift-Tab move focus while Return inserts newline");
+
+    // Uncommitted text flushes on textDidEndEditing:, viewWillMoveToWindow:nil, and relaunchDia:, but NOT when disabled.
+    row.textView.string = @"--force-dark-mode";
+    [row textDidEndEditing:[NSNotification notificationWithName:NSTextDidEndEditingNotification object:row.textView]];
+    NSCAssert([DPLaunchFlagsSavedText() isEqual:@"--force-dark-mode"], @"textDidEndEditing flushes uncommitted text");
+
+    NSWindow *hostWin = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 500, 200)
+                                                    styleMask:NSWindowStyleMaskTitled
+                                                      backing:NSBackingStoreBuffered
+                                                        defer:NO];
+    hostWin.releasedWhenClosed = NO;
+    [hostWin.contentView addSubview:row];
+    row.textView.string = @"--disable-gpu-vsync";
+    [row removeFromSuperview];
+    NSCAssert([DPLaunchFlagsSavedText() isEqual:@"--disable-gpu-vsync"], @"viewWillMoveToWindow:nil flushes uncommitted text");
+
+    [hostWin.contentView addSubview:row];
+    row.textView.string = @"--enable-features=FlushOnRelaunch";
+    lastHandOff = nil;
+    [row.relaunch performClick:nil];
+    NSCAssert([DPLaunchFlagsSavedText() isEqual:@"--enable-features=FlushOnRelaunch"] && [lastHandOff isEqual:@[ @"apply" ]],
+              @"relaunchDia flushes uncommitted text before handing off to diapatch");
+
+    row.enabled = NO;
+    row.textView.string = @"--must-not-save-while-disabled";
+    [row textDidEndEditing:[NSNotification notificationWithName:NSTextDidEndEditingNotification object:row.textView]];
+    [row removeFromSuperview];
+    NSCAssert([DPLaunchFlagsSavedText() isEqual:@"--enable-features=FlushOnRelaunch"],
+              @"disabled row does not overwrite saved flags on blur or detach");
+    row.enabled = YES;
+
+    // Dark Aqua updateLayer resolves dynamic CGColors safely.
+    row.box.appearance = [NSAppearance appearanceNamed:NSAppearanceNameDarkAqua];
+    [row.box updateLayer];
+    NSCAssert(row.box.layer.backgroundColor != NULL && row.box.layer.borderColor != NULL,
+              @"DPLaunchFlagsBox updateLayer resolves dynamic colors under effectiveAppearance");
+    [hostWin close];
 }
 
 int main(void) {

@@ -22,13 +22,47 @@ static NSHashTable *DPPages, *DPDiscarded, *DPUnloadOnHide;
 static NSMapTable<NSWindow *, NSMapTable<NSString *, id> *> *DPPanePages;
 static NSMapTable<id, NSString *> *DPPagePaneID;
 
+static void DPForgetPage(id page);
+
+static BOOL DPIsNonTabContainer(NSView *view) {
+    Class peekCard = NSClassFromString(@"DPPeekCard");
+    if (peekCard && [view isKindOfClass:peekCard]) return YES;
+    if (DPIsKind(view, DPDiaAssistantPanel) || DPIsKind(view, DPDiaPopover)) return YES;
+    NSString *name = NSStringFromClass(view.class);
+    return [name containsString:@"ExtensionSidePanel"] || [name containsString:@"AssistantPanel"];
+}
+
+// Excludes Peek cards, warmed Peek hosts, Little Dia popups, Side Chat, and Extension Side Panels from tab matching.
+static BOOL DPIsNonTabPage(id page) {
+    if (!page) return YES;
+    if ([objc_getAssociatedObject(page, NSSelectorFromString(@"dp_nonTabWebContents")) boolValue]) return YES;
+    if (![page respondsToSelector:@selector(nativeView)]) return NO;
+    NSView *view = ((NSView *(*)(id, SEL))objc_msgSend)(page, @selector(nativeView));
+    if (![view isKindOfClass:NSView.class]) return NO;
+    BOOL sawPane = NO;
+    for (NSView *up = view; up; up = up.superview) {
+        if (DPIsNonTabContainer(up)) return YES;
+        if (DPIsKind(up, DPDiaContentPane)) { sawPane = YES; break; }
+    }
+    return view.window != nil && !sawPane;
+}
+
 static BOOL DPRecordPagePane(id page) {
     if (!page || ![page respondsToSelector:@selector(nativeView)]) return NO;
+    if (DPIsNonTabPage(page)) {
+        DPForgetPage(page);
+        return NO;
+    }
     NSView *view = ((NSView *(*)(id, SEL))objc_msgSend)(page, @selector(nativeView));
     if (![view isKindOfClass:NSView.class] || !view.window) return NO;
     NSView *pane = nil;
-    for (NSView *up = view; up; up = up.superview)
+    for (NSView *up = view; up; up = up.superview) {
+        if (DPIsNonTabContainer(up)) {
+            DPForgetPage(page);
+            return NO;
+        }
         if (DPIsKind(up, DPDiaContentPane)) { pane = up; break; }
+    }
     NSString *paneID = pane ? DPUUIDsIn([DPSwiftValue(pane, @"contentPaneID") description]).firstObject : nil;
     if (!paneID) return NO;
     NSMapTable<NSString *, id> *byPane = [DPPanePages objectForKey:view.window];
@@ -123,6 +157,10 @@ static BOOL DPIsAuxiliaryPage(id page) {
 static id DPPageAt(NSURL *url, NSString *contentID) {
     id found = nil;
     for (id page in DPPages.allObjects) {
+        if (DPIsNonTabPage(page)) {
+            DPForgetPage(page);
+            continue;
+        }
         if (![page respondsToSelector:@selector(url)] || ![[page valueForKey:@"url"] isEqual:url]) continue;
         if (DPIsAuxiliaryPage(page)) continue;
         NSString *owner = [DPPagePaneID objectForKey:page];
@@ -152,9 +190,14 @@ BOOL DPPageIsVisible(id page) {
         && ((NSInteger (*)(id, SEL))objc_msgSend)(page, @selector(visibility)) == DPPageVisible;
 }
 
+BOOL DPPageIsTracked(id page) { return page && [DPPages containsObject:page] && !DPIsNonTabPage(page); }
+
 void DPUnloadPage(id page, id before) {
-    if (!page) return;
-    if (!before) return (void)[page performSelector:@selector(discard)];
+    if (!page || ![DPPages containsObject:page] || DPPageIsDiscarded(page)) return;
+    if (!before) {
+        if (!DPPageIsVisible(page)) [page performSelector:@selector(discard)];
+        return;
+    }
     [DPUnloadOnHide addObject:page];
     DPFocusTab(before);
     __weak id weakPage = page;
@@ -166,12 +209,17 @@ void DPUnloadPage(id page, id before) {
 
 static void DPPage_setVisibility(id self, SEL _cmd, NSInteger visibility) {
     if ([self respondsToSelector:@selector(visibility)] && [self respondsToSelector:@selector(discard)]) {
-        [DPPages addObject:self];
-        DPRecordPagePane(self);
+        if (DPIsNonTabPage(self)) DPForgetPage(self);
+        else {
+            [DPPages addObject:self];
+            DPRecordPagePane(self);
+        }
     }
     DPCallOriginal(DPPage_setVisibility, self, visibility);
     if (![DPPages containsObject:self]) return;
+    if (DPIsNonTabPage(self)) return DPForgetPage(self);
     BOOL recorded = DPRecordPagePane(self);
+    if (![DPPages containsObject:self]) return;
     if (visibility == DPPageVisible) {
         [DPDiscarded removeObject:self];
         if (!recorded && DPUnloadTab.on) {
@@ -180,9 +228,14 @@ static void DPPage_setVisibility(id self, SEL _cmd, NSInteger visibility) {
         }
     } else if ([DPUnloadOnHide containsObject:self]) {
         [DPUnloadOnHide removeObject:self];
-        if (DPUnloadTab.on) dispatch_async(dispatch_get_main_queue(), ^{
-            if (DPUnloadTab.on && [DPPages containsObject:self]) [self performSelector:@selector(discard)];
-        });
+        if (DPUnloadTab.on) {
+            __weak id weakSelf = self;
+            dispatch_async(dispatch_get_main_queue(), ^{
+                id page = weakSelf;
+                if (DPUnloadTab.on && page && [DPPages containsObject:page] && !DPPageIsVisible(page) && !DPPageIsDiscarded(page))
+                    [page performSelector:@selector(discard)];
+            });
+        }
     }
 }
 

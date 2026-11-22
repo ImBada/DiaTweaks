@@ -262,6 +262,52 @@ static void Check(BOOL ok, NSString *msg) {
 }
 @end
 
+@interface DPPeekCard : NSView
+@end
+@implementation DPPeekCard
+@end
+
+@interface _TtC18ExtensionSidePanel23WebContentContainerView : NSView
+@end
+@implementation _TtC18ExtensionSidePanel23WebContentContainerView
+@end
+
+@interface _TtC14AssistantPanel18AssistantPanelView : NSView
+@end
+@implementation _TtC14AssistantPanel18AssistantPanelView
+@end
+
+@interface DPEphemeralScriptWindow : NSObject
+@property (nonatomic, copy) NSString *windowId;
+@property (nonatomic, copy) NSArray<NSString *> *tabIDs;
+@property (nonatomic, copy) NSString *activeTabID;
+@property (nonatomic, copy) void (^onFocusTabID)(NSString *tabID);
+@end
+@implementation DPEphemeralScriptWindow
+- (NSArray *)appleScriptTabs {
+    NSMutableArray *list = [NSMutableArray array];
+    for (NSString *tid in self.tabIDs) {
+        DPTestScriptTab *t = [DPTestScriptTab new];
+        t.tabId = tid;
+        t.URL = [NSString stringWithFormat:@"https://%@.test/", tid];
+        __weak DPEphemeralScriptWindow *weakSelf = self;
+        t.onFocus = ^(DPTestScriptTab *focused) {
+            DPEphemeralScriptWindow *s = weakSelf;
+            if (s && s.onFocusTabID) s.onFocusTabID(focused.tabId);
+        };
+        [list addObject:t];
+    }
+    return list;
+}
+- (id)activeTab {
+    if (!self.activeTabID) return nil;
+    DPTestScriptTab *t = [DPTestScriptTab new];
+    t.tabId = self.activeTabID;
+    t.URL = [NSString stringWithFormat:@"https://%@.test/", self.activeTabID];
+    return t;
+}
+@end
+
 // --- Fixture helpers ---
 static DPTestWindow *MakeWindow(NSString *windowId) {
     DPTestWindow *win = [[DPTestWindow alloc] initWithContentRect:NSMakeRect(0, 0, 800, 600)
@@ -495,11 +541,6 @@ static void TestRegularAndSidebarPinnedTabs(_TtC3ADK18WebContentChromium *chromi
     win.mockVisible = NO;
     [win close];
 }
-
-@interface DPPeekCard : NSView
-@end
-@implementation DPPeekCard
-@end
 
 @interface _TtC5Popup19PlatformPopupWindow : NSWindow
 @end
@@ -795,6 +836,156 @@ static void TestOffPausedAndVerify(_TtC3ADK18WebContentChromium *chromium) {
     [win close];
 }
 
+static void TestNonTabIsolationAndEdgeCases(_TtC3ADK18WebContentChromium *chromium) {
+    DPTestWindow *win = MakeWindow(@"WIN-NONTAB");
+    DPTestWindow *popupWin = MakeWindow(@"WIN-POPUP");
+    NSString *coldTabID = @"D1111111-1111-1111-1111-111111111111";
+    NSString *coldPaneID = @"D1111111-1111-1111-1111-111111111112";
+    NSString *bgTabID = @"D2222222-2222-2222-2222-222222222221";
+    NSString *bgPaneID = @"D2222222-2222-2222-2222-222222222222";
+    NSString *frontTabID = @"D3333333-3333-3333-3333-333333333331";
+    NSString *frontPaneID = @"D3333333-3333-3333-3333-333333333332";
+
+    _TtC5TabUI15TabDockItemView *coldDock = MakeDockItem(win, [NSString stringWithFormat:@"tab(%@)", coldTabID],
+                                                         @{ coldPaneID : @"C" }, nil, @"favicon");
+    _TtC5TabUI15TabDockItemView *bgDock = MakeDockItem(win, [NSString stringWithFormat:@"tab(%@)", bgTabID],
+                                                       @{ bgPaneID : @"C" }, nil, @"favicon");
+    _TtC5TabUI7TabView *frontTab = MakeTabView(win, frontTabID, frontPaneID, @"https://front.test/", NO, NO, @"primary", nil);
+
+    DPTestScriptTab *stCold = MakeScriptTab(coldTabID, @"https://shared-peek.test/");
+    DPTestScriptTab *stBg = MakeScriptTab(bgTabID, @"https://shared-bg.test/");
+    DPTestScriptTab *stFront = MakeScriptTab(frontTabID, @"https://front.test/");
+    DPTestScriptWindow *sw = [DPTestScriptWindow new];
+    sw.windowId = @"WIN-NONTAB";
+    sw.appleScriptTabs = @[stCold, stBg, stFront];
+    sw.activeTab = stFront;
+    DPTestAppDelegate *appDel = [DPTestAppDelegate new];
+    appDel.appleScriptWindows = @[sw];
+    NSApp.delegate = appDel;
+
+    // 1. Peek card nested inside a ContentPaneView (plus dp_nonTabWebContents marker) is NEVER tracked or matched.
+    _TtC11ContentPane15ContentPaneView *frontPane = nil;
+    ArcWebContents *frontPage = MakePage(win, frontPaneID, @"https://front.test/", 2, &frontPane);
+    DPPeekCard *peekCard = [[DPPeekCard alloc] initWithFrame:frontPane.bounds];
+    [frontPane addSubview:peekCard];
+    ArcWebContents *peekPage = [ArcWebContents new];
+    peekPage.url = [NSURL URLWithString:@"https://shared-peek.test/"];
+    peekPage.nativeView = [[NSView alloc] initWithFrame:peekCard.bounds];
+    [peekCard addSubview:peekPage.nativeView];
+    [peekPage setVisibility:2];
+    Check(!DPPageIsTracked(peekPage), @"Peek card WebContents inside ContentPaneView is excluded from tracking");
+
+    // Marked non-tab WebContents (before view attaches) is excluded too.
+    ArcWebContents *markedPeek = [ArcWebContents new];
+    markedPeek.url = [NSURL URLWithString:@"https://shared-bg.test/"];
+    objc_setAssociatedObject(markedPeek, NSSelectorFromString(@"dp_nonTabWebContents"), @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    [markedPeek setVisibility:2];
+    Check(!DPPageIsTracked(markedPeek), @"dp_nonTabWebContents marker excludes WebContents before mounting");
+
+    // 2. Popup / Little Dia WebContents (mounted in window without ContentPaneView) and Side Chat / Extension panel views.
+    ArcWebContents *popupPage = [ArcWebContents new];
+    popupPage.url = [NSURL URLWithString:@"https://shared-peek.test/"];
+    popupPage.nativeView = [[NSView alloc] initWithFrame:popupWin.contentView.bounds];
+    [popupWin.contentView addSubview:popupPage.nativeView];
+    [popupPage setVisibility:2];
+
+    _TtC18ExtensionSidePanel23WebContentContainerView *extPanel = [[_TtC18ExtensionSidePanel23WebContentContainerView alloc] initWithFrame:NSMakeRect(0, 0, 300, 400)];
+    [win.contentView addSubview:extPanel];
+    ArcWebContents *extPage = [ArcWebContents new];
+    extPage.url = [NSURL URLWithString:@"https://shared-bg.test/"];
+    extPage.nativeView = [[NSView alloc] initWithFrame:extPanel.bounds];
+    [extPanel addSubview:extPage.nativeView];
+    [extPage setVisibility:2];
+
+    _TtC14AssistantPanel18AssistantPanelView *chatPanel = [[_TtC14AssistantPanel18AssistantPanelView alloc] initWithFrame:NSMakeRect(0, 0, 300, 400)];
+    [win.contentView addSubview:chatPanel];
+    ArcWebContents *chatPage = [ArcWebContents new];
+    chatPage.url = [NSURL URLWithString:@"https://shared-peek.test/"];
+    chatPage.nativeView = [[NSView alloc] initWithFrame:chatPanel.bounds];
+    [chatPanel addSubview:chatPage.nativeView];
+    [chatPage setVisibility:2];
+
+    // Cold pinned tab sharing exact URL with Peek/popup/chat must NOT offer Unload Tab or discard them.
+    Check([DPTabContextMenu(coldDock) itemWithTitle:@"Unload Tab"] == nil,
+          @"cold pinned tab never matches Peek, popup, or Side Chat WebContents at same URL");
+
+    // Unvisited background tab sharing URL with marked Peek + ExtensionSidePanel MUST still match via DPPageByURL without false ambiguity!
+    ArcWebContents *realBgPage = MakePage(nil, nil, @"https://shared-bg.test/", 0, nil);
+    NSMenuItem *bgItem = [DPTabContextMenu(bgDock) itemWithTitle:@"Unload Tab"];
+    Check(bgItem != nil && bgItem.enabled, @"real background tab matches cleanly despite non-tab WebContents at same URL");
+    Trigger(bgItem);
+    Check(realBgPage.discardCount == 1 && markedPeek.discardCount == 0 && extPage.discardCount == 0 && peekPage.discardCount == 0 && popupPage.discardCount == 0,
+          @"only real tab page is discarded; Peek, ExtensionSidePanel, and popup pages remain untouched");
+
+    // 3. Unload-on-hide switch-back race: becoming visible again before main queue drains must NOT discard.
+    __block BOOL raceSwitched = NO;
+    stCold.onFocus = ^(DPTestScriptTab *t) {
+        raceSwitched = YES;
+        [frontPage setVisibility:0];
+        [frontPage setVisibility:2];
+    };
+    stBg.onFocus = stCold.onFocus;
+    NSMenuItem *raceItem = [DPTabContextMenu(frontTab) itemWithTitle:@"Unload Tab"];
+    Trigger(raceItem);
+    DrainMainQueue();
+    Check(raceSwitched && frontPage.discardCount == 0, @"switching back to visible before async discard prevents unloading visible tab");
+
+    // 4. Stale menu item safety: already discarded, closed, or tweak off -> safe no-op.
+    [realBgPage setVisibility:2];
+    [realBgPage setVisibility:0];
+    NSMenuItem *staleDiscardItem = [DPTabContextMenu(bgDock) itemWithTitle:@"Unload Tab"];
+    [chromium webContents:realBgPage finalizeDiscardRequest:YES];
+    NSInteger beforeDiscard = realBgPage.discardCount;
+    Trigger(staleDiscardItem);
+    Check(realBgPage.discardCount == beforeDiscard, @"clicking stale menu item after finalizeDiscardRequest is a no-op");
+
+    [realBgPage setVisibility:2];
+    [realBgPage setVisibility:0];
+    NSMenuItem *staleCloseItem = [DPTabContextMenu(bgDock) itemWithTitle:@"Unload Tab"];
+    [chromium webContents:realBgPage didCloseWithSessionID:@99];
+    Trigger(staleCloseItem);
+    Check(realBgPage.discardCount == beforeDiscard, @"clicking stale menu item after didCloseWithSessionID is a no-op");
+
+    // 5. DPTabBefore fallback when active tab is missing from appleScriptTabs returns firstObject.
+    sw.activeTab = MakeScriptTab(@"MISSING-ID", @"https://missing.test/");
+    Check(DPTabBefore(win) == stCold, @"DPTabBefore falls back to first tab when active tab is not in appleScriptTabs");
+
+    // 6. Ephemeral AppleScript wrapper objects survive autoreleasepool drain between menu build and click.
+    DPEphemeralScriptWindow *eph = [DPEphemeralScriptWindow new];
+    eph.windowId = @"WIN-NONTAB";
+    eph.tabIDs = @[ coldTabID, frontTabID ];
+    eph.activeTabID = frontTabID;
+    __block NSString *focusedEphID = nil;
+    __weak DPEphemeralScriptWindow *weakEph = eph;
+    eph.onFocusTabID = ^(NSString *tid) {
+        focusedEphID = tid;
+        weakEph.activeTabID = tid;
+        [frontPage setVisibility:0];
+    };
+    appDel.appleScriptWindows = @[ eph ];
+    NSMenuItem *ephItem = nil;
+    @autoreleasepool {
+        ephItem = [DPTabContextMenu(frontTab) itemWithTitle:@"Unload Tab"];
+    }
+    Check(ephItem != nil && ephItem.enabled, @"front tab with ephemeral AppleScript tabs offers enabled Unload Tab");
+    Trigger(ephItem);
+    DrainMainQueue();
+    Check([focusedEphID isEqualToString:coldTabID] && frontPage.discardCount == 1,
+          @"ephemeral AppleScript wrapper still focuses previous tab and discards front tab after autoreleasepool drain");
+
+    [chromium webContents:frontPage didCloseWithSessionID:@40];
+    [chromium webContents:peekPage didCloseWithSessionID:@41];
+    [chromium webContents:markedPeek didCloseWithSessionID:@42];
+    [chromium webContents:popupPage didCloseWithSessionID:@43];
+    [chromium webContents:extPage didCloseWithSessionID:@44];
+    [chromium webContents:chatPage didCloseWithSessionID:@45];
+    NSApp.delegate = nil;
+    win.mockVisible = NO;
+    popupWin.mockVisible = NO;
+    [win close];
+    [popupWin close];
+}
+
 int main(void) {
     @autoreleasepool {
         [NSApplication sharedApplication];
@@ -806,6 +997,7 @@ int main(void) {
         TestDockAndTopTabPinnedTabs(chromium);
         TestMultiWindowSyncedAndSharedURL(chromium);
         TestOffPausedAndVerify(chromium);
+        TestNonTabIsolationAndEdgeCases(chromium);
 
         if (failures) {
             printf("%d unload-tab test(s) failed\n", failures);

@@ -137,12 +137,18 @@ static NSView *DPWideRow(NSView *view) {
     DPSetChoice([DPGet(picker, &DPChoicePatchKey) pointerValue] ?: _patch, picker.selectedItem.representedObject);
 }
 
-static void DPSetRowControlsEnabled(NSView *row, BOOL enabled) {
-    DPFindView(row, ^BOOL(NSView *view) {
-        if ([view isKindOfClass:NSTextField.class] && !((NSTextField *)view).editable) return NO;
-        if ([view isKindOfClass:NSControl.class] || [view respondsToSelector:@selector(setEnabled:)]) [(id)view setEnabled:enabled];
-        return NO;
-    });
+static void DPSetRowControlsEnabled(NSView *view, BOOL enabled) {
+    if (!view) return;
+    if ([view isKindOfClass:NSTextField.class] && !((NSTextField *)view).editable) return;
+    if ([view isKindOfClass:NSControl.class]) {
+        ((NSControl *)view).enabled = enabled;
+        return;
+    }
+    if ([view respondsToSelector:@selector(setEnabled:)]) {
+        [(id)view setEnabled:enabled];
+        return;
+    }
+    for (NSView *sub in view.subviews) DPSetRowControlsEnabled(sub, enabled);
 }
 
 - (void)sync {

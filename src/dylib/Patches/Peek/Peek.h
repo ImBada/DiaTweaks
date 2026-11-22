@@ -119,6 +119,8 @@ void DPPeekInstallChat(void);
 void DPPeekInstallChatContext(void);
 void DPPeekChatAttach(DPPeekCard *peek);
 void DPPeekChatDetach(DPPeekCard *peek);
+void DPPeekChatDetachQuiet(DPPeekCard *peek);
+void DPPeekChatDetachBridge(id bridge);
 void DPPeekChatVisibilityDidChange(DPPeekCard *peek);
 NSView *DPPeekChatHolder(NSWindow *window, NSView *pane);
 NSArray *DPPeekWatchPaneAncestors(DPPeekCard *peek, NSView *pane, NSView *holder);

@@ -1,4 +1,5 @@
 #import "StdPatch/StdPatch.h"
+#include <sys/stat.h>
 
 extern DPPatch DPProtonPass;
 
@@ -11,16 +12,30 @@ static NSDictionary *DPHostAt(NSString *path) {
     return [host isKindOfClass:NSDictionary.class] ? host : nil;
 }
 
+static BOOL DPIsExecutableRegularFile(NSString *path) {
+    if (![path isKindOfClass:NSString.class] || !path.length) return NO;
+    struct stat st;
+    const char *fs = path.fileSystemRepresentation;
+    return stat(fs, &st) == 0 && S_ISREG(st.st_mode) && access(fs, X_OK) == 0;
+}
+
+static BOOL DPOwnsHostAt(NSString *path) {
+    struct stat st;
+    if (lstat(path.fileSystemRepresentation, &st) != 0 || S_ISDIR(st.st_mode)) return NO;
+    NSDictionary *host = DPHostAt(path);
+    return [host[@"name"] isEqual:kHost] && [host[@"description"] isEqual:kDescription];
+}
+
 static NSString *DPExecutableHostInApp(NSString *app) {
     if (!app.length) return nil;
     NSString *host = [app stringByAppendingPathComponent:@"Contents/Resources/assets/proton_pass_nm_host"];
-    return [NSFileManager.defaultManager isExecutableFileAtPath:host] ? host : nil;
+    return DPIsExecutableRegularFile(host) ? host : nil;
 }
 
 #ifndef DP_PROTON_PASS_HOST_PATH
 static NSString *DPHostPath(void) {
     NSString *app = [NSWorkspace.sharedWorkspace URLForApplicationWithBundleIdentifier:@"me.proton.pass.electron"].path;
-    NSString *host = DPExecutableHostInApp(app);
+    NSString *host = app && ![app containsString:@"/.Trash/"] ? DPExecutableHostInApp(app) : nil;
     if (host) return host;
     for (NSString *candidate in @[ @"/Applications/Proton Pass.app", [@"~/Applications/Proton Pass.app" stringByExpandingTildeInPath] ])
         if ((host = DPExecutableHostInApp(candidate))) return host;
@@ -36,8 +51,7 @@ static void DPRemoveOwnHost(NSString *keepDir) {
     for (NSString *dir in DPHostFolders()) {
         if (keepDir && [dir isEqualToString:keepDir]) continue;
         NSString *path = [dir stringByAppendingPathComponent:kHostFile];
-        if ([files fileExistsAtPath:path] && [DPHostAt(path)[@"description"] isEqual:kDescription])
-            [files removeItemAtPath:path error:nil];
+        if (DPOwnsHostAt(path)) [files removeItemAtPath:path error:nil];
     }
 }
 
@@ -50,7 +64,10 @@ static void DPRegisterHost(BOOL on) {
         return;
     }
     NSString *host = DPHostPath();
-    if (!host) return;
+    if (!host) {
+        DPRemoveOwnHost(nil);
+        return;
+    }
     NSError *error = nil;
     NSString *hostFolder = DPHostFolder(YES, &error);
     if (!hostFolder) {
@@ -59,7 +76,7 @@ static void DPRegisterHost(BOOL on) {
         return;
     }
     NSString *path = [hostFolder stringByAppendingPathComponent:kHostFile];
-    BOOL ours = [DPHostAt(path)[@"description"] isEqual:kDescription];
+    BOOL ours = DPOwnsHostAt(path);
     if ([files fileExistsAtPath:path] && !ours) {
         DPRemoveOwnHost(hostFolder);
         return;
@@ -89,7 +106,7 @@ static NSString *DPProtonPassProblem(DPPatch *patch) {
     if (gWriteError) return DPWriteProblem(gWritePath ?: path, gWriteError);
     NSDictionary *host = DPHostAt(path);
     if (![host[@"name"] isEqual:kHost]) return [NSString stringWithFormat:@"%@ isn’t a valid host file.", path];
-    if (![host[@"path"] isKindOfClass:NSString.class] || ![NSFileManager.defaultManager isExecutableFileAtPath:host[@"path"]])
+    if (!DPIsExecutableRegularFile(host[@"path"]))
         return [NSString stringWithFormat:@"Proton Pass’s %@ points to %@, which isn’t there. Quit and reopen Proton Pass, then try again.", path, host[@"path"]];
     return nil;
 }

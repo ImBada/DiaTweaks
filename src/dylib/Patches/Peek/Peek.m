@@ -40,7 +40,13 @@ static void DPPeekOpenLater(id delegate, id source, NSURL *url) {
     NSWindow *window = NSApp.keyWindow;
     NSString *originTabID = DPActiveTabID(window);
     NSPoint origin = NSEvent.mouseLocation;
-    dispatch_async(dispatch_get_main_queue(), ^{ DPPeekOpen(window, originTabID, url, origin, delegate, source); });
+    __weak NSWindow *weakWindow = window;
+    __weak id weakDelegate = delegate, weakSource = source;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        NSWindow *win = weakWindow;
+        id del = weakDelegate, src = weakSource;
+        if (win && src) DPPeekOpen(win, originTabID, url, origin, del, src);
+    });
 }
 
 static void DPWebContent_didCreate(id self, SEL _cmd, id webContents, id newWebContent, NSURL *url, NSInteger disposition) {

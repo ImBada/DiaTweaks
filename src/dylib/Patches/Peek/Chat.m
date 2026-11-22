@@ -70,12 +70,18 @@ NSRect DPPeekControlsFrame(DPPeekCard *peek, NSRect controlsFrame) {
     return controlsFrame;
 }
 
+static BOOL DPPeekIsChatClassName(Class cls) {
+    if (!cls) return NO;
+    NSString *name = NSStringFromClass(cls);
+    return [name containsString:@"ExtensionSidePanel"] || [name containsString:@"AssistantPanel"];
+}
+
 BOOL DPPeekResponderInChat(id responder) {
     if (![responder isKindOfClass:NSView.class]) return NO;
     for (NSView *view = responder; view; view = view.superview) {
         if (DPIsKind(view, DPDiaAssistantPanel) || DPIsKind(view, DPDiaChatHeader)) return YES;
         if (DPIsKind(view, DPDiaPopover) && DPIsFloatingChat(view)) return YES;
-        if ([NSStringFromClass(view.class) containsString:@"ExtensionSidePanel"]) return YES;
+        if (DPPeekIsChatClassName(view.class) || DPPeekIsChatClassName([view.nextResponder class])) return YES;
     }
     return NO;
 }

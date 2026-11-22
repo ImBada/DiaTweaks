@@ -1,12 +1,35 @@
 #import "ProfileColorPicker.h"
 
-@implementation DPProfileColorWell
+@implementation DPProfileColorWell {
+    id _windowCloseObserver;
+}
+
+- (void)stopWatchingWindow {
+    if (_windowCloseObserver) {
+        [NSNotificationCenter.defaultCenter removeObserver:_windowCloseObserver];
+        _windowCloseObserver = nil;
+    }
+}
+
 - (void)viewWillMoveToWindow:(NSWindow *)newWindow {
+    [self stopWatchingWindow];
     if (!newWindow && self.isActive) [self deactivate];
     [super viewWillMoveToWindow:newWindow];
+    if (newWindow) {
+        __weak DPProfileColorWell *weakSelf = self;
+        _windowCloseObserver = [NSNotificationCenter.defaultCenter addObserverForName:NSWindowWillCloseNotification
+                                                                               object:newWindow
+                                                                                queue:nil
+                                                                           usingBlock:^(NSNotification *note) {
+            DPProfileColorWell *well = weakSelf;
+            if (well.isActive) [well deactivate];
+        }];
+    }
 }
+
+// Avoid calling [self deactivate] in dealloc: AppKit/NSColorPanel may form weak references to self during deactivation.
 - (void)dealloc {
-    if (self.isActive) [self deactivate];
+    [self stopWatchingWindow];
 }
 @end
 
@@ -14,13 +37,18 @@
 @property (weak) DPProfileColorRow *row;
 @end
 
-@implementation DPProfileHexField
+@implementation DPProfileHexField {
+    BOOL _skipNextEndEditing;
+}
+
 - (void)controlTextDidChange:(NSNotification *)note {
+    if (!DPProfileColorPicker.on || !self.row || self.row.suppressCommit) return;
     NSString *canonical = nil;
     if (DPColorFromSixDigitHex(self.stringValue, &canonical)) [self.row applyHex:canonical fromField:YES];
 }
 
 - (void)commitText {
+    if (!DPProfileColorPicker.on || !self.row || self.row.suppressCommit) return;
     NSString *trimmed = [self.stringValue stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
     if (!trimmed.length) return [self.row clearColor];
     NSString *canonical = nil;
@@ -33,18 +61,26 @@
 }
 
 - (void)controlTextDidEndEditing:(NSNotification *)note {
+    if (_skipNextEndEditing) return;
     [self commitText];
 }
 
 - (BOOL)control:(NSControl *)control textView:(NSTextView *)textView doCommandBySelector:(SEL)selector {
     if (selector == @selector(insertNewline:)) {
         [self commitText];
+        if (textView) textView.string = self.stringValue ?: @"";
+        _skipNextEndEditing = YES;
         [self.window makeFirstResponder:nil];
+        _skipNextEndEditing = NO;
         return YES;
     }
     if (selector == @selector(cancelOperation:)) {
-        self.stringValue = DPSavedProfileHexForSpace(self.row.spaceID) ?: @"";
+        NSString *saved = DPSavedProfileHexForSpace(self.row.spaceID) ?: @"";
+        self.stringValue = saved;
+        if (textView) textView.string = saved;
+        _skipNextEndEditing = YES;
         [self.window makeFirstResponder:nil];
+        _skipNextEndEditing = NO;
         return YES;
     }
     return NO;
@@ -121,19 +157,38 @@ static NSColor *DPPlaceholderWellColor(void) {
     _syncing = YES;
     NSString *hex = DPSavedProfileHexForSpace(self.spaceID);
     NSColor *color = DPColorFromHex(hex, NULL);
+    if (forceField && !color && self.well.isActive) [self.well deactivate];
     self.well.color = color ?: DPPlaceholderWellColor();
     if (forceField || !self.hexField.currentEditor) self.hexField.stringValue = hex ?: @"";
     self.clearButton.hidden = (color == nil);
     _syncing = NO;
 }
 
+- (void)switchToSpaceID:(NSString *)spaceID {
+    if ([self.spaceID isEqualToString:spaceID]) return [self syncFromDefaults:NO];
+    if (self.well.isActive) [self.well deactivate];
+    self.suppressCommit = YES;
+    if (self.hexField.currentEditor) [self.window makeFirstResponder:nil];
+    self.spaceID = spaceID;
+    self.suppressCommit = NO;
+    [self syncFromDefaults:YES];
+}
+
+- (void)prepareForRemoval {
+    self.suppressCommit = YES;
+    if (self.well.isActive) [self.well deactivate];
+    self.hexField.delegate = nil;
+    if (self.hexField.currentEditor) [self.window makeFirstResponder:nil];
+}
+
 - (void)wellChanged:(id)sender {
-    if (_syncing) return;
+    if (_syncing || !DPProfileColorPicker.on || self.suppressCommit) return;
     NSString *hex = DPHexFromColor(self.well.color);
     if (hex) [self applyHex:hex fromField:NO];
 }
 
 - (void)applyHex:(NSString *)canonical fromField:(BOOL)fromField {
+    if (!DPProfileColorPicker.on || self.suppressCommit) return;
     NSColor *color = DPColorFromHex(canonical, &canonical);
     if (!color || !self.spaceID) return;
     DPSetProfileHexForSpace(self.spaceID, canonical);
@@ -146,6 +201,7 @@ static NSColor *DPPlaceholderWellColor(void) {
 }
 
 - (void)clearColor {
+    if (!DPProfileColorPicker.on || self.suppressCommit) return;
     if (self.well.isActive) [self.well deactivate];
     if (self.spaceID) DPSetProfileHexForSpace(self.spaceID, nil);
     [self syncFromDefaults:YES];

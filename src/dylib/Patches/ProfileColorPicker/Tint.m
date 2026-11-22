@@ -1,7 +1,7 @@
 #import "ProfileColorPicker.h"
 #import "Commands/GroupTabs/GroupTabs.h"
 
-static char DPColorsKey, DPAlphaKey, DPLastSpaceKey;
+static char DPColorsKey, DPAlphaKey, DPLastSpaceKey, DPOverrideSpaceKey;
 
 static BOOL DPIsPrivateWindow(NSWindow *window) {
     id browser = DPBrowserOfWindow(window);
@@ -58,6 +58,14 @@ static void DPSetLayerColors(CAGradientLayer *layer, NSArray *colors) {
     [CATransaction commit];
 }
 
+static CGFloat DPNeutralFallbackAlpha(BOOL dark, double intensity) {
+    if (!isfinite(intensity)) intensity = 0.0;
+    if (intensity >= 1.0) return dark ? 0.90 : 1.0;
+    CGFloat base = dark ? 0.50 : 0.75;
+    CGFloat edge = intensity < 0.0 ? (dark ? 0.15 : 0.45) : (dark ? 0.75 : 1.0);
+    return base + (edge - base) * MIN(fabs(intensity), 1.0);
+}
+
 static void DPApplyGradient(NSView *gradient) {
     if (!DPIsKind(gradient.superview, DPDiaWindowTint)) return;
     CAGradientLayer *layer = DPGradientLayer(gradient);
@@ -65,30 +73,46 @@ static void DPApplyGradient(NSView *gradient) {
     NSString *spaceID = DPProfileColorPicker.on ? DPWindowSpaceID(gradient.window) : nil;
     NSColor *custom = DPColorFromHex(DPProfileHexForSpace(spaceID), NULL);
     if (!custom) {
+        NSString *savedSpace = DPGet(gradient, &DPOverrideSpaceKey);
+        BOOL sameSpace = !savedSpace || !spaceID || [savedSpace isEqualToString:spaceID];
+        DPSet(gradient, &DPOverrideSpaceKey, nil);
         if (DPGet(layer, &DPColorsKey)) {
             id dia = DPDiaValue(layer, &DPColorsKey, layer.colors ?: NSNull.null);
+            BOOL stillOurs = !sameSpace && [((NSArray *)DPGet(layer, &DPColorsKey))[1] isEqual:(layer.colors ?: NSNull.null)];
             DPSet(layer, &DPColorsKey, nil);
-            DPSetLayerColors(layer, dia == NSNull.null ? nil : dia);
+            if (sameSpace || stillOurs) DPSetLayerColors(layer, dia == NSNull.null ? nil : dia);
+            if (stillOurs) {
+                gradient.needsDisplay = YES;
+                gradient.superview.needsDisplay = YES;
+            }
         }
         if (DPGet(gradient, &DPAlphaKey)) {
             NSNumber *diaAlpha = DPDiaValue(gradient, &DPAlphaKey, @(gradient.alphaValue));
             DPSet(gradient, &DPAlphaKey, nil);
-            gradient.alphaValue = diaAlpha.doubleValue;
+            // Only restore Neutral's 0 alpha on the same space; switching spaces must not wipe another space's tint.
+            if (sameSpace) gradient.alphaValue = diaAlpha.doubleValue;
+            else gradient.superview.needsDisplay = YES;
         }
         return;
     }
     BOOL dark = [[gradient.effectiveAppearance bestMatchFromAppearancesWithNames:@[ NSAppearanceNameAqua, NSAppearanceNameDarkAqua ]]
         isEqual:NSAppearanceNameDarkAqua];
-    NSArray *ours = DPProfileGradientColors(custom, dark, DPTintIntensityOf(gradient.superview));
+    double intensity = DPTintIntensityOf(gradient.superview);
+    NSArray *ours = DPProfileGradientColors(custom, dark, intensity);
     if (!ours) return;
+    DPSet(gradient, &DPOverrideSpaceKey, spaceID);
     id dia = DPDiaValue(layer, &DPColorsKey, layer.colors ?: NSNull.null);
     DPOverride(layer, &DPColorsKey, dia, ours);
     DPSetLayerColors(layer, ours);
-    if (gradient.alphaValue < 0.01) {
+    if (gradient.alphaValue < 0.01 || DPGet(gradient, &DPAlphaKey)) {
         NSNumber *diaAlpha = DPDiaValue(gradient, &DPAlphaKey, @(gradient.alphaValue));
-        CGFloat targetAlpha = dark ? 0.50 : 0.75;
-        DPOverride(gradient, &DPAlphaKey, diaAlpha, @(targetAlpha));
-        gradient.alphaValue = targetAlpha;
+        if (diaAlpha.doubleValue < 0.01) {
+            CGFloat targetAlpha = DPNeutralFallbackAlpha(dark, intensity);
+            DPOverride(gradient, &DPAlphaKey, diaAlpha, @(targetAlpha));
+            gradient.alphaValue = targetAlpha;
+        } else {
+            DPSet(gradient, &DPAlphaKey, nil);
+        }
     }
 }
 
@@ -132,6 +156,15 @@ static void DPColorGradient_updateLayer(NSView *self, SEL _cmd) {
 }
 
 static void DPColorTint_updateLayer(NSView *self, SEL _cmd) {
+    // Restore overridden alpha before Dia updates the layer so Dia's fresh alpha isn't confused with our override.
+    for (NSView *sub in self.subviews) {
+        if (!DPIsKind(sub, DPDiaGradientView)) continue;
+        NSArray *saved = DPGet(sub, &DPAlphaKey);
+        if (saved) {
+            if (fabs(sub.alphaValue - [saved[1] doubleValue]) < 1e-4) sub.alphaValue = [saved[0] doubleValue];
+            DPSet(sub, &DPAlphaKey, nil);
+        }
+    }
     DPCallOriginal(DPColorTint_updateLayer, self);
     for (NSView *sub in self.subviews) {
         if (!DPIsKind(sub, DPDiaGradientView)) continue;

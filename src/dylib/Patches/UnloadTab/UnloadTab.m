@@ -76,12 +76,31 @@ static void DPAddUnloadMenuItem(NSMenu *menu, NSView *tab, NSString *tabID, id p
     BOOL visible = page ? DPPageIsVisible(page) : open;
     NSWindow *window = tab.window;
     id before = visible && open ? DPTabBefore(window) : nil;
+    NSString *tabIDCopy = [tabID copy];
+    __weak NSWindow *weakWindow = window;
+    __weak NSView *weakTab = tab, *weakClosePane = closePane;
+    __weak id weakPage = page;
     NSMenuItem *item = DPMenuItem(@"Unload Tab", ^{
-        if (before) DPForgetFrontTab(window);
-        if (page) return DPUnloadPage(page, before);
-        if (before) DPFocusTab(before);
+        if (!DPUnloadTab.on) return;
+        NSWindow *win = weakWindow;
+        NSView *targetTab = weakTab, *targetClose = weakClosePane;
+        id targetPage = weakPage;
+        BOOL isOpen = targetTab && DPTabOpen(targetTab, tabIDCopy);
+        if (targetPage) {
+            if (!DPPageIsTracked(targetPage) || DPPageIsDiscarded(targetPage)) return;
+            BOOL isVisible = DPPageIsVisible(targetPage);
+            id targetBefore = isVisible && isOpen && win ? DPTabBefore(win) : nil;
+            if (isVisible && !targetBefore) return;
+            if (targetBefore && win) DPForgetFrontTab(win);
+            DPUnloadPage(targetPage, targetBefore);
+            return;
+        }
+        if (!targetClose || !targetClose.window || DPIsClosedPinned(targetClose)) return;
+        id targetBefore = isOpen && win ? DPTabBefore(win) : nil;
+        if (targetBefore && win) DPForgetFrontTab(win);
+        if (targetBefore) DPFocusTab(targetBefore);
         DPMarkOwnClose();
-        DPCloseKeepingTab(closePane);
+        DPCloseKeepingTab(targetClose);
     });
     item.image = [NSImage imageWithSystemSymbolName:@"moon.zzz" accessibilityDescription:nil];
     // By name: CI's SDK predates macOS 27. 1 is NSMenuItemImageVisibilityVisible.

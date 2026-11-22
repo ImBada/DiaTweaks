@@ -100,9 +100,20 @@ typedef struct {
 @public
     DPFakeTintStruct tint;
 }
+@property (nonatomic) CGFloat diaAlpha;
 @end
 @implementation _TtC15WindowTreatment31WindowBackgroundOverlayTintView
-- (void)updateLayer {}
+- (instancetype)initWithFrame:(NSRect)frameRect {
+    if (!(self = [super initWithFrame:frameRect])) return nil;
+    _diaAlpha = -1.0;
+    return self;
+}
+- (void)updateLayer {
+    if (self.diaAlpha >= 0.0) {
+        for (NSView *sub in self.subviews)
+            if ([sub isKindOfClass:objc_getClass("_TtC5ARCUI12GradientView")]) sub.alphaValue = self.diaAlpha;
+    }
+}
 @end
 
 @interface _TtC5ARCUI12GradientView : NSView
@@ -475,6 +486,145 @@ static void TestUIMountTintAndOffInvariant(void) {
     [gradA updateLayer];
     [tintA updateLayer];
     Check([gradA.gradientLayer.colors isEqual:diaA], @"off invariant: updateLayer leaves Dia gradient untouched");
+
+    // --- Neutral preset (alpha=0) + Space switch + Appearance/Intensity + ColorWell/HexField edge cases ---
+    DPProfileColorPicker.on = YES;
+    DPProfileColorPicker.apply(&DPProfileColorPicker);
+    // Reset space-A & space-B custom colors.
+    DPSetProfileHexForSpace(@"space-A", nil);
+    DPSetProfileHexForSpace(@"space-B", nil);
+    DPRefreshProfileColors();
+
+    // 1. Neutral preset on space-A (diaAlpha = 0.0) + custom color #FF5733 in Light & Dark & high intensity.
+    tintA.diaAlpha = 0.0;
+    tintA->tint.themeIntensity = 0.0;
+    gradA.appearance = [NSAppearance appearanceNamed:NSAppearanceNameAqua];
+    gradA.alphaValue = 0.0;
+    [tintA updateLayer];
+    DPSetProfileHexForSpace(@"space-A", @"#FF5733");
+    DPRefreshProfileColorForWindow(winA);
+    Check(fabs(gradA.alphaValue - 0.75) < 0.01, @"Neutral preset + custom color uses Light fallback alpha 0.75");
+
+    gradA.appearance = [NSAppearance appearanceNamed:NSAppearanceNameDarkAqua];
+    [tintA updateLayer];
+    Check(fabs(gradA.alphaValue - 0.50) < 0.01, @"Neutral preset + custom color updates to Dark fallback alpha 0.50");
+
+    tintA->tint.themeIntensity = 1.0;
+    [tintA updateLayer];
+    Check(fabs(gradA.alphaValue - 0.90) < 0.01, @"Neutral preset + custom color respects Dark max intensity alpha 0.90");
+
+    // 2. Switching winA from Neutral+Custom space-A (alpha=0.75) to Colored preset space-B (no custom color, diaAlpha=0.75!)
+    // MUST NOT misidentify space-B's 0.75 alpha as our Neutral override and wipe it to 0.0!
+    gradA.appearance = [NSAppearance appearanceNamed:NSAppearanceNameAqua];
+    tintA->tint.themeIntensity = 0.0;
+    [tintA updateLayer];
+    Check(fabs(gradA.alphaValue - 0.75) < 0.01, @"Neutral+Custom space-A at Light default alpha 0.75");
+    indicator.focusedSpaceID = @"space-B";
+    tintA.diaAlpha = 0.75;
+    gradA.diaColors = diaSingle;
+    [gradA updateLayer];
+    [tintA updateLayer];
+    Check(fabs(gradA.alphaValue - 0.75) < 0.01, @"switching from Neutral+Custom space-A to Colored space-B preserves space-B alpha 0.75");
+    Check([gradA.gradientLayer.colors isEqual:diaSingle], @"switching to Colored space-B preserves space-B gradient colors");
+
+    // Reverse update order ([tintA updateLayer] before [gradA updateLayer]) also preserves space-B alpha & colors!
+    indicator.focusedSpaceID = @"space-A";
+    tintA.diaAlpha = 0.0;
+    gradA.diaColors = diaA;
+    [tintA updateLayer];
+    [gradA updateLayer];
+    indicator.focusedSpaceID = @"space-B";
+    tintA.diaAlpha = 0.75;
+    gradA.diaColors = diaSingle;
+    [tintA updateLayer];
+    Check(fabs(gradA.alphaValue - 0.75) < 0.01, @"reverse order: tintA updateLayer preserves space-B alpha 0.75");
+    [gradA updateLayer];
+    Check([gradA.gradientLayer.colors isEqual:diaSingle] && fabs(gradA.alphaValue - 0.75) < 0.01,
+          @"reverse order: gradA updateLayer displays space-B gradient with 0.75 alpha");
+
+    // Even if space switcher fires BEFORE tintA updateLayer, space-B alpha is NOT wiped to 0.0!
+    indicator.focusedSpaceID = @"space-A";
+    tintA.diaAlpha = 0.0;
+    gradA.diaColors = diaA;
+    [tintA updateLayer];
+    Check(fabs(gradA.alphaValue - 0.75) < 0.01, @"returning to Neutral+Custom space-A restores fallback alpha 0.75");
+    indicator.focusedSpaceID = @"space-B";
+    gradA.alphaValue = 0.75;
+    DPRefreshProfileColorForWindow(winA);
+    Check(fabs(gradA.alphaValue - 0.75) < 0.01, @"space switch refresh does not wipe space-B 0.75 alpha to 0.0");
+
+    // Clicking a Colored preset on space-A after Neutral+Custom restores Colored preset alpha 0.75, not 0.0.
+    indicator.focusedSpaceID = @"space-A";
+    tintA.diaAlpha = 0.0;
+    [tintA updateLayer];
+    tintA.diaAlpha = 0.75;
+    [pane.themePicker themeClicked:otherPreset];
+    [tintA updateLayer];
+    Check(fabs(gradA.alphaValue - 0.75) < 0.01, @"clicking Colored preset after Neutral+Custom keeps preset alpha 0.75");
+
+    // Clearing / turning tweak OFF on Neutral space-A DOES restore Dia's 0.0 alpha.
+    tintA.diaAlpha = 0.0;
+    [tintA updateLayer];
+    DPSetProfileHexForSpace(@"space-A", @"#22AA44");
+    DPRefreshProfileColorForWindow(winA);
+    Check(fabs(gradA.alphaValue - 0.75) < 0.01, @"Neutral+Custom re-enabled with alpha 0.75");
+    DPProfileColorPicker.on = NO;
+    DPProfileColorPicker.apply(&DPProfileColorPicker);
+    Check(fabs(gradA.alphaValue - 0.0) < 0.01, @"turning tweak OFF restores Neutral space-A alpha to 0.0");
+
+    // 3. DPProfileHexField Escape/Return & DPProfileColorRow switchToSpaceID / prepareForRemoval / window close safety.
+    DPProfileColorPicker.on = YES;
+    DPSetProfileHexForSpace(@"space-A", @"#112233");
+    DPSetProfileHexForSpace(@"space-B", @"#AABBCC");
+    DPProfileColorPicker.apply(&DPProfileColorPicker);
+    DPProfileColorRow *edgeRow = (DPProfileColorRow *)pane.formRows.arrangedSubviews[3];
+    Check([edgeRow isKindOfClass:DPProfileColorRow.class] && [edgeRow.hexField.stringValue isEqualToString:@"#112233"], @"edgeRow synced to space-A");
+
+    // Escape after typing valid 3-digit shorthand #0AF must cancel cleanly WITHOUT committing #00AAFF!
+    NSTextView *mockEditor = [[NSTextView alloc] initWithFrame:NSMakeRect(0, 0, 80, 20)];
+    mockEditor.string = @"#0AF";
+    edgeRow.hexField.stringValue = @"#0AF";
+    BOOL handledEsc = [edgeRow.hexField control:edgeRow.hexField textView:mockEditor doCommandBySelector:@selector(cancelOperation:)];
+    Check(handledEsc && [edgeRow.hexField.stringValue isEqualToString:@"#112233"] && [mockEditor.string isEqualToString:@"#112233"],
+          @"Escape restores saved hex in both hexField and field editor");
+    Check([DPProfileHexForSpace(@"space-A") isEqualToString:@"#112233"], @"Escape on valid 3-digit shorthand does not commit");
+
+    // Return commits valid 3-digit shorthand once and updates field editor string.
+    mockEditor.string = @"#0AF";
+    edgeRow.hexField.stringValue = @"#0AF";
+    BOOL handledRet = [edgeRow.hexField control:edgeRow.hexField textView:mockEditor doCommandBySelector:@selector(insertNewline:)];
+    Check(handledRet && [DPProfileHexForSpace(@"space-A") isEqualToString:@"#00AAFF"] && [mockEditor.string isEqualToString:@"#00AAFF"],
+          @"Return expands and commits 3-digit shorthand once");
+
+    // switchToSpaceID: must not leak space-A's in-progress edit into space-B and deactivates well.
+    edgeRow.hexField.stringValue = @"#999999";
+    [edgeRow.well activate:NO];
+    [edgeRow switchToSpaceID:@"space-B"];
+    Check([edgeRow.spaceID isEqualToString:@"space-B"] && [edgeRow.hexField.stringValue isEqualToString:@"#AABBCC"] && !edgeRow.well.isActive,
+          @"switchToSpaceID deactivates well and loads space-B without leaking edit");
+    Check([DPProfileHexForSpace(@"space-A") isEqualToString:@"#00AAFF"] && [DPProfileHexForSpace(@"space-B") isEqualToString:@"#AABBCC"],
+          @"switchToSpaceID preserves both spaces' saved colors");
+
+    // prepareForRemoval while hexField is empty must NOT erase space-B's saved color on controlTextDidEndEditing:.
+    edgeRow.hexField.stringValue = @"";
+    [edgeRow.well activate:NO];
+    [edgeRow prepareForRemoval];
+    [edgeRow.hexField controlTextDidEndEditing:[NSNotification notificationWithName:NSControlTextDidEndEditingNotification object:edgeRow.hexField]];
+    Check(!edgeRow.well.isActive && [DPProfileHexForSpace(@"space-B") isEqualToString:@"#AABBCC"],
+          @"prepareForRemoval suppresses end-editing commit and preserves saved color");
+
+    // NSWindowWillCloseNotification deactivates active color well cleanly (Settings window has releasedWhenClosed = NO).
+    DPProfileColorPicker.apply(&DPProfileColorPicker);
+    [pane rebuildForm];
+    DPProfileColorRow *closeRow = (DPProfileColorRow *)pane.formRows.arrangedSubviews[3];
+    [closeRow.well activate:NO];
+    [NSNotificationCenter.defaultCenter postNotificationName:NSWindowWillCloseNotification object:settingsWin];
+    Check(!closeRow.well.isActive, @"NSWindowWillCloseNotification deactivates active color well");
+
+    // Clicking a preset swatch deactivates active color well.
+    [closeRow.well activate:NO];
+    [pane.themePicker themeClicked:otherPreset];
+    Check(!closeRow.well.isActive, @"clicking preset swatch deactivates active color well");
 
     [panel close];
     [settingsWin close];

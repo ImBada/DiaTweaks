@@ -35,8 +35,11 @@ NSString *DPAnchoredPanelSpaceID(NSWindow *window);
 @property (strong) DPProfileColorWell *well;
 @property (strong) DPProfileHexField *hexField;
 @property (strong) NSButton *clearButton;
+@property (nonatomic) BOOL suppressCommit;
 - (instancetype)initWithSpaceID:(NSString *)spaceID font:(NSFont *)font textColor:(NSColor *)textColor;
 - (void)syncFromDefaults:(BOOL)forceField;
+- (void)switchToSpaceID:(NSString *)spaceID;
+- (void)prepareForRemoval;
 - (void)applyHex:(NSString *)canonical fromField:(BOOL)fromField;
 - (void)clearColor;
 @end

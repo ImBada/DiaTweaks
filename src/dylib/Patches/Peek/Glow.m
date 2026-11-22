@@ -41,7 +41,11 @@ static const CGFloat DPGlowEase = 0.15;
 
 - (void)dealloc { [_frames invalidate]; }
 
-- (void)updateLayer { self.line.backgroundColor = NSColor.controlAccentColor.CGColor; }
+- (void)updateLayer {
+    [self.effectiveAppearance performAsCurrentDrawingAppearance:^{
+        self.line.backgroundColor = NSColor.controlAccentColor.CGColor;
+    }];
+}
 
 - (void)layout {
     [super layout];

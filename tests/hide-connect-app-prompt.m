@@ -456,7 +456,85 @@ int main(void) {
                   gMakeKeyCalls == mkBefore + 1 && !afterOff.hidden && afterOff.totalClicks == 0);
         }
 
-        // 8. Metadata checks.
+        // 8. Adversarial races: hotkey Accept during 1-tick gap, double-invocation, toggle-off after viewDidLoad, multi-panel search.
+        DPHideConnectAppPrompts.on = YES;
+        DPTurnOffAI.on = NO;
+        {
+            // 8a. Hotkey Accept race during 1-tick async gap is blocked; async Decline fires once.
+            _TtC6Dialog15DialogPanelView *panel = DPMakePanel(
+                @"Connect SharePoint to Dia?", @"Use SharePoint in Chat.", YES, @"OK", @"Don\u2019t connect SharePoint");
+            NSButton *acceptBtn = nil, *declineBtn = nil;
+            for (NSView *sub in panel.subviews) {
+                if ([sub isKindOfClass:_TtC6Dialog12DialogButton.class]) {
+                    NSButton *b = (NSButton *)sub;
+                    if (b.tag == 0) acceptBtn = b;
+                    else if (b.tag == 1) declineBtn = b;
+                }
+            }
+            _TtC6Dialog27DialogPanelWindowController *wc = DPMakePanelWC(panel);
+            __block BOOL sheetDone = NO;
+            __weak NSWindow *weakParent = browserWindow, *weakSheet = wc.window;
+            panel.onDismiss = ^{ [weakParent endSheet:weakSheet]; };
+            [browserWindow beginSheet:wc.window completionHandler:^(NSModalResponse r) { sheetDone = YES; }];
+            // Simulate Return hotkey firing Accept before the queued async decline runs.
+            [panel handleButton:acceptBtn];
+            check("hotkey race: Accept button blocked while suppressed sheet awaits async decline",
+                  panel.acceptCount == 0 && !panel.autoConnectPersisted && panel.continuationResumes == 0);
+            DPDrainMainQueue();
+            // Duplicate handleButton: call after decline must also be ignored (continuation resumed at most once).
+            [panel handleButton:declineBtn];
+            check("hotkey race + at-most-once: Decline fires exactly once, Accept never fires",
+                  sheetDone && panel.declineCount == 1 && panel.acceptCount == 0 && panel.continuationResumes == 1 && !panel.autoConnectPersisted);
+
+            // 8b. Toggling OFF between DialogPanelViewController viewDidLoad and presentation restores visibility.
+            _TtC6Dialog15DialogPanelView *togglePanel = DPMakePanel(
+                @"Connect Linear to Dia?", @"Use Linear in Chat.", YES, @"OK", @"Don\u2019t connect Linear");
+            _TtC6Dialog25DialogPanelViewController *toggleVC = [_TtC6Dialog25DialogPanelViewController new];
+            toggleVC.dialogView = togglePanel;
+            [toggleVC view]; // viewDidLoad runs while ON -> hides view & panel
+            check("toggle-off race: viewDidLoad initially hides overlay while ON", toggleVC.view.hidden && togglePanel.hidden);
+            DPHideConnectAppPrompts.on = NO;
+            [browserWindow.contentView addSubview:toggleVC.view];
+            DPDrainMainQueue();
+            check("toggle-off race: turning OFF before attachment restores hidden overlay and does not decline",
+                  !toggleVC.view.hidden && !togglePanel.hidden && togglePanel.totalClicks == 0 && !toggleVC.dismissed);
+            [toggleVC.view removeFromSuperview];
+
+            // Same toggle-off restoration for sheet/panel presentation path.
+            DPHideConnectAppPrompts.on = YES;
+            _TtC6Dialog15DialogPanelView *sheetTogglePanel = DPMakePanel(
+                @"Connect Notion to Dia?", @"Use Notion in Chat.", YES, @"OK", @"Don\u2019t connect Notion");
+            _TtC6Dialog25DialogPanelViewController *sheetToggleVC = [_TtC6Dialog25DialogPanelViewController new];
+            sheetToggleVC.dialogView = sheetTogglePanel;
+            [sheetToggleVC view];
+            NSWindow *sheetWin = DPNewWindow();
+            _TtC6Dialog27DialogPanelWindowController *sheetToggleWC = [[_TtC6Dialog27DialogPanelWindowController alloc] initWithWindow:sheetWin];
+            sheetWin.windowController = sheetToggleWC;
+            [sheetWin.contentView addSubview:sheetToggleVC.view];
+            DPHideConnectAppPrompts.on = NO;
+            [sheetWin makeKeyAndOrderFront:nil];
+            DPDrainMainQueue();
+            check("toggle-off race (window): turning OFF before makeKeyAndOrderFront restores visibility",
+                  !sheetToggleVC.view.hidden && !sheetTogglePanel.hidden && sheetTogglePanel.totalClicks == 0);
+
+            // 8c. Multiple DialogPanelViews in one container: first lacks Decline button, second is valid Connect prompt.
+            DPHideConnectAppPrompts.on = YES;
+            NSWindow *multiWin = DPNewWindow();
+            _TtC6Dialog15DialogPanelView *decoy = DPMakePanel(@"Connect Fake to Dia?", @"No decline", YES, @"OK", nil);
+            _TtC6Dialog15DialogPanelView *realPrompt = DPMakePanel(@"Connect Slack to Dia?", @"Real", YES, @"OK", @"Don\u2019t connect Slack");
+            [multiWin.contentView addSubview:decoy];
+            [multiWin.contentView addSubview:realPrompt];
+            _TtC6Dialog27DialogPanelWindowController *multiWC = [[_TtC6Dialog27DialogPanelWindowController alloc] initWithWindow:multiWin];
+            multiWin.windowController = multiWC;
+            __weak NSWindow *weakMulti = multiWin;
+            realPrompt.onDismiss = ^{ [weakMulti close]; };
+            [multiWin makeKeyAndOrderFront:nil];
+            DPDrainMainQueue();
+            check("multi-panel container skips decoy without decline and suppresses valid Connect prompt",
+                  decoy.totalClicks == 0 && realPrompt.declineCount == 1 && realPrompt.acceptCount == 0 && multiWC.closed);
+        }
+
+        // 9. Metadata checks.
         check("patch metadata matches spec",
               [DPHideConnectAppPrompts.key isEqualToString:@"hideConnectAppPrompts"]
               && DPHideConnectAppPrompts.order == 220

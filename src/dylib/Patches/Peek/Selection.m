@@ -59,7 +59,10 @@ void DPPeekUpdateSyncTimer(void) {
 void DPPeekCloseForSource(id source) {
     if (!source) return;
     for (DPPeekCard *peek in DPPeekAllCards(nil))
-        if (!peek.closing && peek.source == source) [peek close:DPPeekClose];
+        if (!peek.closing && peek.source == source) {
+            DPPeekChatDetachQuiet(peek);
+            [peek close:DPPeekClose];
+        }
     DPPeekUpdateSyncTimer();
 }
 
@@ -133,27 +136,46 @@ static void DPPeekRunMain(void (^work)(void)) {
     else dispatch_async(dispatch_get_main_queue(), work);
 }
 
+static BOOL DPPeekIsVisibleSource(id page) {
+    for (DPPeekCard *peek in DPPeekAllCards(nil))
+        if (!peek.closing && !peek.isHiddenOrHasHiddenAncestor && peek.source == page) return YES;
+    return NO;
+}
+
 static void DPPeekPage_setVisibility(id self, SEL _cmd, NSInteger visibility) {
     DPCallOriginal(DPPeekPage_setVisibility, self, visibility);
-    if (!DPPeek.on || visibility != DPPeekPageVisible) return;
+    if (!DPPeek.on || !DPPeekHasCards()) return;
     __weak id weak = self;
-    DPPeekRunMain(^{
-        if (DPPeek.on && DPPeekHasCards() && weak && !DPPeekCardForPage(weak)) DPPeekSyncAllWindows();
-    });
+    if (visibility == DPPeekPageVisible) {
+        DPPeekRunMain(^{
+            if (DPPeek.on && DPPeekHasCards() && weak && !DPPeekCardForPage(weak)) DPPeekSyncAllWindows();
+        });
+    } else {
+        DPPeekRunMain(^{
+            if (DPPeek.on && DPPeekHasCards() && weak && DPPeekIsVisibleSource(weak)) DPPeekSyncAllWindows();
+        });
+    }
+}
+
+static void DPPeekCloseForPageOrSource(id page) {
+    if (!page) return;
+    DPPeekCloseForSource(page);
+    DPPeekCard *own = DPPeekCardForPage(page);
+    if (own && !own.closing) [own close:DPPeekClose];
 }
 
 static void DPPeekPage_close(id self, SEL _cmd) {
     DPCallOriginal(DPPeekPage_close, self);
     if (!DPPeek.on) return;
     __weak id weak = self;
-    DPPeekRunMain(^{ if (DPPeek.on && DPPeekHasCards() && weak) DPPeekCloseForSource(weak); });
+    DPPeekRunMain(^{ if (DPPeek.on && DPPeekHasCards() && weak) DPPeekCloseForPageOrSource(weak); });
 }
 
 static void DPPeekPage_closeTiming(id self, SEL _cmd, NSInteger timing) {
     DPCallOriginal(DPPeekPage_closeTiming, self, timing);
     if (!DPPeek.on) return;
     __weak id weak = self;
-    DPPeekRunMain(^{ if (DPPeek.on && DPPeekHasCards() && weak) DPPeekCloseForSource(weak); });
+    DPPeekRunMain(^{ if (DPPeek.on && DPPeekHasCards() && weak) DPPeekCloseForPageOrSource(weak); });
 }
 
 static void DPPeekWebContent_finalizeDiscard(id self, SEL _cmd, id page, BOOL discarded) {

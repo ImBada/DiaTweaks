@@ -6,7 +6,7 @@ static Class DPDialogPanelClass;
 static Class DPDialogButtonClass;
 static Class DPDialogPanelVCClass;
 static Class DPDialogPanelWCClass;
-static char DPDismissedKey;
+static char DPDismissedKey, DPHandledKey, DPDeclineButtonKey, DPHiddenAtLoadKey;
 
 static BOOL DPSuppressConnectPrompts(void) {
     return DPHideConnectAppPrompts.on || DPTurnOffAI.on;
@@ -49,12 +49,31 @@ static NSButton *DPDeclineButtonIn(NSView *panel) {
 }
 
 static NSView *DPConnectPromptIn(NSView *root, NSButton **declineOut) {
-    NSView *panel = DPFindView(root, ^BOOL(NSView *view) { return DPIsConnectAppPrompt(view); });
+    __block NSButton *matchedDecline = nil;
+    NSView *panel = DPFindView(root, ^BOOL(NSView *view) {
+        if (!DPIsConnectAppPrompt(view)) return NO;
+        NSButton *decline = DPDeclineButtonIn(view);
+        if (!decline) return NO;
+        matchedDecline = decline;
+        return YES;
+    });
     if (!panel) return nil;
-    NSButton *decline = DPDeclineButtonIn(panel);
-    if (!decline) return nil;
-    if (declineOut) *declineOut = decline;
+    if (declineOut) *declineOut = matchedDecline;
     return panel;
+}
+
+static void DPRestoreHiddenAtLoadIn(NSView *root) {
+    if (!root) return;
+    DPFindView(root, ^BOOL(NSView *view) {
+        NSView *host = DPGet(view, &DPHiddenAtLoadKey);
+        if (!host) return NO;
+        DPSet(view, &DPHiddenAtLoadKey, nil);
+        if (![DPGet(view, &DPDismissedKey) boolValue]) {
+            host.hidden = NO;
+            view.hidden = NO;
+        }
+        return NO;
+    });
 }
 
 static void DPHidePromptWindow(NSWindow *window, NSView *panel) {
@@ -78,20 +97,38 @@ static void DPHideOverlayHost(NSView *panel) {
 
 // Route through Dia's own decline button so Swift continuations and cooldown state clean up without connecting.
 static void DPScheduleDecline(NSView *panel, NSButton *decline) {
-    if (!panel || !decline || [DPGet(panel, &DPDismissedKey) boolValue]) return;
+    if (!panel || !decline || [DPGet(panel, &DPDismissedKey) boolValue] || [DPGet(panel, &DPHandledKey) boolValue]) return;
     DPSet(panel, &DPDismissedKey, @YES);
+    DPSet(panel, &DPDeclineButtonKey, decline);
     __weak NSView *weakPanel = panel;
     __weak NSButton *weakDecline = decline;
     dispatch_async(dispatch_get_main_queue(), ^{
         NSView *p = weakPanel;
         NSButton *b = weakDecline;
-        if (!p || !b || (!p.window && !p.superview)) return;
+        if (!p || !b || [DPGet(p, &DPHandledKey) boolValue] || (!p.window && !p.superview)) return;
         if (b.target != p || b.action != @selector(handleButton:) || ![p respondsToSelector:@selector(handleButton:)]) return;
         ((void (*)(id, SEL, id))objc_msgSend)(p, @selector(handleButton:), b);
     });
 }
 
+// Prevent hotkeys (e.g. Return on a hidden sheet) from accepting a suppressed prompt and guarantee at-most-once delivery.
+static void DPDialogPanel_handleButton(NSView *self, SEL _cmd, id sender) {
+    BOOL suppressed = [DPGet(self, &DPDismissedKey) boolValue];
+    if (suppressed) {
+        if ([DPGet(self, &DPHandledKey) boolValue]) return;
+        id expected = DPGet(self, &DPDeclineButtonKey);
+        if (expected && sender != expected) return;
+        DPSet(self, &DPHandledKey, @YES);
+        DPSet(self, &DPDeclineButtonKey, nil);
+        DPCallOriginal(DPDialogPanel_handleButton, self, sender);
+        return;
+    }
+    if (DPSuppressConnectPrompts() && DPIsConnectAppPrompt(self)) DPSet(self, &DPHandledKey, @YES);
+    DPCallOriginal(DPDialogPanel_handleButton, self, sender);
+}
+
 static void DPWindow_beginSheet(NSWindow *self, SEL _cmd, NSWindow *sheet, void (^handler)(NSModalResponse)) {
+    if (sheet && !DPSuppressConnectPrompts()) DPRestoreHiddenAtLoadIn(sheet.contentView);
     if (DPSuppressConnectPrompts() && sheet) {
         NSButton *decline = nil;
         NSView *panel = DPConnectPromptIn(sheet.contentView, &decline);
@@ -106,7 +143,11 @@ static void DPWindow_beginSheet(NSWindow *self, SEL _cmd, NSWindow *sheet, void 
 }
 
 static BOOL DPSuppressPanelWindow(NSWindow *window) {
-    if (!DPSuppressConnectPrompts() || !DPDialogPanelWCClass) return NO;
+    if (!DPSuppressConnectPrompts()) {
+        DPRestoreHiddenAtLoadIn(window.contentView);
+        return NO;
+    }
+    if (!DPDialogPanelWCClass) return NO;
     if (![window.windowController isKindOfClass:DPDialogPanelWCClass]) return NO;
     NSButton *decline = nil;
     NSView *panel = DPConnectPromptIn(window.contentView, &decline);
@@ -132,13 +173,18 @@ static void DPDialogPanelVC_viewDidLoad(NSViewController *self, SEL _cmd) {
     NSButton *decline = nil;
     NSView *panel = DPConnectPromptIn(self.view, &decline);
     if (!panel) return;
+    DPSet(panel, &DPHiddenAtLoadKey, self.view);
     self.view.hidden = YES;
     panel.hidden = YES;
 }
 
 static void DPDialogPanel_viewDidMoveToWindow(NSView *self, SEL _cmd) {
     DPCallOriginal(DPDialogPanel_viewDidMoveToWindow, self);
-    if (!self.window || !DPSuppressConnectPrompts()) return;
+    if (!self.window) return;
+    if (!DPSuppressConnectPrompts()) {
+        DPRestoreHiddenAtLoadIn(self);
+        return;
+    }
     if (DPDialogPanelWCClass && [self.window.windowController isKindOfClass:DPDialogPanelWCClass]) return;
     if (!DPIsConnectAppPrompt(self)) return;
     NSButton *decline = DPDeclineButtonIn(self);
@@ -177,6 +223,7 @@ static void DPInstallHideConnectAppPrompts(void) {
     DPHookClass(NSWindow.class, @selector(orderFront:), (IMP)DPWindow_orderFront);
     DPHook(DPDiaDialogPanelVC, @selector(viewDidLoad), (IMP)DPDialogPanelVC_viewDidLoad);
     DPHook(DPDiaDialogPanel, @selector(viewDidMoveToWindow), (IMP)DPDialogPanel_viewDidMoveToWindow);
+    DPHook(DPDiaDialogPanel, @selector(handleButton:), (IMP)DPDialogPanel_handleButton);
 }
 
 static void DPApplyHideConnectAppPrompts(DPPatch *patch) {

@@ -17,8 +17,10 @@
 }
 - (BOOL)wantsUpdateLayer { return YES; }
 - (void)updateLayer {
-    self.layer.backgroundColor = NSColor.textBackgroundColor.CGColor;
-    self.layer.borderColor = NSColor.separatorColor.CGColor;
+    [self.effectiveAppearance performAsCurrentDrawingAppearance:^{
+        self.layer.backgroundColor = NSColor.textBackgroundColor.CGColor;
+        self.layer.borderColor = NSColor.separatorColor.CGColor;
+    }];
 }
 @end
 
@@ -159,9 +161,25 @@ static NSTextView *DPLaunchFlagsEditor(NSFont *font, id<NSTextViewDelegate> dele
     _relaunch.enabled = pending;
 }
 
+- (void)flushEdits {
+    if (!_enabled) return;
+    NSString *text = _textView.string ?: @"";
+    if (![text isEqualToString:DPLaunchFlagsSavedText()]) DPLaunchFlagsSaveText(text);
+    [self refreshStatus];
+}
+
+- (void)viewWillMoveToWindow:(NSWindow *)newWindow {
+    if (!newWindow) [self flushEdits];
+    [super viewWillMoveToWindow:newWindow];
+}
+
 - (void)textDidChange:(NSNotification *)notification {
     DPLaunchFlagsSaveText(_textView.string ?: @"");
     [self refreshStatus];
+}
+
+- (void)textDidEndEditing:(NSNotification *)notification {
+    [self flushEdits];
 }
 
 - (BOOL)textView:(NSTextView *)textView doCommandBySelector:(SEL)command {
@@ -170,7 +188,11 @@ static NSTextView *DPLaunchFlagsEditor(NSFont *font, id<NSTextViewDelegate> dele
     return NO;
 }
 
-- (void)relaunchDia:(id)sender { DPHandOffAndQuit(@[ @"apply" ]); }
+- (void)relaunchDia:(id)sender {
+    [self.window endEditingFor:nil];
+    [self flushEdits];
+    DPHandOffAndQuit(@[ @"apply" ]);
+}
 
 @end
 

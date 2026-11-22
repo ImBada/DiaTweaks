@@ -542,6 +542,46 @@ static void testProtonPass(void) {
     DPProtonPass.apply(&DPProtonPass);
     NSString *permMsg = DPProtonPass.ready(&DPProtonPass);
     NSCAssert(permMsg && [permMsg containsString:@"sudo chown -R \"$(whoami)\""], @"#384 Proton Pass repair expected, got: %@", permMsg);
+    chmod(chromeDir.fileSystemRepresentation, 0755);
+
+    // Symlinked app & host succeed; directory or broken symlink at host binary is rejected.
+    NSString *symlinkApp = [gAppSupportRoot stringByAppendingPathComponent:@"ProtonPassLink.app"];
+    NSCAssert([NSFileManager.defaultManager createSymbolicLinkAtPath:symlinkApp withDestinationPath:fakeApp error:nil], @"create app symlink");
+    NSCAssert([DPExecutableHostInApp(symlinkApp) hasSuffix:@"/ProtonPassLink.app/Contents/Resources/assets/proton_pass_nm_host"],
+              @"symlinked Proton Pass app discovers executable host");
+
+    NSString *dirApp = [gAppSupportRoot stringByAppendingPathComponent:@"DirHost.app"];
+    NSString *dirHost = [dirApp stringByAppendingPathComponent:@"Contents/Resources/assets/proton_pass_nm_host"];
+    [NSFileManager.defaultManager createDirectoryAtPath:dirHost withIntermediateDirectories:YES attributes:nil error:nil];
+    NSCAssert(DPExecutableHostInApp(dirApp) == nil, @"directory named proton_pass_nm_host must be rejected");
+    writeJSON(chromePp, @{ @"name" : @"me.proton.pass.nm", @"description" : @"Proton Pass host", @"path" : dirHost });
+    DPProtonPass.apply(&DPProtonPass);
+    NSString *dirReadyMsg = DPProtonPass.ready(&DPProtonPass);
+    NSCAssert(dirReadyMsg && [dirReadyMsg containsString:@"Quit and reopen Proton Pass"],
+              @"ready() must reject directory path in manifest, got: %@", dirReadyMsg);
+    [NSFileManager.defaultManager removeItemAtPath:chromePp error:nil];
+
+    NSString *brokenApp = [gAppSupportRoot stringByAppendingPathComponent:@"BrokenHost.app"];
+    NSString *brokenHost = [brokenApp stringByAppendingPathComponent:@"Contents/Resources/assets/proton_pass_nm_host"];
+    [NSFileManager.defaultManager createDirectoryAtPath:brokenHost.stringByDeletingLastPathComponent withIntermediateDirectories:YES attributes:nil error:nil];
+    [NSFileManager.defaultManager createSymbolicLinkAtPath:brokenHost withDestinationPath:@"/nonexistent/proton_pass_nm_host" error:nil];
+    NSCAssert(DPExecutableHostInApp(brokenApp) == nil, @"broken symlink at host binary must be rejected");
+
+    // Ownership requires BOTH name and description; matching description with another name is preserved.
+    writeJSON(chromePp, @{ @"name" : @"other.host", @"description" : @"DiaTweaks link to the Proton Pass app", @"path" : hostBin });
+    DPProtonPass.on = NO;
+    DPProtonPass.apply(&DPProtonPass);
+    NSCAssert([NSFileManager.defaultManager fileExistsAtPath:chromePp], @"manifest with wrong name must not be deleted even if description matches");
+    [NSFileManager.defaultManager removeItemAtPath:chromePp error:nil];
+
+    // Uninstalling Proton Pass while tweak stays ON removes stale DiaTweaks-owned manifest.
+    gProtonPassHost = hostBin;
+    DPProtonPass.on = YES;
+    DPProtonPass.apply(&DPProtonPass);
+    NSCAssert([NSFileManager.defaultManager fileExistsAtPath:chromePp], @"DiaTweaks manifest installed before uninstall");
+    gProtonPassHost = nil;
+    DPProtonPass.apply(&DPProtonPass);
+    NSCAssert(![NSFileManager.defaultManager fileExistsAtPath:chromePp], @"uninstalling Proton Pass cleans up stale DiaTweaks manifest");
 
     unlockAndRemove(gAppSupportRoot);
 }

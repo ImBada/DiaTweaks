@@ -125,6 +125,12 @@ static int gChatMenuTriggers, gNewChatTriggers, gExtMenuTriggers, gChatButtonCli
 @implementation _TtC18ExtensionSidePanel32ExtensionSidePanelViewController
 @end
 
+@interface _TtC18ExtensionSidePanel35ExtensionSidePanelSubViewController : NSViewController
+@end
+@implementation _TtC18ExtensionSidePanel35ExtensionSidePanelSubViewController
+- (void)loadView { self.view = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 300, 600)]; }
+@end
+
 @interface _TtCC14DynamicPopover28DynamicPopoverViewControllerP33_AB0357A1429F4D6D7F128058B713C93F8RootView : NSView
 @end
 @implementation _TtCC14DynamicPopover28DynamicPopoverViewControllerP33_AB0357A1429F4D6D7F128058B713C93F8RootView
@@ -198,10 +204,11 @@ void DPPeekLayoutHints(NSView *controls, CGFloat availableRight) {}
 void DPPeekResetControlHints(NSView *controls) {}
 void DPPeekHideDragZone(void) {}
 CATransform3D DPPeekScaled(NSView *view, CGFloat scale) { return CATransform3DIdentity; }
+static NSString *gActiveTabID = @"tab-1";
 id DPScriptWindow(NSWindow *window) { return nil; }
 NSString *DPTabID(id tab) { return nil; }
-NSString *DPActiveTabIDIn(id scriptWindow) { return @"tab-1"; }
-NSString *DPActiveTabID(NSWindow *window) { return @"tab-1"; }
+NSString *DPActiveTabIDIn(id scriptWindow) { return gActiveTabID; }
+NSString *DPActiveTabID(NSWindow *window) { return gActiveTabID; }
 void DPOnLaunch(void (^block)(void)) { block(); }
 
 BOOL DPEventIsKey(NSEvent *event, NSString *key) {
@@ -475,11 +482,17 @@ int main(void) {
         CHECK(gChatButtonClicks == 1 && !peek.closing, "fallback Chat button click fires and keeps Peek open");
         toggleChatItem.keyEquivalent = @"e";
 
-        // 5. Focus inside docked AI Side Chat, Floating Chat, or Extension Side Panel passes through.
+        // 5. Focus inside docked AI Side Chat, Floating Chat, or Extension Side Panel (both NSView and NSViewController nextResponder) passes through.
+        _TtC18ExtensionSidePanel35ExtensionSidePanelSubViewController *extVC = [_TtC18ExtensionSidePanel35ExtensionSidePanelSubViewController new];
+        NSView *extVCChild = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 100, 40)];
+        [extVC.view addSubview:extVCChild];
+        [sidebarRoot addSubview:extVC.view];
         CHECK(!DPPeekResponderInChat(peek.host), "Peek host is not detected as chat responder");
         CHECK(DPPeekResponderInChat(chatInput), "docked AI Side Chat input detected as chat responder");
         CHECK(DPPeekResponderInChat(floatingInput), "floating chat popover input detected as chat responder");
         CHECK(DPPeekResponderInChat(extInput), "Extension Side Panel input detected as chat responder");
+        CHECK(DPPeekResponderInChat(extVCChild), "Extension Side Panel NSViewController nextResponder detected as chat responder");
+        [extVC.view removeFromSuperview];
 
         // 5b. Regression: Command Bar overlay or external text focus prevents Peek from hijacking Cmd+W / Cmd+O / Escape.
         window.mockResponder = peek.host;
@@ -626,6 +639,105 @@ int main(void) {
         peekPage.url = [NSURL URLWithString:@"about:blank"];
         CHECK(kvo.selectedHits == afterCloseSel && kvo.inputHits == afterCloseIn,
               "detached Peek page no longer forwards KVO to source");
+
+        // 10. KVO torture: double detach, background-thread KVO racing with detach, sudden DPPeekCard dealloc, and quiet detach on parked/source close.
+        {
+            // 10a. Sudden DPPeekCard dealloc without close:/handOver must cleanly remove all KVO observers from peekPage.
+            ArcWebContents *orphanPeekPage = [ArcWebContents new];
+            orphanPeekPage.tag = @"orphan";
+            orphanPeekPage.selectedText = @"orphan-sel";
+            @autoreleasepool {
+                DPPeekCard *orphan = [[DPPeekCard alloc] initWithFrame:NSMakeRect(0, 0, 400, 400)];
+                orphan.page = orphanPeekPage;
+                orphan.source = source;
+                DPPeekChatAttach(orphan);
+                CHECK(orphan.chatBridge != nil, "orphan card attached chatBridge");
+                // Intentionally drop orphan without calling close: or handOver.
+            }
+            int orphanSelBefore = kvo.selectedHits, orphanInBefore = kvo.inputHits;
+            orphanPeekPage.selectedText = @"after-dealloc";
+            orphanPeekPage.isLoading = NO;
+            orphanPeekPage.url = [NSURL URLWithString:@"https://after-dealloc.example/"];
+            CHECK(kvo.selectedHits == orphanSelBefore && kvo.inputHits == orphanInBefore,
+                  "sudden DPPeekCard dealloc detaches KVO cleanly without crashing or notifying source");
+
+            // 10b. Background-thread KVO mutation racing with main-thread DPPeekChatDetach (50 iterations under ASan).
+            dispatch_queue_t bg = dispatch_queue_create("dp.peek.kvo.torture", DISPATCH_QUEUE_CONCURRENT);
+            for (int iter = 0; iter < 50; iter++) {
+                ArcWebContents *racePage = [ArcWebContents new];
+                racePage.tag = @"race";
+                DPPeekCard *raceCard = [[DPPeekCard alloc] initWithFrame:NSMakeRect(0, 0, 400, 400)];
+                raceCard.page = racePage;
+                raceCard.source = source;
+                DPPeekChatAttach(raceCard);
+                id bridge = raceCard.chatBridge;
+                dispatch_async(bg, ^{
+                    racePage.selectedText = @"bg-sel";
+                    racePage.url = [NSURL URLWithString:@"https://race.example/"];
+                });
+                DPPeekChatDetach(raceCard);
+                DPPeekChatDetach(raceCard); // idempotent double detach
+                DPPeekChatDetachBridge(bridge);
+            }
+            dispatch_barrier_sync(bg, ^{});
+            [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.05]];
+            CHECK(YES, "50 iterations of background KVO vs main-thread detach completed without crash or exception");
+
+            // 10c. Quiet detach when closing a parked (hidden) Peek or closing via DPPeekCloseForSource emits zero extra KVO notifications.
+            DPPeekOpenFrom(window, @"tab-1", [NSURL URLWithString:@"https://peek.example/parked"], NSMakeRect(100, 100, 40, 20), nil, source, nil, nil);
+            DPPeekCard *parked = DPPeekCardIn(window);
+            parked.hidden = YES;
+            int parkedSel = kvo.selectedHits, parkedIn = kvo.inputHits;
+            DPPeekCloseForSource(source);
+            CHECK(parked.closing && parked.chatBridge == nil && kvo.selectedHits == parkedSel && kvo.inputHits == parkedIn,
+                  "DPPeekCloseForSource detaches parked Peek quietly without synthetic KVO on dying source");
+        }
+
+        // 11. Multi-tab Side Chat isolation: Tab A (visible Peek A) -> Tab B (no Peek) -> Tab C (different Peek C).
+        {
+            ArcWebContents *srcA = [ArcWebContents new], *srcB = [ArcWebContents new], *srcC = [ArcWebContents new];
+            srcA.tag = @"tabA"; srcA.url = [NSURL URLWithString:@"https://tabA.example/"]; srcA.selectedText = @"sel-A";
+            srcB.tag = @"tabB"; srcB.url = [NSURL URLWithString:@"https://tabB.example/"]; srcB.selectedText = @"sel-B";
+            srcC.tag = @"tabC"; srcC.url = [NSURL URLWithString:@"https://tabC.example/"]; srcC.selectedText = @"sel-C";
+
+            gActiveTabID = @"tab-A";
+            DPPeekOpenFrom(window, @"tab-A", [NSURL URLWithString:@"https://peekA.example/"], NSMakeRect(100, 100, 40, 20), nil, srcA, nil, nil);
+            DPPeekCard *peekA = DPPeekCardIn(window);
+            ((ArcWebContents *)peekA.page).tag = @"peekA";
+            ((ArcWebContents *)peekA.page).selectedText = @"peekA-sel";
+
+            // On Tab A: srcA routes to peekA; srcB and srcC stay on themselves.
+            __block NSDictionary *exA = nil, *exB = nil, *exC = nil;
+            [extractor getExtractedContentForWebContents:srcA completion:^(NSDictionary *c) { exA = c; }];
+            [extractor getExtractedContentForWebContents:srcB completion:^(NSDictionary *c) { exB = c; }];
+            [extractor getExtractedContentForWebContents:srcC completion:^(NSDictionary *c) { exC = c; }];
+            CHECK([exA[@"tag"] isEqualToString:@"peekA"] && [srcA.selectedText isEqualToString:@"peekA-sel"], "Tab A active -> routes to Peek A");
+            CHECK([exB[@"tag"] isEqualToString:@"tabB"] && [srcB.selectedText isEqualToString:@"sel-B"], "Tab B unaffected while Peek A active");
+            CHECK([exC[@"tag"] isEqualToString:@"tabC"] && [srcC.selectedText isEqualToString:@"sel-C"], "Tab C unaffected while Peek A active");
+
+            // Switch to Tab B (no Peek): park Peek A -> all three resolve to their own tab pages.
+            gActiveTabID = @"tab-B";
+            peekA.hidden = YES;
+            [extractor getExtractedContentForWebContents:srcA completion:^(NSDictionary *c) { exA = c; }];
+            [extractor getExtractedContentForWebContents:srcB completion:^(NSDictionary *c) { exB = c; }];
+            CHECK([exA[@"tag"] isEqualToString:@"tabA"] && [exB[@"tag"] isEqualToString:@"tabB"], "Tab B active -> zero stale Peek A context");
+
+            // Switch to Tab C and open Peek C while Peek A stays parked.
+            gActiveTabID = @"tab-C";
+            DPPeekOpenFrom(window, @"tab-C", [NSURL URLWithString:@"https://peekC.example/"], NSMakeRect(100, 100, 40, 20), nil, srcC, nil, nil);
+            DPPeekCard *peekC = DPPeekCardIn(window);
+            ((ArcWebContents *)peekC.page).tag = @"peekC";
+            ((ArcWebContents *)peekC.page).selectedText = @"peekC-sel";
+            [extractor getExtractedContentForWebContents:srcA completion:^(NSDictionary *c) { exA = c; }];
+            [extractor getExtractedContentForWebContents:srcB completion:^(NSDictionary *c) { exB = c; }];
+            [extractor getExtractedContentForWebContents:srcC completion:^(NSDictionary *c) { exC = c; }];
+            CHECK([exC[@"tag"] isEqualToString:@"peekC"] && [srcC.selectedText isEqualToString:@"peekC-sel"], "Tab C active -> routes to Peek C");
+            CHECK([exA[@"tag"] isEqualToString:@"tabA"] && [exB[@"tag"] isEqualToString:@"tabB"], "parked Peek A and Tab B stay isolated on Tab C");
+
+            [peekA handOver];
+            [peekC handOver];
+            gActiveTabID = @"tab-1";
+        }
 
         [source removeObserver:kvo forKeyPath:@"selectedText"];
         [source removeObserver:kvo forKeyPath:@"inputEvent"];
