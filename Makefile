@@ -190,6 +190,15 @@ build/diapatch-passkeys: tests/diapatch-passkeys.m src/diapatch/PasswordsLaunch.
 build/passkeys-origin: tests/passkeys-origin.m src/diapatch/Passkeys.m src/diapatch/Passkeys.h src/diapatch/LaunchServices.h | build
 	clang $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -Isrc -framework Foundation -framework CoreGraphics -o $@ tests/passkeys-origin.m
 
+build/passkeys-managers: tests/passkeys-managers.m tests/passkeys-managers.js $(PASSKEYS)/page.js | build
+	clang $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -framework Foundation -framework JavaScriptCore -o $@ tests/passkeys-managers.m
+
+check-passkeys-managers: build/passkeys-managers
+	build/passkeys-managers
+
+check: check-passkeys-managers
+.PHONY: check-passkeys-managers
+
 build/app-icon-signing: tests/app-icon-signing.m src/diapatch/AppIcon.m src/diapatch/IconCatalog.m src/diapatch/AppIcon.h src/diapatch/IconCatalog.h | build
 	clang $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -Isrc -framework Foundation -framework CoreGraphics -framework Security -o $@ tests/app-icon-signing.m src/diapatch/AppIcon.m src/diapatch/IconCatalog.m
 
