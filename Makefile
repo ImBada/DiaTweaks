@@ -150,6 +150,9 @@ DIAPATCH_PARTS := $(filter-out src/diapatch/main.m,$(wildcard src/diapatch/*.m))
 build/diapatch-tests: tests/diapatch.m $(wildcard src/diapatch/*.[hm]) | build
 	clang $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -Isrc/diapatch -framework AppKit -framework CoreGraphics -framework Security -o $@ tests/diapatch.m $(DIAPATCH_PARTS)
 
+build/ai-history-search: tests/ai-history-search.m src/dylib/Patches/AIHistorySearch/AIHistorySearch.m $(wildcard src/dylib/StdPatch/*.h) | build
+	clang $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -Isrc/dylib -framework AppKit -o $@ tests/ai-history-search.m
+
 build/open-sidebar-instantly: tests/open-sidebar-instantly.m src/dylib/Patches/OpenSidebarInstantly/OpenSidebarInstantly.m $(wildcard src/dylib/StdPatch/*.h) | build
 	clang $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -Isrc/dylib -framework AppKit -o $@ tests/open-sidebar-instantly.m
 
@@ -293,7 +296,7 @@ COMBINATORIAL := src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m src/dylib/
 build/combinatorial-stability: tests/combinatorial-stability.m tests/watchdog.h $(COMBINATORIAL) src/dylib/SafeMode/SafeMode.m $(wildcard src/dylib/StdPatch/*.h) | build
 	clang $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -Isrc/dylib -framework AppKit -framework QuartzCore -o $@ tests/combinatorial-stability.m $(COMBINATORIAL)
 
-check: build/diapatch build/diapatch-tests build/group-tabs build/mouse-back-forward build/vertical-tab-glow build/split-client-hello build/peek-cursor build/peek-link build/peek-tabs build/peek-chat build/safe-mode build/pause build/hook-table build/updates-runtime build/settings-preview build/runtime-guards build/tidy-tabs build/drag-offset build/small-tab-shape build/toolbar-permission build/launch-flags build/little-dia-stack build/little-dia-profile build/little-dia-over build/little-dia-focus build/tracking build/hide-toolbar-settle build/command-bar-swap build/command-bar-spare build/tab-titles build/show-address-field build/hide-chat-button build/hide-connect-app-prompt build/open-sidebar-instantly build/native-messaging build/diapatch-passkeys build/passkeys-origin build/app-icon-signing build/little-dia-route build/chat-card build/peek-lifecycle build/hide-toolbar-off build/command-bar-lifecycle build/window-patches build/pinned-tab-close-button build/pinned-split-close build/sidebar-tab-bugs build/unload-tab build/profile-color-picker build/historical-regressions build/abi-kvc-kvo build/view-reuse-layout build/combinatorial-stability build/patches.json
+check: build/diapatch build/diapatch-tests build/group-tabs build/mouse-back-forward build/vertical-tab-glow build/split-client-hello build/peek-cursor build/peek-link build/peek-tabs build/peek-chat build/safe-mode build/pause build/hook-table build/updates-runtime build/settings-preview build/runtime-guards build/tidy-tabs build/drag-offset build/small-tab-shape build/toolbar-permission build/launch-flags build/little-dia-stack build/little-dia-profile build/little-dia-over build/little-dia-focus build/tracking build/hide-toolbar-settle build/command-bar-swap build/command-bar-spare build/tab-titles build/show-address-field build/hide-chat-button build/hide-connect-app-prompt build/open-sidebar-instantly build/ai-history-search build/native-messaging build/diapatch-passkeys build/passkeys-origin build/app-icon-signing build/little-dia-route build/chat-card build/peek-lifecycle build/hide-toolbar-off build/command-bar-lifecycle build/window-patches build/pinned-tab-close-button build/pinned-split-close build/sidebar-tab-bugs build/unload-tab build/profile-color-picker build/historical-regressions build/abi-kvc-kvo build/view-reuse-layout build/combinatorial-stability build/patches.json
 	tests/tweaks-update
 	build/diapatch-tests
 	build/group-tabs
@@ -333,6 +336,7 @@ check: build/diapatch build/diapatch-tests build/group-tabs build/mouse-back-for
 	build/hide-chat-button
 	build/hide-connect-app-prompt
 	build/open-sidebar-instantly
+	build/ai-history-search
 	build/native-messaging
 	build/diapatch-passkeys
 	build/passkeys-origin

@@ -69,6 +69,7 @@ body:
         - Hide Personalize Button
         - Hide Skills Suggestions
         - Hide Connect App Prompt
+        - Exclude Sites from AI History Search
         - Window Material
         - Keep Windows Active
         - Drag Window from Page
