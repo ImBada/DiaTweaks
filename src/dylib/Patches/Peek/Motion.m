@@ -209,7 +209,7 @@ static char DPGrowthKey, DPInTimerKey;
             if (peek) DPSet(peek, &DPInTimerKey, nil);
             return;
         }
-        if (![[(NSObject *)peek.page valueForKey:@"isReadyToDisplay"] boolValue] && CACurrentMediaTime() - start < 0.15) return;
+        if (![DPValueForKey(peek.page, @"isReadyToDisplay") boolValue] && CACurrentMediaTime() - start < 0.15) return;
         [timer invalidate];
         DPSet(peek, &DPInTimerKey, nil);
         if (peek.isHiddenOrHasHiddenAncestor) {

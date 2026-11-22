@@ -24,6 +24,11 @@ NSToolbarItemIdentifier const DPSearchItemIdentifier = @"DiaPatchesSearch";
     return self;
 }
 
+- (void)dealloc {
+    [NSNotificationCenter.defaultCenter removeObserver:self];
+    _searchItem.searchField.delegate = nil;
+}
+
 - (NSScrollView *)scrollFor:(NSView *)content {
     DPFlippedView *document = [DPFlippedView new];
     NSScrollView *scroll = [NSScrollView new];

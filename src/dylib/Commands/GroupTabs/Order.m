@@ -22,19 +22,26 @@ static NSArray *DPWindowTabsMatching(BOOL (^match)(id tab)) {
     return best;
 }
 
+static NSMutableArray *DPTabIDsOf(NSArray *tabs) {
+    if (!tabs) return nil;
+    NSMutableArray *ids = [NSMutableArray arrayWithCapacity:tabs.count];
+    for (id tab in tabs) [ids addObject:DPValueForKey(tab, @"tabId") ?: NSNull.null];
+    return ids;
+}
+
 NSDictionary *DPTabPlaces(NSDictionary<NSNumber *, NSString *> *urls) {
     NSSet *wanted = [NSSet setWithArray:urls.allValues];
     NSArray *tabs = DPWindowTabsMatching(^BOOL(id tab) { return [wanted containsObject:DPURLOf(tab)]; });
     NSMutableDictionary<NSString *, NSNumber *> *sessions = [NSMutableDictionary new];
     for (NSNumber *sid in urls)
         for (id tab in tabs) {
-            id tabID = [tab valueForKey:@"tabId"];
+            id tabID = DPValueForKey(tab, @"tabId");
             if (tabID && !sessions[tabID] && [DPURLOf(tab) isEqualToString:urls[sid]]) {
                 sessions[tabID] = sid;
                 break;
             }
         }
-    return tabs && sessions.count == urls.count ? @{@"order": [tabs valueForKey:@"tabId"], @"sessions": sessions} : nil;
+    return tabs && sessions.count == urls.count ? @{@"order": DPTabIDsOf(tabs), @"sessions": sessions} : nil;
 }
 
 void DPMoveTab(id delegate, id browser, NSNumber *sid, NSInteger index, void (^done)(void), void (^failed)(void)) {
@@ -85,8 +92,8 @@ void DPRestorePlaces(id delegate, id browser, NSDictionary *places) {
     NSString *first = sessions.allKeys.firstObject;
     if (!first) return;
     DPMoveTab(delegate, browser, sessions[first], 0, ^{
-        NSArray *tabs = DPWindowTabsMatching(^BOOL(id tab) { return [[tab valueForKey:@"tabId"] isEqual:first]; });
-        NSMutableArray *now = [[tabs valueForKey:@"tabId"] mutableCopy];
+        NSArray *tabs = DPWindowTabsMatching(^BOOL(id tab) { return [DPValueForKey(tab, @"tabId") isEqual:first]; });
+        NSMutableArray *now = DPTabIDsOf(tabs);
         NSUInteger start = now ? [now indexOfObject:first] : NSNotFound;
         if (start != NSNotFound) DPRunMoves(delegate, browser, DPPlanMoves(places[@"order"], now, sessions, start), 0);
     }, nil);

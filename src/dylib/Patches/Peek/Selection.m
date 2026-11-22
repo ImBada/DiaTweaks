@@ -10,19 +10,17 @@ static NSTimer *DPPeekSyncTimer;
 static NSSet<NSString *> *DPPeekOpenTabIDs(id scriptWindow, NSString *active) {
     if (!scriptWindow || !active) return nil;
     NSMutableSet<NSString *> *openIDs = [NSMutableSet set];
-    NSArray *tabs = [scriptWindow respondsToSelector:@selector(appleScriptTabs)] ? [scriptWindow valueForKey:@"appleScriptTabs"] : nil;
+    NSArray *tabs = DPValueForKey(scriptWindow, @"appleScriptTabs");
     for (id tab in [tabs isKindOfClass:NSArray.class] ? tabs : @[]) {
         NSString *tabID = DPTabID(tab);
         if (tabID) [openIDs addObject:tabID];
     }
-    if ([scriptWindow respondsToSelector:@selector(appleScriptProfiles)]) {
-        NSArray *profiles = [scriptWindow valueForKey:@"appleScriptProfiles"];
-        for (id profile in [profiles isKindOfClass:NSArray.class] ? profiles : @[]) {
-            NSArray *ptabs = [profile respondsToSelector:@selector(appleScriptTabs)] ? [profile valueForKey:@"appleScriptTabs"] : nil;
-            for (id tab in [ptabs isKindOfClass:NSArray.class] ? ptabs : @[]) {
-                NSString *tabID = DPTabID(tab);
-                if (tabID) [openIDs addObject:tabID];
-            }
+    NSArray *profiles = DPValueForKey(scriptWindow, @"appleScriptProfiles");
+    for (id profile in [profiles isKindOfClass:NSArray.class] ? profiles : @[]) {
+        NSArray *ptabs = DPValueForKey(profile, @"appleScriptTabs");
+        for (id tab in [ptabs isKindOfClass:NSArray.class] ? ptabs : @[]) {
+            NSString *tabID = DPTabID(tab);
+            if (tabID) [openIDs addObject:tabID];
         }
     }
     return [openIDs containsObject:active] ? openIDs : nil;

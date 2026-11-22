@@ -55,7 +55,7 @@ static void DPPeekNotifySource(id source, BOOL selection) {
     }
     DPPeekCard *peek = self.peek;
     if (!DPPeek.on || !page || !source || !peek || peek.closing || peek.isHiddenOrHasHiddenAncestor) return;
-    if ([keyPath isEqualToString:@"isLoading"] && [[(NSObject *)page valueForKey:@"isLoading"] boolValue]) return;
+    if ([keyPath isEqualToString:@"isLoading"] && [DPValueForKey(page, @"isLoading") boolValue]) return;
     DPPeekNotifySource(source, [keyPath isEqualToString:@"selectedText"]);
 }
 

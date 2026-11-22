@@ -26,8 +26,9 @@ void DPCloseLeftSpares(NSArray<NSString *> *left, BOOL last) {
         NSWindow *foundWindow = nil;
         for (NSWindow *window in NSApp.windows) {
             id scriptWindow = DPScriptWindow(window);
-            if (![scriptWindow respondsToSelector:@selector(appleScriptProfiles)]) continue;
-            for (id profile in [scriptWindow valueForKey:@"appleScriptProfiles"])
+            id profiles = DPValueForKey(scriptWindow, @"appleScriptProfiles");
+            if (![profiles isKindOfClass:NSArray.class]) continue;
+            for (id profile in profiles)
                 if ((tab = DPScriptTabIn(profile, tabID))) {
                     space = profile; foundScript = scriptWindow; foundWindow = window;
                     break;
@@ -43,8 +44,9 @@ void DPCloseLeftSpares(NSArray<NSString *> *left, BOOL last) {
                 continue;
             }
         }
-        NSString *url = [[tab valueForKey:@"URL"] description];
-        if (tab && !url.length && [[space valueForKey:@"appleScriptTabs"] count] > 1) DPCloseTab(tab);
+        NSString *url = [DPValueForKey(tab, @"URL") description];
+        id spaceTabs = DPValueForKey(space, @"appleScriptTabs");
+        if (tab && !url.length && [spaceTabs isKindOfClass:NSArray.class] && [spaceTabs count] > 1) DPCloseTab(tab);
         if (tab || last) DPNoteSpare(tabID, NO);
     }
 }
@@ -58,12 +60,14 @@ void DPDropSpare(NSWindow *window) {
     DPWantSpare();
     DPDismiss(spare, YES);
     id scriptWindow = DPScriptWindow(window);
-    if (!scriptWindow || !tabID || ![scriptWindow respondsToSelector:@selector(appleScriptProfiles)]) return;
-    for (id profile in [scriptWindow valueForKey:@"appleScriptProfiles"]) {
+    id profiles = DPValueForKey(scriptWindow, @"appleScriptProfiles");
+    if (!scriptWindow || !tabID || ![profiles isKindOfClass:NSArray.class]) return;
+    for (id profile in profiles) {
         id tab = DPScriptTabIn(profile, tabID);
         if (!tab) continue;
-        NSString *url = [[tab valueForKey:@"URL"] description];
-        if (!url.length && [[profile valueForKey:@"appleScriptTabs"] count] > 1) DPCloseTab(tab);
+        NSString *url = [DPValueForKey(tab, @"URL") description];
+        id profileTabs = DPValueForKey(profile, @"appleScriptTabs");
+        if (!url.length && [profileTabs isKindOfClass:NSArray.class] && [profileTabs count] > 1) DPCloseTab(tab);
         return;
     }
 }
@@ -119,7 +123,7 @@ BOOL DPShowSpare(NSWindow *window) {
     DPCommandBarOverlay *overlay = DPGet(window, &DPSpareKey);
     if (!overlay) return NO;
     NSString *tabID = DPTabID(overlay.openedTab);
-    id scriptWindow = DPScriptWindow(window), front = [scriptWindow valueForKey:@"activeTab"];
+    id scriptWindow = DPScriptWindow(window), front = DPValueForKey(scriptWindow, @"activeTab");
     if ([DPTabID(front) isEqual:tabID]) {
         NSView *page = DPFindView(window.contentView, ^BOOL(NSView *view) { return DPIsKind(view, DPDiaNewTabPage) && !view.isHiddenOrHasHiddenAncestor; });
         DPAdoptSpare(window, page);
@@ -136,7 +140,7 @@ BOOL DPShowSpare(NSWindow *window) {
     DPSet(window, &DPOverlayKey, overlay);
     overlay.returnTab = front;
     overlay.picked = NO;
-    overlay.startURL = [overlay.openedTab valueForKey:@"URL"];
+    overlay.startURL = DPValueForKey(overlay.openedTab, @"URL");
     NSTextView *text = DPBarText(overlay);
     if (DPCommandBarKeepText.on) [text selectAll:nil];
     else [text insertText:@"" replacementRange:NSMakeRange(0, text.string.length)];
@@ -167,8 +171,9 @@ BOOL DPAdoptSpare(NSWindow *window, NSView *page) {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 300 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
         if (!weakWindow || DPGet(weakWindow, &DPOverlayKey)) return;
         id scriptWindow = DPScriptWindow(weakWindow), tab = DPScriptTabIn(scriptWindow, tabID);
-        if (!tab || [[tab valueForKey:@"URL"] description].length) return;
-        if ([[scriptWindow valueForKey:@"appleScriptTabs"] count] < 2) {
+        if (!tab || [DPValueForKey(tab, @"URL") description].length) return;
+        id tabs = DPValueForKey(scriptWindow, @"appleScriptTabs");
+        if (![tabs isKindOfClass:NSArray.class] || [tabs count] < 2) {
             if (weakPage.window) DPMakeBlank(weakPage, tabID, nil);
             return;
         }

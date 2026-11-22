@@ -14,25 +14,34 @@ static void DPBrowser_setWindow(id self, SEL _cmd, NSWindow *window) {
 
 // Chromium's icon can be blank, so prefer the pinned toolbar icon.
 static NSImage *DPIconFor(id info, NSWindow *window) {
-    NSView *pinned = DPFindView(window.contentView, ^BOOL(NSView *view) {
-        return DPIsKind(view, DPDiaPinnedExtension) && [view.accessibilityLabel isEqualToString:[info valueForKey:@"name"]];
-    });
+    id name = DPValueForKey(info, @"name");
+    NSView *pinned = [name isKindOfClass:NSString.class] ? DPFindView(window.contentView, ^BOOL(NSView *view) {
+        return DPIsKind(view, DPDiaPinnedExtension) && [view.accessibilityLabel isEqualToString:name];
+    }) : nil;
     NSImage *icon = ((NSImageView *)DPFindView(pinned, ^BOOL(NSView *view) { return [view isKindOfClass:NSImageView.class]; })).image;
-    icon = [icon ?: [info valueForKey:@"icon"] ?: [NSImage imageWithSystemSymbolName:@"puzzlepiece.extension" accessibilityDescription:nil] copy];
+    id rawIcon = DPValueForKey(info, @"icon");
+    icon = [icon ?: ([rawIcon isKindOfClass:NSImage.class] ? rawIcon : nil) ?: [NSImage imageWithSystemSymbolName:@"puzzlepiece.extension" accessibilityDescription:nil] copy];
     icon.size = NSMakeSize(16, 16);
     return icon;
 }
 
 static NSMenu *DPExtensionsMenu(id browser, NSWindow *window) {
     NSMenu *menu = [[NSMenu alloc] initWithTitle:@"Extensions"];
-    id extensions = [[browser performSelector:@selector(context)] performSelector:@selector(extensions)];
-    NSArray *all = [[extensions performSelector:@selector(listExtensions)] sortedArrayUsingComparator:^NSComparisonResult(id a, id b) {
-        return [([a valueForKey:@"name"] ?: @"") localizedCaseInsensitiveCompare:([b valueForKey:@"name"] ?: @"")];
-    }];
+    id context = [browser respondsToSelector:@selector(context)] ? [browser performSelector:@selector(context)] : nil;
+    id extensions = [context respondsToSelector:@selector(extensions)] ? [context performSelector:@selector(extensions)] : nil;
+    id raw = [extensions respondsToSelector:@selector(listExtensions)] ? [extensions performSelector:@selector(listExtensions)] : nil;
+    NSArray *all = [raw isKindOfClass:NSArray.class] ? [raw sortedArrayUsingComparator:^NSComparisonResult(id a, id b) {
+        id rawA = DPValueForKey(a, @"name"), rawB = DPValueForKey(b, @"name");
+        return [([rawA isKindOfClass:NSString.class] ? rawA : @"") localizedCaseInsensitiveCompare:([rawB isKindOfClass:NSString.class] ? rawB : @"")];
+    }] : @[];
     for (id info in all) {
-        if (![[info valueForKey:@"enabled"] boolValue] || ![[info valueForKey:@"hasAction"] boolValue]) continue;
-        NSString *extensionID = [info valueForKey:@"id"];
-        NSMenuItem *item = DPMenuItem([info valueForKey:@"name"] ?: @"", ^{ [browser performSelector:@selector(executeExtensionAction:) withObject:extensionID]; });
+        if (![DPValueForKey(info, @"enabled") boolValue] || ![DPValueForKey(info, @"hasAction") boolValue]) continue;
+        NSString *extensionID = DPValueForKey(info, @"id");
+        id rawName = DPValueForKey(info, @"name");
+        NSMenuItem *item = DPMenuItem([rawName isKindOfClass:NSString.class] ? rawName : @"", ^{
+            if (extensionID && [browser respondsToSelector:@selector(executeExtensionAction:)])
+                [browser performSelector:@selector(executeExtensionAction:) withObject:extensionID];
+        });
         item.image = DPIconFor(info, window);
         [menu addItem:item];
     }

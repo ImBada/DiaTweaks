@@ -93,7 +93,7 @@
     NSTextField *note = DPLabel(@"", 11, NSFontWeightRegular, NSColor.secondaryLabelColor);
     note.hidden = YES;
     NSStackView *leading = [NSStackView stackViewWithViews:@[
-        DPIconTile(patch->symbol, [NSColor valueForKey:patch->tint]),
+        DPIconTile(patch->symbol, DPValueForKey(NSColor.class, patch->tint) ?: NSColor.systemGrayColor),
         DPColumn(@[DPLabel(patch->title, 13, NSFontWeightRegular, NSColor.labelColor), note], 2),
     ]];
     leading.spacing = 10;

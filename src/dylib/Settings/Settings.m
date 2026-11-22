@@ -14,14 +14,20 @@ static void DPRemoveDiaPaneItems(NSToolbar *toolbar) {
     void **slot = DPIvar(toolbar.delegate, "paneToolbarItems");
     // A Swift array of objects is its storage, an NSArray; one bridged from Objective-C is tagged and left alone.
     if (!slot || !*slot || ((uintptr_t)*slot & 0xC000000000000001)) return;
-    NSArray<NSToolbarItem *> *paneItems = (__bridge NSArray *)*slot;
-    NSSet *identifiers = [NSSet setWithArray:[paneItems valueForKey:@"itemIdentifier"]];
+    id raw = (__bridge id)*slot;
+    if (![raw isKindOfClass:NSArray.class]) return;
+    NSMutableSet *identifiers = [NSMutableSet set];
+    for (id item in (NSArray *)raw) {
+        id identifier = DPValueForKey(item, @"itemIdentifier");
+        if (identifier) [identifiers addObject:identifier];
+    }
     for (NSInteger i = toolbar.items.count - 1; i >= 0; i--)
         if ([identifiers containsObject:toolbar.items[i].itemIdentifier]) [toolbar removeItemAtIndex:i];
 }
 
 @interface DPSettings : NSObject
 @property (nonatomic, weak) NSTableView *table;
+@property (nonatomic, weak) NSClipView *watchedClip;
 @property (nonatomic, weak) NSTextField *title;
 @property (nonatomic, copy) NSString *originalTitle, *shownTitle;
 @property (nonatomic, strong) DPPaneView *home, *patches;
@@ -30,7 +36,7 @@ static void DPRemoveDiaPaneItems(NSToolbar *toolbar) {
 @property (nonatomic) NSWindowCollectionBehavior behavior;
 @property (nonatomic) NSSize minSize, maxSize;
 @property (nonatomic) CGFloat fixedHeight, dividerHeight;
-@property (nonatomic) BOOL backWasEnabled, backBorrowed, zoomWasEnabled, watchingHeight;
+@property (nonatomic) BOOL backWasEnabled, backBorrowed, zoomWasEnabled;
 @end
 
 static CGFloat const DPDividerMinHeight = 17;
@@ -49,12 +55,17 @@ static __weak DPPaneView *DPShownPane;
     return settings;
 }
 
+- (void)dealloc {
+    [NSNotificationCenter.defaultCenter removeObserver:self];
+}
+
 - (CGFloat)fittedDividerHeight {
     NSTableView *table = self.table;
     NSClipView *clip = table.enclosingScrollView.contentView;
     if (!clip || table.numberOfRows < DPOurRowCount) return DPDividerMinHeight;
-    if (!self.watchingHeight) {
-        self.watchingHeight = YES;
+    if (self.watchedClip != clip) {
+        [NSNotificationCenter.defaultCenter removeObserver:self];
+        self.watchedClip = clip;
         clip.postsFrameChangedNotifications = clip.postsBoundsChangedNotifications = YES;
         for (NSNotificationName name in @[NSViewFrameDidChangeNotification, NSViewBoundsDidChangeNotification])
             [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(fitDivider) name:name object:clip];

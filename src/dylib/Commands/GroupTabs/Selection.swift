@@ -30,10 +30,13 @@ private func DPIDNormalized(_ text: String) -> String? {
 }
 
 private func DPSwiftValue(_ object: Any?, _ key: String) -> Any? {
-    guard let object = object as? NSObject else { return nil }
+    guard let object else { return nil }
+    let obj = object as AnyObject
     let sel = NSSelectorFromString("safeSwiftValueForKey:")
-    guard object.responds(to: sel), let value = object.perform(sel, with: key) else { return nil }
-    return value.takeUnretainedValue()
+    if obj.responds?(to: sel) == true, let value = obj.perform?(sel, with: key) {
+        return value.takeUnretainedValue()
+    }
+    return Mirror(reflecting: object).children.first { $0.label == key }?.value
 }
 
 private func DPElements(_ value: Any?, _ depth: Int = 0) -> [Any] {

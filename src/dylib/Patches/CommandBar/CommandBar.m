@@ -64,7 +64,9 @@ static NSString *DPNoteActiveTab(NSWindow *window, id scriptWindow, BOOL *seen) 
     DPSeenTabs = DPSeenTabs ?: [NSMutableSet set];
     if (scriptWindow && !DPGet(window, &DPSeenKey)) {
         DPSet(window, &DPSeenKey, @YES);
-        for (id tab in [scriptWindow valueForKey:@"appleScriptTabs"]) [DPSeenTabs addObject:DPTabID(tab) ?: @""];
+        id tabs = DPValueForKey(scriptWindow, @"appleScriptTabs");
+        if ([tabs isKindOfClass:NSArray.class])
+            for (id tab in tabs) [DPSeenTabs addObject:DPTabID(tab) ?: @""];
     }
     if (seen) *seen = active && [DPSeenTabs containsObject:active];
     if (active) [DPSeenTabs addObject:active];
@@ -153,8 +155,8 @@ static CALayer *DPBlurLayer(void) {
     CALayer *backdrop = [backdropClass new];
     id blur = [(id)filterClass filterWithType:@"gaussianBlur"];
     if (!backdrop || !blur) return nil;
-    [blur setValue:@(DPTuned(DPBlurRadiusKey)) forKey:@"inputRadius"];
-    [blur setValue:@YES forKey:@"inputNormalizeEdges"];
+    DPSetValueForKey(blur, @"inputRadius", @(DPTuned(DPBlurRadiusKey)));
+    DPSetValueForKey(blur, @"inputNormalizeEdges", @YES);
     backdrop.filters = @[ blur ];
     return backdrop;
 }
@@ -367,7 +369,9 @@ id DPDismiss(DPCommandBarOverlay *overlay, BOOL closing) {
 static BOOL DPNowhereToGo(DPCommandBarOverlay *overlay) {
     NSWindow *host = overlay.host;
     id scriptWindow = overlay.returnTab ? DPScriptWindow(host) : nil;
-    return !overlay.returnTab || (!DPScriptTabIn(scriptWindow, DPTabID(overlay.returnTab)) && [[scriptWindow valueForKey:@"appleScriptTabs"] count] < 2);
+    id tabs = DPValueForKey(scriptWindow, @"appleScriptTabs");
+    NSUInteger count = [tabs isKindOfClass:NSArray.class] ? [tabs count] : 0;
+    return !overlay.returnTab || (!DPScriptTabIn(scriptWindow, DPTabID(overlay.returnTab)) && count < 2);
 }
 
 static id DPDismissCommandBar(DPCommandBarOverlay *overlay) { return DPDismiss(overlay, NO); }
@@ -424,7 +428,7 @@ static void DPWatchNewTab(DPCommandBarOverlay *overlay, id scriptWindow) {
     }
     // A chat loads no page; Dia empties the bar once it has taken what was typed.
     BOOL taken = overlay.picked && !DPBarText(overlay).string.length;
-    NSString *url = [tab valueForKey:@"URL"];
+    NSString *url = DPValueForKey(tab, @"URL");
     if (!taken && (url == overlay.startURL || [url isEqual:overlay.startURL])) return;
     DPDismissCommandBar(overlay);
     DPNoteSpare(DPTabID(tab), NO);
@@ -560,7 +564,7 @@ static DPCommandBarOverlay *DPLiftBar(NSView *page, id tabBehind) {
     return overlay;
 }
 
-static BOOL DPHasURL(id tab) { return [[[tab valueForKey:@"URL"] description] length] > 0; }
+static BOOL DPHasURL(id tab) { return [[DPValueForKey(tab, @"URL") description] length] > 0; }
 
 static void DPCaughtUpSoon(NSWindow *window) {
     __weak NSWindow *weak = window;
@@ -571,7 +575,7 @@ static void DPPresentCommandBar(NSView *page, BOOL overBlank) {
     NSWindow *window = page.window;
     DPCaughtUpSoon(window);
     DPCloseCommandBarPopover(window);
-    id scriptWindow = DPScriptWindow(window), openedTab = [scriptWindow valueForKey:@"activeTab"];
+    id scriptWindow = DPScriptWindow(window), openedTab = DPValueForKey(scriptWindow, @"activeTab");
     NSString *openedID = DPTabID(openedTab), *returnID = DPPreviousTabID(window);
     NSArray *recent = DPGet(window, &DPRecentKey);
     if (![recent.lastObject isEqual:openedID]) returnID = recent.lastObject;
@@ -598,7 +602,7 @@ static void DPPresentCommandBar(NSView *page, BOOL overBlank) {
     if (left.length) [text selectAll:nil];
     overlay.overBlank = overBlank;
     overlay.openedTab = openedTab;
-    overlay.startURL = [openedTab valueForKey:@"URL"];
+    overlay.startURL = DPValueForKey(openedTab, @"URL");
     DPSet(overlay, &DPLayoutKey, @(DPHasStrip(window)));
     if (overlay.returnTab) {
         DPHideTabRow(openedID, window);
@@ -853,7 +857,7 @@ static void DPPopover_viewDidMoveToWindow(NSView *self, SEL _cmd) {
     DPCommandBarOverlay *overlay = DPGet(self, &DPOverlayKey);
     if (overlay) return (void)DPDismissCommandBar(overlay);
     if (!DPCommandBar.on || !self.window || DPToolbarShowing(self.window) || DPIsFloatingChat(self)) return;
-    overlay = DPLiftBar(self, [DPScriptWindow(self.window) valueForKey:@"activeTab"]);
+    overlay = DPLiftBar(self, DPValueForKey(DPScriptWindow(self.window), @"activeTab"));
     if (overlay) DPShowWhenBuilt(overlay);
 }
 

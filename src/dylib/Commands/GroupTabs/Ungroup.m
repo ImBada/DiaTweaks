@@ -22,14 +22,14 @@ static id DPScriptWindow(NSWindow *window) {
     NSArray *windows = DPMsg(app, @selector(appleScriptWindows));
     if (![windows isKindOfClass:NSArray.class]) return nil;
     for (id scripted in windows)
-        if ([[scripted valueForKey:@"windowId"] isEqual:window.identifier]) return scripted;
+        if ([DPValueForKey(scripted, @"windowId") isEqual:window.identifier]) return scripted;
     return nil;
 }
 
 long long DPActiveSession(id browser) {
     long long sid = DPVisibleSession(browser);
     if (sid > 0) return sid;
-    id active = [DPScriptWindow(DPBrowserWindow(browser)) valueForKey:@"activeTab"];
+    id active = DPValueForKey(DPScriptWindow(DPBrowserWindow(browser)), @"activeTab");
     NSString *url = [active respondsToSelector:@selector(URL)] ? DPText(DPMsg(active, @selector(URL))) : nil;
     if (!url.length) return 0;
     long long found = 0;

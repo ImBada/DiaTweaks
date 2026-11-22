@@ -14,8 +14,17 @@ static uint32_t *DPSidebarClamp(void) {
     static uint32_t *site;
     static dispatch_once_t once;
     dispatch_once(&once, ^{
+        const struct mach_header_64 *header = NULL;
+        for (uint32_t i = 0; i < _dyld_image_count(); i++) {
+            const struct mach_header *image = _dyld_get_image_header(i);
+            if (image && image->filetype == MH_EXECUTE) {
+                header = (const struct mach_header_64 *)image;
+                break;
+            }
+        }
+        if (!header) return;
         unsigned long size = 0;
-        uint32_t *text = (uint32_t *)getsectiondata((const struct mach_header_64 *)_dyld_get_image_header(0), "__TEXT", "__text", &size);
+        uint32_t *text = (uint32_t *)getsectiondata(header, "__TEXT", "__text", &size);
         NSUInteger found = 0;
         for (NSUInteger i = 0; text && i + 4 <= size / 4; i++)
             if (!memcmp(text + i, DPSidebarClampWide, sizeof DPSidebarClampWide)) found++, site = text + i;
@@ -31,6 +40,7 @@ static BOOL DPIsSidebarClamp(const uint32_t words[4]) {
 
 static BOOL DPWriteSidebarClamp(const uint32_t words[4]) {
     uintptr_t page = vm_page_size, address = (uintptr_t)DPSidebarClamp();
+    if (!address) return NO;
     uintptr_t start = address & ~(page - 1), end = (address + 4 * sizeof(uint32_t) + page - 1) & ~(page - 1);
     uint32_t previous[4];
     memcpy(previous, (const void *)address, sizeof previous);

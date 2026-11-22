@@ -50,6 +50,10 @@ static NSView *DPWebRow(NSString *title, NSString *path) {
     return self;
 }
 
+- (void)dealloc {
+    [NSNotificationCenter.defaultCenter removeObserver:self];
+}
+
 - (void)updatesDidChange {
     DPUpdates *updates = DPUpdates.shared;
     NSUInteger available = 0, staged = 0;

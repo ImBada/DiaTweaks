@@ -108,11 +108,13 @@ private func DPTidyIneligibleReason() -> String? {
     let domain = unsafeBitCast(domainSymbol, to: Domain.self)("OS_ELIGIBILITY_DOMAIN_GREYMATTER")
     var answer: UInt64 = 0, source: UInt64 = 0
     var statusPointer: UnsafeMutableRawPointer?, contextPointer: UnsafeMutableRawPointer?
-    guard unsafeBitCast(answerSymbol, to: Answer.self)(domain, &answer, &source, &statusPointer, &contextPointer) == 0,
-          let statusPointer else { return nil }
-    // Both come back retained.
-    let status = Unmanaged<AnyObject>.fromOpaque(statusPointer).takeRetainedValue() as! xpc_object_t
-    let context = contextPointer.map { Unmanaged<AnyObject>.fromOpaque($0).takeRetainedValue() as! xpc_object_t }
+    let rc = unsafeBitCast(answerSymbol, to: Answer.self)(domain, &answer, &source, &statusPointer, &contextPointer)
+    // Both come back retained when non-null.
+    let statusObj = statusPointer.map { Unmanaged<AnyObject>.fromOpaque($0).takeRetainedValue() }
+    let contextObj = contextPointer.map { Unmanaged<AnyObject>.fromOpaque($0).takeRetainedValue() }
+    guard rc == 0, let status = statusObj as? xpc_object_t, xpc_get_type(status) == XPC_TYPE_DICTIONARY else { return nil }
+    let rawContext = contextObj as? xpc_object_t
+    let context = rawContext.flatMap { xpc_get_type($0) == XPC_TYPE_DICTIONARY ? $0 : nil }
     let fails = { (input: String) in xpc_dictionary_get_int64(status, "OS_ELIGIBILITY_INPUT_" + input) == 2 }
     if fails("DEVICE_CLASS") || fails("GENERATIVE_MODEL_SYSTEM") { return "This Mac can't run Apple Intelligence." }
     if fails("EXTERNAL_BOOT_DRIVE") { return "Apple Intelligence doesn't work while your Mac starts up from an external drive." }

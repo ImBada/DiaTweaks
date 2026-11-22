@@ -94,7 +94,7 @@ static NSView *DPWideRow(NSView *view) {
     }
     [headingText addObject:_note];
     NSStackView *heading = [NSStackView stackViewWithViews:@[
-        DPIconTile(_patch->symbol, [NSColor valueForKey:_patch->tint]),
+        DPIconTile(_patch->symbol, DPValueForKey(NSColor.class, _patch->tint) ?: NSColor.systemGrayColor),
         DPColumn(headingText, 2),
     ]];
     heading.spacing = 10;

@@ -110,12 +110,15 @@ static NSURL *DPTabURLOf(id tab) {
 }
 
 static void DPEachScriptTab(void (^visit)(id tab)) {
-    id app = NSApp.delegate;
-    if (![app respondsToSelector:@selector(appleScriptWindows)]) return;
-    for (id window in [app valueForKey:@"appleScriptWindows"]) {
-        NSArray *profiles = [window respondsToSelector:@selector(appleScriptProfiles)] ? [window valueForKey:@"appleScriptProfiles"] : nil;
-        for (id owner in profiles.count ? profiles : @[window])
-            for (id tab in [owner valueForKey:@"appleScriptTabs"]) visit(tab);
+    id windows = DPValueForKey(NSApp.delegate, @"appleScriptWindows");
+    if (![windows isKindOfClass:NSArray.class]) return;
+    for (id window in windows) {
+        id rawProfiles = DPValueForKey(window, @"appleScriptProfiles");
+        NSArray *profiles = [rawProfiles isKindOfClass:NSArray.class] ? rawProfiles : nil;
+        for (id owner in profiles.count ? profiles : @[window]) {
+            id tabs = DPValueForKey(owner, @"appleScriptTabs");
+            if ([tabs isKindOfClass:NSArray.class]) for (id tab in tabs) visit(tab);
+        }
     }
 }
 
@@ -161,7 +164,7 @@ static id DPPageAt(NSURL *url, NSString *contentID) {
             DPForgetPage(page);
             continue;
         }
-        if (![page respondsToSelector:@selector(url)] || ![[page valueForKey:@"url"] isEqual:url]) continue;
+        if (![DPValueForKey(page, @"url") isEqual:url]) continue;
         if (DPIsAuxiliaryPage(page)) continue;
         NSString *owner = [DPPagePaneID objectForKey:page];
         if (contentID && owner && ![owner isEqualToString:contentID]) continue;
@@ -195,7 +198,7 @@ BOOL DPPageIsTracked(id page) { return page && [DPPages containsObject:page] && 
 void DPUnloadPage(id page, id before) {
     if (!page || ![DPPages containsObject:page] || DPPageIsDiscarded(page)) return;
     if (!before) {
-        if (!DPPageIsVisible(page)) [page performSelector:@selector(discard)];
+        if (!DPPageIsVisible(page) && [page respondsToSelector:@selector(discard)]) [page performSelector:@selector(discard)];
         return;
     }
     [DPUnloadOnHide addObject:page];

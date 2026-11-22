@@ -81,8 +81,15 @@ static BOOL DPPeekCanReveal(DPPeekBarZone *zone) { return DPHideToolbar.on && DP
     NSObject *page = (NSObject *)peek.page;
     BOOL outOfSight = !pinned && self.reveal == 0 && DPHideToolbar.progress == 1;
     if (!DPShowLoadingProgress.on || !outOfSight || peek.closing || !page) DPRemoveProgressLine(peek.clip);
-    else if ([[page valueForKey:@"isLoading"] boolValue]) DPShowProgressLine(peek.clip, MAX(0.1, [[page valueForKey:@"loadProgress"] doubleValue]));
+    else if ([DPValueForKey(page, @"isLoading") boolValue]) DPShowProgressLine(peek.clip, MAX(0.1, [DPValueForKey(page, @"loadProgress") doubleValue]));
     else DPFinishProgressLine(peek.clip);
+}
+
+- (void)dealloc {
+    [_watch invalidate];
+    [_ease invalidate];
+    [_hide invalidate];
+    if (_patches) [NSNotificationCenter.defaultCenter removeObserver:_patches];
 }
 
 - (void)viewDidMoveToWindow {
@@ -95,17 +102,14 @@ static BOOL DPPeekCanReveal(DPPeekBarZone *zone) { return DPHideToolbar.on && DP
     self.patches = nil;
     if (!self.window) return;
     __weak DPPeekBarZone *weak = self;
-    self.watch = [NSTimer scheduledTimerWithTimeInterval:0.1 repeats:YES block:^(NSTimer *timer) { [weak check]; }];
+    self.watch = [NSTimer scheduledTimerWithTimeInterval:0.1 repeats:YES block:^(NSTimer *timer) {
+        DPPeekBarZone *zone = weak;
+        if (!zone) return [timer invalidate];
+        [zone check];
+    }];
     self.patches = [NSNotificationCenter.defaultCenter addObserverForName:DPPatchesDidChangeNotification object:nil
                                                                     queue:NSOperationQueue.mainQueue
                                                                usingBlock:^(NSNotification *note) { [weak check]; }];
-}
-
-- (void)dealloc {
-    [_watch invalidate];
-    [_ease invalidate];
-    [_hide invalidate];
-    if (_patches) [NSNotificationCenter.defaultCenter removeObserver:_patches];
 }
 @end
 

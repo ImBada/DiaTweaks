@@ -1,4 +1,5 @@
 #import "Patches/CompactTabRows/CompactTabRows.h"
+#import <dlfcn.h>
 
 extern DPPatch DPCompactTabRows;
 
@@ -33,7 +34,18 @@ static void DPReportHeight(NSCollectionViewLayout *layout, double height) {
     NSView *list = layout.collectionView;
     while (list && !DPIsKind(list, DPDiaTabList)) list = list.superview;
     void **handler = list ? DPIvar(list, "onPreferredHeightUpdated") : NULL;
-    if (handler && handler[0]) ((DPHeightHandler)handler[0])(height + layout.collectionView.enclosingScrollView.contentInsets.top, handler[1]);
+    if (!handler || !handler[0]) return;
+    static void *(*retainFn)(void *);
+    static void (*releaseFn)(void *);
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        retainFn = dlsym(RTLD_DEFAULT, "swift_retain");
+        releaseFn = dlsym(RTLD_DEFAULT, "swift_release");
+    });
+    void *fn = handler[0], *ctx = handler[1];
+    if (ctx && retainFn) retainFn(ctx);
+    ((DPHeightHandler)fn)(height + layout.collectionView.enclosingScrollView.contentInsets.top, ctx);
+    if (ctx && releaseFn) releaseFn(ctx);
 }
 
 static void DPLayout_prepareLayout(NSCollectionViewLayout *self, SEL _cmd) {

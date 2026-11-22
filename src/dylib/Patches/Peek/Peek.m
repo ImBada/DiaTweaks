@@ -65,15 +65,18 @@ static void DPWebContent_didCreate(id self, SEL _cmd, id webContents, id newWebC
 - (NSInteger)navigationDisposition { return DPCurrentTab; }
 - (NSMethodSignature *)methodSignatureForSelector:(SEL)selector { return [self.action methodSignatureForSelector:selector]; }
 - (void)forwardInvocation:(NSInvocation *)invocation { [invocation invokeWithTarget:self.action]; }
+- (BOOL)respondsToSelector:(SEL)selector { return selector == @selector(navigationDisposition) || [self.action respondsToSelector:selector]; }
+- (BOOL)conformsToProtocol:(Protocol *)protocol { return [self.action conformsToProtocol:protocol]; }
+- (BOOL)isKindOfClass:(Class)cls { return [self.action isKindOfClass:cls]; }
 @end
 
 static BOOL DPPeekLeavesPinnedRow(id webContents, id action, NSInteger disposition, NSInteger policy) {
     BOOL stays = disposition == DPCurrentTab || disposition == DPForegroundTab;
-    NSInteger type = [[action valueForKey:@"navigationType"] integerValue];
+    NSInteger type = [DPValueForKey(action, @"navigationType") integerValue];
     // navigationType: 0 = link activation, 4 = other (how Dia reports target=_blank clicks).
     BOOL clicked = type == 0 || (type == 4 && disposition == DPForegroundTab);
     if (DPPeekModifiers() || !stays || !clicked || (policy != DPCurrentTab && policy != DPForegroundTab)) return NO;
-    NSString *from = DPDomainKey([[(NSObject *)webContents valueForKey:@"url"] absoluteString]), *to = DPDomainKey([[action valueForKey:@"url"] absoluteString]);
+    NSString *from = DPDomainKey([DPValueForKey(webContents, @"url") absoluteString]), *to = DPDomainKey([DPValueForKey(action, @"url") absoluteString]);
     if (!from || !to || [DPRegistrableDomain(from) isEqual:DPRegistrableDomain(to)]) return NO;
     return !DPPeekShows(webContents) && DPPeekInPinnedRow(NSApp.keyWindow, webContents);
 }
@@ -81,12 +84,12 @@ static BOOL DPPeekLeavesPinnedRow(id webContents, id action, NSInteger dispositi
 static NSInteger DPWebContent_decidePolicy(id self, SEL _cmd, id webContents, id action) {
     BOOL little = DPLittleDia.on && DPLittleDiaTabLinks.on;
     if (!DPPeek.on && !little) return DPCallOriginal(DPWebContent_decidePolicy, self, webContents, action);
-    NSInteger disposition = [[action valueForKey:@"navigationDisposition"] integerValue];
+    NSInteger disposition = [DPValueForKey(action, @"navigationDisposition") integerValue];
     if (!DPPeekWanted(disposition)) {
         NSInteger policy = DPCallOriginal(DPWebContent_decidePolicy, self, webContents, action);
         BOOL peeks = DPPeek.on && DPPeekPinnedLinks.on;
         if (!peeks && !little) return policy;
-        NSURL *url = [action valueForKey:@"url"];
+        NSURL *url = DPValueForKey(action, @"url");
         // Script-opened tabs have no link under the pointer and would lose their opener in Little Dia.
         BOOL clicked = disposition != DPForegroundTab || DPPeekOverLink(webContents, url);
         BOOL leaves = (peeks || (clicked && policy == DPCurrentTab)) && DPPeekLeavesPinnedRow(webContents, action, disposition, policy);
@@ -105,7 +108,7 @@ static NSInteger DPWebContent_decidePolicy(id self, SEL _cmd, id webContents, id
         return DPIgnoreAction;
     }
     if (DPPeekShows(webContents)) return DPCurrentTab;
-    NSURL *url = [action valueForKey:@"url"];
+    NSURL *url = DPValueForKey(action, @"url");
     if (!DPPeekIsWeb(url) || !DPPeekCanOpen(webContents)) return DPCallOriginal(DPWebContent_decidePolicy, self, webContents, action);
     DPPeekOpenLater(self, webContents, url);
     return DPIgnoreAction;

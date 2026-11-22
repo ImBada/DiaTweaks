@@ -54,19 +54,20 @@ BOOL DPPeekShows(id page) {
 }
 
 void DPPeekLoad(id page, NSURL *url) {
-    id navigation = [(NSObject *)page valueForKey:@"navigationController"];
+    id navigation = DPValueForKey(page, @"navigationController");
     SEL load = @selector(load:initiatorOrigin:);
     if (url && [navigation respondsToSelector:load]) ((id (*)(id, SEL, NSURL *, NSURL *))objc_msgSend)(navigation, load, url, nil);
 }
 
 NSURL *DPPeekSearchURL(id page, NSString *text) {
     id factory = DPPeekFactoryFor(page, NSApp.keyWindow);
-    id context = [factory respondsToSelector:@selector(preferences)] ? factory : [(NSObject *)factory valueForKey:@"context"];
-    id engine = [[(NSObject *)context valueForKey:@"preferences"] performSelector:@selector(getDefaultSearchEngine)];
+    id context = [factory respondsToSelector:@selector(preferences)] ? factory : DPValueForKey(factory, @"context");
+    id preferences = DPValueForKey(context, @"preferences");
+    id engine = [preferences respondsToSelector:@selector(getDefaultSearchEngine)] ? [preferences performSelector:@selector(getDefaultSearchEngine)] : nil;
     NSString *query = [text stringByAddingPercentEncodingWithAllowedCharacters:NSCharacterSet.URLQueryAllowedCharacterSet];
     query = [query stringByReplacingOccurrencesOfString:@"&" withString:@"%26"];
     query = [query stringByReplacingOccurrencesOfString:@"+" withString:@"%2B"];
-    NSString *template = [(NSObject *)engine valueForKey:@"url"];
+    NSString *template = DPValueForKey(engine, @"url");
     if (![template isKindOfClass:NSString.class] || ![template containsString:@"{searchTerms}"] || [template containsString:@"{google:"])
         template = @"https://www.google.com/search?q={searchTerms}";
     template = [template stringByReplacingOccurrencesOfString:@"{searchTerms}" withString:query];
@@ -97,9 +98,11 @@ static void DPPeekDetach(id page, NSView *host) {
 // Some extensions crash Dia when a page closes while still showing a site, so it goes blank first.
 static void DPPeekCloseWhenBlank(id page, int checks) {
     if (!page) return;
-    if (checks && ![[[(NSObject *)page valueForKey:@"url"] absoluteString] isEqual:@"about:blank"])
+    id rawURL = DPValueForKey(page, @"url");
+    NSString *urlString = [rawURL isKindOfClass:NSURL.class] ? [rawURL absoluteString] : nil;
+    if (checks && ![urlString isEqual:@"about:blank"])
         return (void)dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 50 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{ DPPeekCloseWhenBlank(page, checks - 1); });
-    [page performSelector:@selector(close)];
+    if ([page respondsToSelector:@selector(close)]) [page performSelector:@selector(close)];
 }
 
 static void DPPeekDiscard(id page, NSView *host) {
@@ -250,7 +253,7 @@ void DPPeekCloseAll(void) {
         return;
     }
     if (!self.hidden) [self.window makeKeyWindow];
-    if (exit != DPPeekClose && DPPeekGive(page, self.sourceDelegate, self.source, [page valueForKey:@"url"], exit)) {
+    if (exit != DPPeekClose && DPPeekGive(page, self.sourceDelegate, self.source, DPValueForKey(page, @"url"), exit)) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{ if (self.superview) [self handOver]; });
         return;
     }

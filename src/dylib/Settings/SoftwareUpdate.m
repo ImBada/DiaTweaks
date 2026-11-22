@@ -40,6 +40,10 @@ static NSButton *DPButton(NSString *title, id target, SEL action, NSString *part
     return self;
 }
 
+- (void)dealloc {
+    [NSNotificationCenter.defaultCenter removeObserver:self];
+}
+
 - (NSArray<NSString *> *)shown {
     DPUpdates *updates = DPUpdates.shared;
     NSMutableArray *parts = [NSMutableArray new];

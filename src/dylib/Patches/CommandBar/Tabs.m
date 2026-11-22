@@ -3,33 +3,39 @@
 id DPScriptWindow(NSWindow *window) {
     NSString *identifier = window.identifier;
     if (!identifier) return nil;
-    for (id scripted in [(id)NSApp.delegate valueForKey:@"appleScriptWindows"])
-        if ([[scripted valueForKey:@"windowId"] isEqual:identifier]) return scripted;
+    id windows = DPValueForKey(NSApp.delegate, @"appleScriptWindows");
+    if (![windows isKindOfClass:NSArray.class]) return nil;
+    for (id scripted in windows)
+        if ([DPValueForKey(scripted, @"windowId") isEqual:identifier]) return scripted;
     return nil;
 }
 
 id DPScriptTabIn(id scriptWindow, NSString *tabID) {
     if (!scriptWindow || !tabID) return nil;
-    for (id tab in [scriptWindow valueForKey:@"appleScriptTabs"])
-        if ([[tab valueForKey:@"tabId"] isEqual:tabID]) return tab;
+    id tabs = DPValueForKey(scriptWindow, @"appleScriptTabs");
+    if (![tabs isKindOfClass:NSArray.class]) return nil;
+    for (id tab in tabs)
+        if ([DPValueForKey(tab, @"tabId") isEqual:tabID]) return tab;
     return nil;
 }
 
 id DPScriptTab(NSWindow *window, NSString *tabID) { return tabID ? DPScriptTabIn(DPScriptWindow(window), tabID) : nil; }
 
 id DPScriptTabInAnyProfile(id scriptWindow, NSString *tabID) {
-    if (!scriptWindow || !tabID || ![scriptWindow respondsToSelector:@selector(appleScriptProfiles)]) return nil;
-    for (id profile in [scriptWindow valueForKey:@"appleScriptProfiles"]) {
+    if (!scriptWindow || !tabID) return nil;
+    id profiles = DPValueForKey(scriptWindow, @"appleScriptProfiles");
+    if (![profiles isKindOfClass:NSArray.class]) return nil;
+    for (id profile in profiles) {
         id tab = DPScriptTabIn(profile, tabID);
         if (tab) return tab;
     }
     return nil;
 }
 
-NSString *DPTabID(id tab) { return [tab valueForKey:@"tabId"]; }
-NSString *DPActiveTabIDIn(id scriptWindow) { return DPTabID([scriptWindow valueForKey:@"activeTab"]); }
+NSString *DPTabID(id tab) { return DPValueForKey(tab, @"tabId"); }
+NSString *DPActiveTabIDIn(id scriptWindow) { return DPTabID(DPValueForKey(scriptWindow, @"activeTab")); }
 NSString *DPActiveTabID(NSWindow *window) { return DPActiveTabIDIn(DPScriptWindow(window)); }
-void DPFocusTab(id tab) { [tab performSelector:@selector(focus:) withObject:nil]; }
+void DPFocusTab(id tab) { if ([tab respondsToSelector:@selector(focus:)]) [tab performSelector:@selector(focus:) withObject:nil]; }
 static NSInteger DPOwnCloses;
 static CFTimeInterval DPOwnClosesLapse;
 
@@ -46,7 +52,7 @@ BOOL DPTakeOwnClose(void) {
 }
 
 void DPCloseTab(id tab) {
-    if (!tab) return;
+    if (!tab || ![tab respondsToSelector:@selector(close:)]) return;
     DPMarkOwnClose();
     [tab performSelector:@selector(close:) withObject:nil];
 }

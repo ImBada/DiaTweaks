@@ -1,10 +1,12 @@
 #import "Patches/ShowAddressField/ShowAddressField.m"
 
 static BOOL gCallbackHovered;
+static BOOL gCallbackIncidental;
 static int gCallbackCalls;
 
-static void DPTestHoverHandler(bool hovered, void *context __attribute__((swift_context))) __attribute__((swiftcall)) {
+static void DPTestHoverHandler(bool hovered, bool incidental, void *context __attribute__((swift_context))) __attribute__((swiftcall)) {
     gCallbackHovered = hovered;
+    gCallbackIncidental = incidental;
     gCallbackCalls++;
     (void)context;
 }
@@ -164,7 +166,9 @@ int main(void) {
         window.fakeMouse = NSMakePoint(500, 780);
         check("flipped pane visible bar matches pointer over subview of field", DPPointerOver(field));
 
-        check("hover callback ran", gCallbackCalls > 0);
+        gCallbackIncidental = YES;
+        DPSetHover(field, YES);
+        check("hover callback ran with incidental=false", gCallbackCalls > 0 && !gCallbackIncidental);
 
         // Regression: invisible/minimized window restores hover state on apply-off and layout-off.
         DPTestWindow *hiddenWin = [[DPTestWindow alloc] initWithContentRect:NSMakeRect(0, 0, 400, 100)

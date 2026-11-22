@@ -356,6 +356,56 @@ int main(void) {
         CHECK(!floatWash.hidden && floatEffect.material == NSVisualEffectMaterialUnderWindowBackground,
               "WindowMaterial turning off restores minimized floating sidebar wash and material");
 
+        // Regression: WindowCorners KVO watch detaches cleanly on layer swap and off-toggle before async drain, and ignores unknown KVO contexts.
+        _TtC6Window28FloatingSidebarContainerView *kvoFloat = [[_TtC6Window28FloatingSidebarContainerView alloc] initWithFrame:NSMakeRect(0, 0, 220, 600)];
+        kvoFloat.wantsLayer = YES;
+        kvoFloat.layer.cornerRadius = 12;
+        [win.contentView addSubview:kvoFloat];
+        gFakeWindows = @[ win ];
+        [gFakeDefaults setDouble:20 forKey:@"windowCornerRadius"];
+        DPWindowCorners.on = YES;
+        [kvoFloat layout];
+        CHECK(kvoFloat.layer.cornerRadius > 12, "WindowCorners rounds floating sidebar on layout");
+        // Swap layer while enabled, then toggle off while a KVO async block is queued.
+        CALayer *oldLayer = kvoFloat.layer;
+        CALayer *newLayer = [CALayer layer];
+        newLayer.frame = kvoFloat.bounds;
+        newLayer.cornerRadius = 12;
+        kvoFloat.layer = newLayer;
+        [kvoFloat layout];
+        oldLayer.cornerRadius = 5; // Detached watch must not touch or crash on old layer.
+        newLayer.cornerRadius = 8; // Queues async DPRoundFloatingSidebar.
+        DPWindowCorners.on = NO;
+        DPWindowCorners.apply(&DPWindowCorners);
+        [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.05]];
+        CHECK(newLayer.cornerRadius == 8 || newLayer.cornerRadius == 12, "WindowCorners KVO async drain after off-toggle does not crash or re-apply");
+        [kvoFloat removeFromSuperview];
+        [gFakeDefaults removeObjectForKey:@"windowCornerRadius"];
+
+        // Regression: WindowMaterial Liquid Glass view handles _variant/cornerRadius safely without thrash-recreating.
+        Class glassCls = NSClassFromString(@"NSGlassEffectView");
+        if (!glassCls) {
+            glassCls = objc_allocateClassPair(NSView.class, "NSGlassEffectView", 0);
+            objc_registerClassPair(glassCls);
+        }
+        gMaterialChoice = @"glass.17";
+        gFakeWindows = @[ matWin ];
+        DPWindowMaterial.on = YES;
+        DPWindowMaterial.apply(&DPWindowMaterial);
+        NSView *firstGlass = nil;
+        for (NSView *sub in floatContent.subviews) if ([sub isKindOfClass:glassCls]) firstGlass = sub;
+        CHECK(firstGlass != nil, "WindowMaterial inserts glass view cleanly");
+        DPWindowMaterial.apply(&DPWindowMaterial);
+        NSView *secondGlass = nil;
+        for (NSView *sub in floatContent.subviews) if ([sub isKindOfClass:glassCls]) secondGlass = sub;
+        CHECK(firstGlass == secondGlass, "WindowMaterial does not destroy/recreate glass view in a loop across layouts");
+        DPWindowMaterial.on = NO;
+        DPWindowMaterial.apply(&DPWindowMaterial);
+        NSView *afterOff = nil;
+        for (NSView *sub in floatContent.subviews) if ([sub isKindOfClass:glassCls]) afterOff = sub;
+        CHECK(afterOff == nil, "WindowMaterial removes glass view cleanly when turned off");
+        gMaterialChoice = @"material.7";
+
         // === 3. PrivateWindowTheme: restores BOTH window gradient AND floating sidebar gradient; nil colors untouched ===
         _TtC6Window14PlatformWindow *normalWin = DPMakeBrowserWindow(NO, YES);
         _TtC6Window14PlatformWindow *privWin = DPMakeBrowserWindow(YES, YES);

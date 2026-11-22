@@ -104,7 +104,7 @@ static void DPAddUnloadMenuItem(NSMenu *menu, NSView *tab, NSString *tabID, id p
     });
     item.image = [NSImage imageWithSystemSymbolName:@"moon.zzz" accessibilityDescription:nil];
     // By name: CI's SDK predates macOS 27. 1 is NSMenuItemImageVisibilityVisible.
-    if (@available(macOS 27, *)) [item setValue:@1 forKey:@"preferredImageVisibility"];
+    if (@available(macOS 27, *)) DPSetValueForKey(item, @"preferredImageVisibility", @1);
     item.enabled = closePane != nil || !visible || before != nil;
     NSInteger index = [menu indexOfItemWithTitle:@"Close"];
     if (index < 0) index = [menu indexOfItemWithTitle:@"Close Tab"];
@@ -164,7 +164,8 @@ static NSString *DPVerifyTab(NSView *tab, BOOL on, BOOL dock, NSCountedSet<NSURL
         if (!front || ![url.scheme hasPrefix:@"http"] || [urls countForObject:url] > 1) return nil;
     }
     if (!item) return dock ? @"loaded pinned tab has no Unload Tab" : front ? @"tab in front has no Unload Tab" : @"loaded tab has no Unload Tab";
-    if (front && !item.enabled && [[DPScriptWindow(tab.window) valueForKey:@"appleScriptTabs"] count] > 1)
+    id scriptTabs = DPValueForKey(DPScriptWindow(tab.window), @"appleScriptTabs");
+    if (front && !item.enabled && [scriptTabs isKindOfClass:NSArray.class] && [scriptTabs count] > 1)
         return dock ? @"Unload Tab can't leave the pinned tab in front" : @"Unload Tab can't leave the tab in front";
     return nil;
 }

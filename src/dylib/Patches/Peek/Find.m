@@ -70,7 +70,7 @@ static const CGFloat DPFindWidth = 260, DPFindHeight = 30, DPFindMargin = 8, DPF
     __weak DPPeekFind *weak = self;
     void (^done)(id) = ^(id result) {
         dispatch_async(dispatch_get_main_queue(), ^{
-            NSInteger total = [[result valueForKey:@"numMatches"] integerValue], at = [[result valueForKey:@"activeMatchOrdinal"] integerValue];
+            NSInteger total = [DPValueForKey(result, @"numMatches") integerValue], at = [DPValueForKey(result, @"activeMatchOrdinal") integerValue];
             weak.count.stringValue = total ? [NSString stringWithFormat:@"%ld/%ld", (long)at, (long)total] : @"0";
         });
     };

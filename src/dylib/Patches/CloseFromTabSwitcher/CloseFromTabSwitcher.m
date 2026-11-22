@@ -9,9 +9,14 @@ static NSArray<NSString *> *DPSwitcherTabs(NSWindowController *switcher, NSStrin
 }
 
 static id DPScriptTab(NSString *tabID) {
-    for (id window in [(id)NSApp.delegate valueForKey:@"appleScriptWindows"])
-        for (id tab in [window valueForKey:@"appleScriptTabs"])
-            if ([[tab valueForKey:@"tabId"] isEqual:tabID]) return tab;
+    id windows = DPValueForKey(NSApp.delegate, @"appleScriptWindows");
+    if (![windows isKindOfClass:NSArray.class]) return nil;
+    for (id window in windows) {
+        id tabs = DPValueForKey(window, @"appleScriptTabs");
+        if (![tabs isKindOfClass:NSArray.class]) continue;
+        for (id tab in tabs)
+            if ([DPValueForKey(tab, @"tabId") isEqual:tabID]) return tab;
+    }
     return nil;
 }
 
@@ -60,7 +65,7 @@ static BOOL DPCloseFocusedTab(NSWindowController *switcher) {
     NSMutableArray<NSString *> *tabs = [DPSwitcherTabs(switcher, &focused) mutableCopy];
     NSUInteger index = focused ? [tabs indexOfObject:focused] : NSNotFound;
     id tab = focused ? DPScriptTab(focused) : nil;
-    if (index == NSNotFound || !tab) return NO;
+    if (index == NSNotFound || !tab || ![tab respondsToSelector:@selector(close:)]) return NO;
     NSUInteger gen = ++DPFocusGeneration;
     [tab performSelector:@selector(close:) withObject:nil];
     [tabs removeObjectAtIndex:index];

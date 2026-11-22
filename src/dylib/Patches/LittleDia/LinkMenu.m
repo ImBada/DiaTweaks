@@ -12,7 +12,7 @@ static BOOL DPPage_willShowMenu(id self, SEL _cmd, id page, id menu, id element)
         if (gLink) gLink = nil;
         return DPCallOriginal(DPPage_willShowMenu, self, page, menu, element);
     }
-    NSURL *url = [element respondsToSelector:@selector(linkURL)] ? [element valueForKey:@"linkURL"] : nil;
+    NSURL *url = DPValueForKey(element, @"linkURL");
     NSString *scheme = [url isKindOfClass:NSURL.class] ? url.scheme : nil;
     BOOL web = scheme && ([scheme caseInsensitiveCompare:@"http"] == NSOrderedSame || [scheme caseInsensitiveCompare:@"https"] == NSOrderedSame);
     gLink = web ? url : nil;

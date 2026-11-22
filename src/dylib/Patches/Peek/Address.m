@@ -41,7 +41,7 @@
 - (void)mouseExited:(NSEvent *)event { self.hovered = NO; [self refresh]; }
 
 - (NSURL *)url {
-    NSURL *url = [(NSObject *)self.page valueForKey:@"url"];
+    NSURL *url = DPValueForKey(self.page, @"url");
     return [url isKindOfClass:NSURL.class] ? url : nil;
 }
 
@@ -52,7 +52,7 @@
     }];
     if (self.field) return;
     NSURL *url = self.url;
-    NSString *title = [(NSObject *)self.page valueForKey:@"title"];
+    NSString *title = DPValueForKey(self.page, @"title");
     NSString *host = url.host.lowercaseString ?: url.absoluteString ?: @"", *rest = @"";
     if ([host hasPrefix:@"www."]) host = [host substringFromIndex:4];
     if (self.hovered) {

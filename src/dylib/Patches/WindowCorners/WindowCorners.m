@@ -115,10 +115,13 @@ static void DPRoundFloatingLayers(CALayer *layer, CGSize size, CGFloat base, CGF
 
 static void DPRoundFloatingSidebar(NSView *self);
 
+static char DPFloatingCornerKVOContext;
+
 // The watch holds the layer, so it can't go before the observer does.
 @interface DPFloatingCornerWatch : NSObject
 @property (nonatomic, weak) NSView *sidebar;
 @property (nonatomic, strong) CALayer *layer;
+- (void)detach;
 @end
 
 @implementation DPFloatingCornerWatch
@@ -126,17 +129,26 @@ static void DPRoundFloatingSidebar(NSView *self);
     if ((self = [super init])) {
         self.sidebar = sidebar;
         self.layer = sidebar.layer;
-        [self.layer addObserver:self forKeyPath:@"cornerRadius" options:0 context:NULL];
+        if (self.layer) [self.layer addObserver:self forKeyPath:@"cornerRadius" options:0 context:&DPFloatingCornerKVOContext];
     }
     return self;
 }
 
-- (void)dealloc { [_layer removeObserver:self forKeyPath:@"cornerRadius"]; }
+- (void)detach {
+    CALayer *layer = _layer;
+    _layer = nil;
+    if (layer) [layer removeObserver:self forKeyPath:@"cornerRadius" context:&DPFloatingCornerKVOContext];
+}
+
+- (void)dealloc { [self detach]; }
 
 - (void)observeValueForKeyPath:(NSString *)keyPath ofObject:(CALayer *)layer change:(NSDictionary *)change context:(void *)context {
+    if (context != &DPFloatingCornerKVOContext) return [super observeValueForKeyPath:keyPath ofObject:layer change:change context:context];
+    __weak DPFloatingCornerWatch *weak = self;
     dispatch_async(dispatch_get_main_queue(), ^{
-        NSView *sidebar = self.sidebar;
-        if (sidebar.layer == layer) DPRoundFloatingSidebar(sidebar);
+        DPFloatingCornerWatch *watch = weak;
+        NSView *sidebar = watch.sidebar;
+        if (watch.layer == layer && sidebar.layer == layer) DPRoundFloatingSidebar(sidebar);
     });
 }
 @end
@@ -146,8 +158,12 @@ static char DPWatchedKey;
 static void DPRoundFloatingSidebar(NSView *self) {
     DPFloatingCornerWatch *watch = DPGet(self, &DPWatchedKey);
     if (!DPWindowCorners.on || !self.layer) {
-        if (watch) DPSet(self, &DPWatchedKey, nil);
+        if (watch) {
+            [watch detach];
+            DPSet(self, &DPWatchedKey, nil);
+        }
     } else if (watch.layer != self.layer) {
+        [watch detach];
         DPSet(self, &DPWatchedKey, [[DPFloatingCornerWatch alloc] initWithSidebar:self]);
     }
     CGFloat base = DPDiaRadius(self.layer, self.layer.cornerRadius);

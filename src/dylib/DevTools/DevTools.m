@@ -61,7 +61,7 @@ static void DPScriptMethods(NSNotification *note) {
     NSMutableArray *classes = [NSMutableArray arrayWithObjects:note.object, nil];
     for (NSString *key in @[@"delegate", @"dataSource"])
         if ([live respondsToSelector:NSSelectorFromString(key)]) {
-            id value = [live valueForKey:key];
+            id value = DPValueForKey(live, key);
             [out appendFormat:@"%@: %s\n", key, value ? object_getClassName(value) : "nil"];
             if (value) [classes addObject:@(object_getClassName(value))];
         }

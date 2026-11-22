@@ -24,9 +24,9 @@ BOOL DPPeekCopyURL(DPPeekCard *peek, NSEvent *event) {
     BOOL markdown = DPPeekIsShortcut(event, DPPeekMenuItem(NSApp.mainMenu, @"Copy URL as Markdown"));
     if (!markdown && !DPPeekIsShortcut(event, DPPeekMenuItem(NSApp.mainMenu, @"Copy URL"))) return NO;
     NSObject *page = (NSObject *)peek.page;
-    NSURL *url = [page valueForKey:@"url"];
+    NSURL *url = DPValueForKey(page, @"url");
     if (![url isKindOfClass:NSURL.class]) return NO;
-    NSString *title = [page valueForKey:@"title"];
+    NSString *title = DPValueForKey(page, @"title");
     if (![title isKindOfClass:NSString.class] || !title.length) title = url.absoluteString;
     NSPasteboard *board = NSPasteboard.generalPasteboard;
     [board clearContents];

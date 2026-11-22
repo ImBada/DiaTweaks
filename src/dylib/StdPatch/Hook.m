@@ -34,15 +34,28 @@ void DPHookClass(Class cls, SEL sel, IMP replacement) {
     atomic_store_explicit(&DPHooks[count].original, original, memory_order_relaxed);
     atomic_store_explicit(&DPHookCount, count + 1, memory_order_release);
     if (!class_addMethod(cls, sel, replacement, method_getTypeEncoding(method))) method_setImplementation(method, replacement);
-    // Re-chain any subclass that copied cls's inherited IMP earlier so it still calls through this hook.
+    // Re-chain any subclass that copied cls's inherited IMP earlier so it still calls through this hook,
+    // unless that subclass (or an intermediate below cls) already hooks the same replacement.
     for (size_t i = 0; i < count; i++) {
         if (DPHooks[i].sel != sel || DPHooks[i].replacement == replacement) continue;
         if (atomic_load_explicit(&DPHooks[i].original, memory_order_relaxed) != original) continue;
+        BOOL isSubclass = NO;
         for (Class c = class_getSuperclass(DPHooks[i].cls); c; c = class_getSuperclass(c))
             if (c == cls) {
-                atomic_store_explicit(&DPHooks[i].original, replacement, memory_order_release);
+                isSubclass = YES;
                 break;
             }
+        if (!isSubclass) continue;
+        BOOL hasReplacement = NO;
+        for (size_t j = 0; j < count && !hasReplacement; j++) {
+            if (DPHooks[j].sel != sel || DPHooks[j].replacement != replacement) continue;
+            for (Class c = DPHooks[i].cls; c && c != cls; c = class_getSuperclass(c))
+                if (c == DPHooks[j].cls) {
+                    hasReplacement = YES;
+                    break;
+                }
+        }
+        if (!hasReplacement) atomic_store_explicit(&DPHooks[i].original, replacement, memory_order_release);
     }
     os_unfair_lock_unlock(&DPHookLock);
 }

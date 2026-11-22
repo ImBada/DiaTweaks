@@ -67,13 +67,21 @@ static uint32_t *DPFindSiteIn(const uint32_t *text, NSUInteger words) {
     if (!text || words < DPSignatureCount) return NULL;
     NSUInteger limit = words - DPSignatureCount + 1, near = 0x18f0000, reach = 0x40000;
     uint32_t *found = NULL;
-    if (near >= reach && near + reach <= limit && DPSearch(text, near - reach, near + reach, &found) == 1) return found;
+    if (near >= reach && reach <= limit && near <= limit - reach && DPSearch(text, near - reach, near + reach, &found) == 1) return found;
     return DPSearch(text, 0, limit, &found) == 1 ? found : NULL;
 }
 
 static uint32_t *DPFindSite(void) {
+    const struct mach_header_64 *header = NULL;
+    for (uint32_t i = 0; i < _dyld_image_count(); i++) {
+        const struct mach_header *image = _dyld_get_image_header(i);
+        if (image && image->filetype == MH_EXECUTE) {
+            header = (const struct mach_header_64 *)image;
+            break;
+        }
+    }
+    if (!header) return NULL;
     unsigned long size = 0;
-    const struct mach_header_64 *header = (const struct mach_header_64 *)_dyld_get_image_header(0);
     const uint32_t *text = (const uint32_t *)getsectiondata(header, "__TEXT", "__text", &size);
     return DPFindSiteIn(text, size / 4);
 }
@@ -83,12 +91,16 @@ static BOOL DPRewrite(uint32_t expected0, uint32_t expected1, uint32_t value0, u
     mach_vm_address_t mask = (mach_vm_address_t)vm_page_size - 1;
     mach_vm_address_t start = (mach_vm_address_t)DPSite & ~mask;
     mach_vm_size_t len = (((mach_vm_address_t)(DPSite + 2) + mask) & ~mask) - start;
-    if (mach_vm_protect(mach_task_self(), start, len, FALSE, VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY)) return NO;
+    if (mach_vm_protect(mach_task_self(), start, len, FALSE, VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY) != KERN_SUCCESS) return NO;
     DPSite[0] = value0;
     DPSite[1] = value1;
-    mach_vm_protect(mach_task_self(), start, len, FALSE, VM_PROT_READ | VM_PROT_EXECUTE);
     sys_icache_invalidate(DPSite, 2 * sizeof *DPSite);
-    return YES;
+    if (mach_vm_protect(mach_task_self(), start, len, FALSE, VM_PROT_READ | VM_PROT_EXECUTE) == KERN_SUCCESS) return YES;
+    DPSite[0] = expected0;
+    DPSite[1] = expected1;
+    sys_icache_invalidate(DPSite, 2 * sizeof *DPSite);
+    mach_vm_protect(mach_task_self(), start, len, FALSE, VM_PROT_READ | VM_PROT_EXECUTE);
+    return NO;
 }
 
 static BOOL DPSearched;

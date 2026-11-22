@@ -48,12 +48,43 @@
 - (int)ping { return 50; }
 @end
 
+@interface DPMultiTarget : NSObject
+- (int)stack;
+@end
+@implementation DPMultiTarget
+- (int)stack { return 1; }
+@end
+
+@interface DPDupBase : NSObject
+- (int)step;
+@end
+@implementation DPDupBase
+- (int)step { return 1; }
+@end
+
+@interface DPDupSub : DPDupBase
+@end
+@implementation DPDupSub
+@end
+
+@interface DPDupGrand : DPDupSub
+@end
+@implementation DPDupGrand
+@end
+
 static int DPTarget_work(id self, SEL _cmd) { return DPCallOriginal(DPTarget_work, self) + 1; }
 static int DPSub_work(id self, SEL _cmd) { return DPCallOriginal(DPSub_work, self) + 1; }
 static int DPShared_value(id self, SEL _cmd) { return DPCallOriginal(DPShared_value, self) + 1; }
 static int DPRecurse_hook(id self, SEL _cmd, int n) { return DPCallOriginal(DPRecurse_hook, self, n); }
 static int DPPing_sub(id self, SEL _cmd) { return DPCallOriginal(DPPing_sub, self) * 2; }
 static int DPPing_base(id self, SEL _cmd) { return DPCallOriginal(DPPing_base, self) + 3; }
+static int DPMulti_h1(id self, SEL _cmd) { return DPCallOriginal(DPMulti_h1, self) * 10 + 1; }
+static int DPMulti_h2(id self, SEL _cmd) { return DPCallOriginal(DPMulti_h2, self) * 10 + 2; }
+static int DPMulti_h3(id self, SEL _cmd) { return DPCallOriginal(DPMulti_h3, self) * 10 + 3; }
+static int DPMulti_h4(id self, SEL _cmd) { return DPCallOriginal(DPMulti_h4, self) * 10 + 4; }
+static int DPDup_repA(id self, SEL _cmd) { return DPCallOriginal(DPDup_repA, self) + 10; }
+static int DPDup_repB(id self, SEL _cmd) { return DPCallOriginal(DPDup_repB, self) * 3; }
+static int DPDup_repC(id self, SEL _cmd) { return DPCallOriginal(DPDup_repC, self) + 100; }
 
 static atomic_bool stop;
 static atomic_long calls, wrong;
@@ -110,6 +141,28 @@ int main(void) {
         if ([[DPInheritedSub new] ping] != 16) { failures++; printf("FAIL subclass-before-superclass re-chain got %d, expected 16\n", [[DPInheritedSub new] ping]); }
         if (DPDiaIMP(DPInheritedSub.class, @selector(ping)) != realBasePing) { failures++; printf("FAIL DPDiaIMP(DPInheritedSub) did not unwind to base original IMP\n"); }
         if (DPDiaIMP(DPOverrideSub.class, @selector(ping)) != realOverridePing) { failures++; printf("FAIL DPDiaIMP(DPOverrideSub) did not return subclass's own IMP\n"); }
+
+        // 4 hooks on the exact same (Class, SEL) execute in LIFO stack order and unwind cleanly via DPDiaIMP.
+        IMP realStack = class_getMethodImplementation(DPMultiTarget.class, @selector(stack));
+        DPHookClass(DPMultiTarget.class, @selector(stack), (IMP)DPMulti_h1);
+        DPHookClass(DPMultiTarget.class, @selector(stack), (IMP)DPMulti_h2);
+        DPHookClass(DPMultiTarget.class, @selector(stack), (IMP)DPMulti_h3);
+        DPHookClass(DPMultiTarget.class, @selector(stack), (IMP)DPMulti_h4);
+        int stacked = [[DPMultiTarget new] stack];
+        if (stacked != 11234) { failures++; printf("FAIL 4-hook stack got %d, expected 11234\n", stacked); }
+        if (DPDiaIMP(DPMultiTarget.class, @selector(stack)) != realStack) { failures++; printf("FAIL DPDiaIMP did not unwind 4 hooks\n"); }
+
+        // Regression: subclass with repB -> repA -> base must not re-chain repA to repB when base is later hooked with repB.
+        DPHookClass(DPDupSub.class, @selector(step), (IMP)DPDup_repA);
+        DPHookClass(DPDupSub.class, @selector(step), (IMP)DPDup_repB);
+        DPHookClass(DPDupGrand.class, @selector(step), (IMP)DPDup_repC);
+        DPHookClass(DPDupBase.class, @selector(step), (IMP)DPDup_repB);
+        int dupSubVal = [[DPDupSub new] step];
+        int dupBaseVal = [[DPDupBase new] step];
+        int dupGrandVal = [[DPDupGrand new] step];
+        if (dupSubVal != 33) { failures++; printf("FAIL duplicate-replacement re-chain on DPDupSub got %d, expected 33\n", dupSubVal); }
+        if (dupBaseVal != 3) { failures++; printf("FAIL duplicate-replacement base got %d, expected 3\n", dupBaseVal); }
+        if (dupGrandVal != 133) { failures++; printf("FAIL duplicate-replacement grandchild got %d, expected 133\n", dupGrandVal); }
 
         target = [DPTarget new];
         DPHookClass(DPTarget.class, @selector(work), (IMP)DPTarget_work);

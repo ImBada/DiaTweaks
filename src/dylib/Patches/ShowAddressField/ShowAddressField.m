@@ -1,8 +1,23 @@
 #import "StdPatch/StdPatch.h"
+#import <dlfcn.h>
 
 extern DPPatch DPShowAddressField;
 
-typedef void (*DPHoverHandler)(bool hovered, void *context __attribute__((swift_context))) __attribute__((swiftcall));
+// DelayedHoverTracker.onUpdate is Swift `(Bool, Bool) -> Void` (`isHoverActive`, `isIncidentalHover`).
+typedef void (*DPHoverHandler)(bool hovered, bool incidental, void *context __attribute__((swift_context))) __attribute__((swiftcall));
+
+static void DPCallHoverHandler(void *fn, void *context, bool hovered, bool incidental) {
+    static void *(*retainFn)(void *);
+    static void (*releaseFn)(void *);
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        retainFn = dlsym(RTLD_DEFAULT, "swift_retain");
+        releaseFn = dlsym(RTLD_DEFAULT, "swift_release");
+    });
+    if (context && retainFn) retainFn(context);
+    ((DPHoverHandler)fn)(hovered, incidental, context);
+    if (context && releaseFn) releaseFn(context);
+}
 
 static char DPForcedKey;
 
@@ -31,7 +46,7 @@ static void DPSetHover(NSView *field, BOOL hovered) {
     *isHovered = hovered;
     *isActive = hovered;
     *incidental = NO;
-    if (handler[0]) ((DPHoverHandler)handler[0])(hovered, handler[1]);
+    if (handler[0]) DPCallHoverHandler(handler[0], handler[1], hovered, false);
 }
 
 static Class DPAddressFieldClass;

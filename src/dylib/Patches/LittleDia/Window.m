@@ -141,10 +141,13 @@ static BOOL DPStaysInLittleDia(id page, NSInteger disposition) {
 - (NSInteger)navigationDisposition { return DPCurrentTab; }
 - (NSMethodSignature *)methodSignatureForSelector:(SEL)selector { return [self.action methodSignatureForSelector:selector]; }
 - (void)forwardInvocation:(NSInvocation *)invocation { [invocation invokeWithTarget:self.action]; }
+- (BOOL)respondsToSelector:(SEL)selector { return selector == @selector(navigationDisposition) || [self.action respondsToSelector:selector]; }
+- (BOOL)conformsToProtocol:(Protocol *)protocol { return [self.action conformsToProtocol:protocol]; }
+- (BOOL)isKindOfClass:(Class)cls { return [self.action isKindOfClass:cls]; }
 @end
 
 static NSInteger DPPage_decidePolicy(id self, SEL _cmd, id page, id action) {
-    if (!DPLittleDia.on || !DPStaysInLittleDia(page, [[action valueForKey:@"navigationDisposition"] integerValue]))
+    if (!DPLittleDia.on || !DPStaysInLittleDia(page, [DPValueForKey(action, @"navigationDisposition") integerValue]))
         return DPCallOriginal(DPPage_decidePolicy, self, page, action);
     DPStayingLink *staying = [DPStayingLink alloc];
     staying.action = action;

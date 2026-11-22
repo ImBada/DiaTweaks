@@ -198,7 +198,7 @@ static void DPShowProfiles(NSButton *button) {
             });
         });
         item.image = DPLittleDiaProfileImage(name);
-        if (@available(macOS 27, *)) [item setValue:@1 forKey:@"preferredImageVisibility"];  // 1: .visible
+        if (@available(macOS 27, *)) DPSetValueForKey(item, @"preferredImageVisibility", @1);  // 1: .visible
         [menu addItem:item];
     }];
     [menu popUpMenuPositioningItem:nil atLocation:NSMakePoint(0, NSHeight(button.bounds) + 4) inView:button];
@@ -226,8 +226,8 @@ static const CGFloat DPAddressHeight = 30;
 static void DPUpdateButtons(DPLittleBar *bar) {
     id page = DPLittleDiaPage(bar.title.window);
     BOOL (*flag)(id, SEL) = (void *)objc_msgSend;
-    bar.leading[1].enabled = page && flag(page, @selector(canGoBack));
-    bar.leading[2].enabled = page && flag(page, @selector(canGoForward));
+    bar.leading[1].enabled = page && [page respondsToSelector:@selector(canGoBack)] && flag(page, @selector(canGoBack));
+    bar.leading[2].enabled = page && [page respondsToSelector:@selector(canGoForward)] && flag(page, @selector(canGoForward));
     bar.leading[3].enabled = page != nil;
 }
 
@@ -265,11 +265,13 @@ static DPLittleBar *DPMakeBar(NSView *title) {
     bar.divider = DPMakeDivider();
     __weak DPLittleBar *weakBar = bar;
     bar.timer = [NSTimer scheduledTimerWithTimeInterval:0.25 repeats:YES block:^(NSTimer *timer) {
-        if (!weakBar.title.window) return;
-        DPUpdateButtons(weakBar);
-        if (DPNameOpenButton(weakBar)) DPRelayoutLittleDiaBars();
-        DPRefreshAddressView(weakBar.address);
-        DPMatchPage(weakBar.title.superview, DPLittleDiaPage(weakBar.title.window));
+        DPLittleBar *live = weakBar;
+        if (!live) return [timer invalidate];
+        if (!live.title.window) return;
+        DPUpdateButtons(live);
+        if (DPNameOpenButton(live)) DPRelayoutLittleDiaBars();
+        DPRefreshAddressView(live.address);
+        DPMatchPage(live.title.superview, DPLittleDiaPage(live.title.window));
     }];
     return bar;
 }

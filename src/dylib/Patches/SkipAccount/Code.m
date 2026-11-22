@@ -19,7 +19,10 @@ BOOL DPSkipFindPatterns(DPSkipPattern *patterns, NSUInteger count) {
     const uint32_t *text = (const uint32_t *)getsectiondata(header, "__TEXT", "__text", &size);
     if (!text) return NO;
     NSUInteger words = size / sizeof *text;
-    for (NSUInteger p = 0; p < count; p++) patterns[p].match = NULL;
+    for (NSUInteger p = 0; p < count; p++) {
+        if (!patterns[p].signature || !patterns[p].length) return NO;
+        patterns[p].match = NULL;
+    }
 
     for (NSUInteger i = 0; i < words; i++) {
         uint32_t first = text[i];
@@ -36,7 +39,7 @@ BOOL DPSkipFindPatterns(DPSkipPattern *patterns, NSUInteger count) {
 }
 
 BOOL DPSkipWriteCode(uint32_t *site, uint32_t expected, uint32_t value) {
-    if (*site != expected) return NO;
+    if (!site || *site != expected) return NO;
     mach_vm_address_t page = (mach_vm_address_t)site & ~((mach_vm_address_t)vm_page_size - 1);
     if (mach_vm_protect(mach_task_self(), page, vm_page_size, FALSE, VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY)) return NO;
     *site = value;

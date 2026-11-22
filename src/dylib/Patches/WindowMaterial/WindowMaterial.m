@@ -128,19 +128,22 @@ static void DPApplyMaterialUnder(NSView *tint, BOOL floating) {
     for (NSView *view in backgrounds) DPHide(view, glass);
 
     // A drawn glass view ignores a new variant.
-    if (glassView && (!glass || [[glassView valueForKey:@"_variant"] integerValue] != value)) {
+    id currentVariant = glassView ? DPValueForKey(glassView, @"_variant") : nil;
+    if (glassView && (!glass || (currentVariant && [currentVariant integerValue] != value))) {
         [glassView removeFromSuperview];
         DPSet(content, &DPGlassKey, glassView = nil);
     }
     if (glass && !glassView) {
         glassView = [[DPGlassEffectView() alloc] initWithFrame:content.bounds];
         glassView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
-        [glassView setValue:@(content.layer.cornerRadius) forKey:@"cornerRadius"];
+        DPSetValueForKey(glassView, @"cornerRadius", @(content.layer.cornerRadius));
         [content addSubview:glassView positioned:NSWindowBelow relativeTo:nil];
         DPSet(content, &DPGlassKey, glassView);
-        [glassView setValue:@(value) forKey:@"_variant"];
-    } else if (glassView && [[glassView valueForKey:@"cornerRadius"] doubleValue] != content.layer.cornerRadius) {
-        [glassView setValue:@(content.layer.cornerRadius) forKey:@"cornerRadius"];
+        DPSetValueForKey(glassView, @"_variant", @(value));
+    } else if (glassView) {
+        id currentRadius = DPValueForKey(glassView, @"cornerRadius");
+        if (currentRadius && [currentRadius doubleValue] != content.layer.cornerRadius)
+            DPSetValueForKey(glassView, @"cornerRadius", @(content.layer.cornerRadius));
     }
     if (floating) return;
 

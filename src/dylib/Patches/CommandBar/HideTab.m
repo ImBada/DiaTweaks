@@ -67,8 +67,13 @@ void DPExpectNewTab(NSWindow *window) {
     if (!DPHiding() || (DPExpecting() && DPExpectWindow == window)) return;
     // Snapshot every window's tabs so another window's existing tabs aren't mistaken for the new one.
     NSMutableSet *known = [NSMutableSet setWithArray:DPListedTabs(nil)];
-    for (id scripted in [(id)NSApp.delegate valueForKey:@"appleScriptWindows"])
-        for (id tab in [scripted valueForKey:@"appleScriptTabs"]) [known addObject:DPTabID(tab) ?: @""];
+    id windows = DPValueForKey(NSApp.delegate, @"appleScriptWindows");
+    if ([windows isKindOfClass:NSArray.class])
+        for (id scripted in windows) {
+            id tabs = DPValueForKey(scripted, @"appleScriptTabs");
+            if ([tabs isKindOfClass:NSArray.class])
+                for (id tab in tabs) [known addObject:DPTabID(tab) ?: @""];
+        }
     for (NSView *tab in DPFindViews(DPDiaTabView)) [known addObject:DPStripTabID(tab) ?: @""];
     DPKnown = known;
     DPExpectWindow = window;

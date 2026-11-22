@@ -71,6 +71,18 @@ static void DPFetchPreview(NSArray<NSString *> *names, void (^done)(NSURL *file,
     }] resume];
 }
 
+@interface DPPreviewLinkProxy : NSObject
+@property (nonatomic, weak) DPPreviewView *target;
+@end
+
+@implementation DPPreviewLinkProxy
+- (void)step:(CADisplayLink *)link {
+    DPPreviewView *target = self.target;
+    if (!target) return [link invalidate];
+    [target performSelector:@selector(drawFrame)];
+}
+@end
+
 @implementation DPPreviewView {
     NSString *_key, *_layout;
     NSArray<NSString *> *_names;
@@ -199,11 +211,18 @@ static void DPFetchPreview(NSArray<NSString *> *names, void (^done)(NSURL *file,
     if (visible && _states) {
         [self showState];
         NSTimeInterval now = NSDate.date.timeIntervalSince1970;
-        _flip = [[NSTimer alloc] initWithFireDate:[NSDate dateWithTimeIntervalSince1970:floor(now) + 1] interval:1 target:self selector:@selector(showState) userInfo:nil repeats:YES];
+        __weak DPPreviewView *weakSelf = self;
+        _flip = [[NSTimer alloc] initWithFireDate:[NSDate dateWithTimeIntervalSince1970:floor(now) + 1] interval:1 repeats:YES block:^(NSTimer *timer) {
+            DPPreviewView *me = weakSelf;
+            if (!me) return [timer invalidate];
+            [me showState];
+        }];
         [NSRunLoop.mainRunLoop addTimer:_flip forMode:NSRunLoopCommonModes];
     }
     if (!visible || !_player) return [_player pause];
-    _link = [self displayLinkWithTarget:self selector:@selector(drawFrame)];
+    DPPreviewLinkProxy *proxy = [DPPreviewLinkProxy new];
+    proxy.target = self;
+    _link = [self displayLinkWithTarget:proxy selector:@selector(step:)];
     [_link addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];
     [_player play];
 }

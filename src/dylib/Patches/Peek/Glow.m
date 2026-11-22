@@ -82,7 +82,7 @@ static const CGFloat DPGlowEase = 0.15;
 - (void)step {
     if (self.isHiddenOrHasHiddenAncestor) return;
     NSObject *page = self.page;
-    BOOL loading = [[page valueForKey:@"isLoading"] boolValue];
+    BOOL loading = [DPValueForKey(page, @"isLoading") boolValue];
     if (loading && !self.loading) {
         self.shown = self.fraction = 0;
         self.finishing = self.fading = NO;
@@ -98,7 +98,7 @@ static const CGFloat DPGlowEase = 0.15;
         self.finishStart = CACurrentMediaTime();
     }
     self.loading = loading;
-    if (loading) self.fraction = MAX(self.fraction, MAX(0.1, [[page valueForKey:@"loadProgress"] doubleValue]));
+    if (loading) self.fraction = MAX(self.fraction, MAX(0.1, [DPValueForKey(page, @"loadProgress") doubleValue]));
     if (!loading && !self.finishing) return;
     CFTimeInterval since = CACurrentMediaTime() - self.finishStart;
     if (!self.finishing) self.shown += (self.fraction - self.shown) * DPGlowEase;
@@ -128,7 +128,9 @@ static const CGFloat DPGlowEase = 0.15;
     self.frames = nil;
     if (!self.window) return;
     __weak DPPeekGlow *weak = self;
-    self.frames = [NSTimer timerWithTimeInterval:1.0 / 60 repeats:YES block:^(NSTimer *timer) { [weak step]; }];
+    self.frames = [NSTimer timerWithTimeInterval:1.0 / 60 repeats:YES block:^(NSTimer *timer) {
+        if (weak) [weak step]; else [timer invalidate];
+    }];
     [NSRunLoop.mainRunLoop addTimer:self.frames forMode:NSRunLoopCommonModes];
 }
 @end

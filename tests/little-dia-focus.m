@@ -152,6 +152,22 @@ int main(void) {
         CHECK([[gRestoreCounts objectForKey:wPaused] integerValue] == 1,
               "300 ms DPClaim timer does not run DPRestoreStack when Little Dia is off/paused");
 
+        // Regression: DPStayingLink NSProxy handles respondsToSelector:/isKindOfClass:/conformsToProtocol: safely with valid and nil targets.
+        DPStayingLink *proxy = [DPStayingLink alloc];
+        proxy.action = @"hello";
+        CHECK([proxy respondsToSelector:@selector(navigationDisposition)], "DPStayingLink responds to navigationDisposition");
+        CHECK([proxy respondsToSelector:@selector(length)], "DPStayingLink forwards respondsToSelector: to target");
+        CHECK(![proxy respondsToSelector:@selector(nonexistentSelectorForProxyTest)], "DPStayingLink returns NO for unknown selectors");
+        CHECK([proxy isKindOfClass:NSString.class], "DPStayingLink forwards isKindOfClass: to target");
+        CHECK([proxy conformsToProtocol:@protocol(NSCopying)], "DPStayingLink forwards conformsToProtocol: to target");
+        CHECK(proxy.navigationDisposition == DPCurrentTab, "DPStayingLink overrides navigationDisposition to DPCurrentTab");
+        DPStayingLink *nilProxy = [DPStayingLink alloc];
+        nilProxy.action = nil;
+        CHECK([nilProxy respondsToSelector:@selector(navigationDisposition)], "nil-target DPStayingLink responds to navigationDisposition");
+        CHECK(![nilProxy respondsToSelector:@selector(length)], "nil-target DPStayingLink does not abort on respondsToSelector:");
+        CHECK(![nilProxy isKindOfClass:NSString.class] && ![nilProxy conformsToProtocol:@protocol(NSCopying)],
+              "nil-target DPStayingLink safely returns NO for kind/protocol checks");
+
         if (failures) return 1;
         puts("PASS: Little Dia focuses the page view without stealing existing focus");
     }

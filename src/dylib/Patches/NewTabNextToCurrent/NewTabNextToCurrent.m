@@ -17,11 +17,18 @@ static char DPStateKey, DPRelayKey;
 @end
 
 static NSArray<NSString *> *DPTabIDs(NSWindow *window) {
-    return [[DPScriptWindow(window) valueForKey:@"appleScriptTabs"] valueForKey:@"tabId"] ?: @[];
+    id tabs = DPValueForKey(DPScriptWindow(window), @"appleScriptTabs");
+    if (![tabs isKindOfClass:NSArray.class]) return @[];
+    NSMutableArray<NSString *> *ids = [NSMutableArray arrayWithCapacity:[tabs count]];
+    for (id tab in tabs) {
+        id tabID = DPTabID(tab);
+        if (tabID) [ids addObject:tabID];
+    }
+    return ids;
 }
 
 static BOOL DPIsBlank(NSWindow *window, NSString *tabID) {
-    NSString *url = [[DPScriptTab(window, tabID) valueForKey:@"URL"] description];
+    NSString *url = [DPValueForKey(DPScriptTab(window, tabID), @"URL") description];
     return !url.length || !([url hasPrefix:@"http:"] || [url hasPrefix:@"https:"] || [url hasPrefix:@"file:"]);
 }
 
