@@ -82,7 +82,9 @@ static void DPTrack(NSMenuItem *item) {
         DPSet(item, &DPDiaHiddenKey, @(item.hidden));
         [DPAIItems addObject:item];
     }
-    item.hidden = [DPGet(item, &DPDiaHiddenKey) boolValue];
+    BOOL diaHidden = [DPGet(item, &DPDiaHiddenKey) boolValue];
+    BOOL wantHidden = diaHidden || DPTurnOffAI.on;
+    if (item.hidden != wantHidden) item.hidden = diaHidden;
 }
 
 static void DPTrackMenu(NSMenu *menu) {

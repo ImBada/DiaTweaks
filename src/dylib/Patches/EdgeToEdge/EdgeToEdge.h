@@ -1,6 +1,6 @@
 #import "StdPatch/StdPatch.h"
 
-extern DPPatch DPEdgeToEdge, DPSquareSidebarCorners;
+extern DPPatch DPEdgeToEdge, DPSquareSidebarCorners, DPWindowCorners;
 extern const CGFloat DPWindowPadding;
 extern NSHashTable<NSView *> *DPContainers;
 static const CACornerMask DPLeftCorners = kCALayerMinXMinYCorner | kCALayerMinXMaxYCorner;

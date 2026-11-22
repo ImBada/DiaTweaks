@@ -1,8 +1,11 @@
 #import "TidyTabs.h"
 
 static void DPApplyTidyTabs(DPPatch *patch) {
-    if (!patch->on)
+    if (!patch->on) {
         for (NSView *list in DPTidyTrackedLists()) [[DPTidyHover forList:list] detach];
+        for (DPTidyBrush *brush in DPTidyBrushes().allObjects)
+            if (DPIsKind(brush.superview, DPDiaTabListSeparator)) DPPlaceSeparatorBrush(brush.superview);
+    }
     DPRelayoutTidyLists();
 }
 

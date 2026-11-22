@@ -63,7 +63,10 @@ static void DPFold(NSString *space, BOOL collapsed);
         NSColor *ink = self.hovered ? NSColor.secondaryLabelColor : NSColor.tertiaryLabelColor;
         self.pin.contentTintColor = self.chevron.contentTintColor = ink;
         self.title.textColor = ink;
+        [CATransaction begin];
+        [CATransaction setDisableActions:YES];
         self.line.backgroundColor = NSColor.separatorColor.CGColor;
+        [CATransaction commit];
     }];
     self.accessibilityValue = self.collapsed ? @0 : @1;
 }
@@ -88,7 +91,10 @@ static void DPFold(NSString *space, BOOL collapsed);
     if (_collapsed == collapsed && self.chevron.image) return;
     _collapsed = collapsed;
     self.chevron.image = DPSmallSymbol(collapsed ? @"chevron.right" : @"chevron.down");
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
     self.line.opacity = collapsed ? 0 : 1;
+    [CATransaction commit];
     [self restyle];
 }
 

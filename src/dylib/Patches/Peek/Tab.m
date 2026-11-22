@@ -148,6 +148,7 @@ void DPPeekRefreshTabBadge(DPPeekCard *peek) {
         if (current.window == window && [[DPTabState(current) description] containsString:badge.contentKey]) return;
         NSView *tab = DPPeekTabWithContent(window, badge.contentKey);
         if (tab) DPPeekPlaceBadge(badge, tab);
+        else [badge removeFromSuperview];
         return;
     }
     if (badge.superview.window == window || peek.hidden) return;

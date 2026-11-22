@@ -54,10 +54,16 @@ void DPSetTrim(NSView *container, CGFloat trim) {
 }
 
 void DPApplyCompactCommandBar(DPPatch *patch) {
-    for (NSView *commandBar in DPFindViews(DPDiaCommandBar)) {
-        commandBar.needsLayout = YES;
-        DPCommandBarPart(commandBar, DPDiaCommandBarInput).needsLayout = YES;
-    }
+    Class barCls = objc_getClass(DPDiaCommandBar);
+    if (!barCls) return;
+    for (NSWindow *window in NSApp.windows)
+        DPFindView(window.contentView.superview ?: window.contentView, ^BOOL(NSView *view) {
+            if ([view isKindOfClass:barCls]) {
+                view.needsLayout = YES;
+                DPCommandBarPart(view, DPDiaCommandBarInput).needsLayout = YES;
+            }
+            return NO;
+        });
 }
 
 static NSString *DPVerifyCompactCommandBar(DPPatch *patch) {

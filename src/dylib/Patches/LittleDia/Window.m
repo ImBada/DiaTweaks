@@ -45,7 +45,9 @@ static void DPSetChrome(NSWindow *window, BOOL little) {
         window.styleMask |= NSWindowStyleMaskFullSizeContentView;
     } else {
         DPSet(window, &DPChromeKey, nil);
-        window.styleMask = [saved[@"mask"] unsignedIntegerValue];
+        NSWindowStyleMask mask = ([saved[@"mask"] unsignedIntegerValue] & ~NSWindowStyleMaskFullScreen)
+                               | (window.styleMask & NSWindowStyleMaskFullScreen);
+        window.styleMask = mask;
         window.movableByWindowBackground = [saved[@"movable"] boolValue];
     }
     window.titlebarAppearsTransparent = little;

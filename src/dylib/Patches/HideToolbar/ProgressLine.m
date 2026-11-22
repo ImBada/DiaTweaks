@@ -38,8 +38,18 @@ static char DPLineKey;
 - (BOOL)wantsUpdateLayer { return YES; }
 
 - (void)updateLayer {
-    self.fill.backgroundColor = [NSColor.controlAccentColor CGColor];
+    [self.effectiveAppearance performAsCurrentDrawingAppearance:^{
+        [CATransaction begin];
+        [CATransaction setDisableActions:YES];
+        self.fill.backgroundColor = [NSColor.controlAccentColor CGColor];
+        [CATransaction commit];
+    }];
     [self draw];
+}
+
+- (void)viewDidChangeBackingProperties {
+    [super viewDidChangeBackingProperties];
+    self.needsLayout = YES;
 }
 
 - (NSView *)hitTest:(NSPoint)point { return nil; }
@@ -78,6 +88,7 @@ static char DPLineKey;
     self.frames = [NSTimer timerWithTimeInterval:1.0 / 60 repeats:YES block:^(NSTimer *timer) {
         DPProgressLineView *me = weakSelf;
         if (!me) return [timer invalidate];
+        if (me.window.isMiniaturized || me.hiddenOrHasHiddenAncestor) return;
         me.shown += (me.fraction - me.shown) * 0.15;
         [me draw];
     }];

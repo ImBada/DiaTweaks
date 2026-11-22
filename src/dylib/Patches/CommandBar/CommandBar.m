@@ -258,7 +258,10 @@ void DPShowShade(DPCommandBarOverlay *overlay) {
 
 - (void)layout {
     [super layout];
-    if (self.panel) self.panel.frame = [self frameForPanelSize:self.panel.frame.size];
+    if (self.panel) {
+        NSRect target = [self frameForPanelSize:self.panel.frame.size];
+        if (!NSEqualRects(self.panel.frame, target)) self.panel.frame = target;
+    }
     DPPlaceShade(self.shade, self.host);
 }
 

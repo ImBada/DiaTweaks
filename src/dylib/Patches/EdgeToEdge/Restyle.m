@@ -2,14 +2,14 @@
 
 static char DPChatKey, DPPendingRestyleKey, DPCheckChatKey;
 
-void DPRestyleContainer(NSView *container) {
+static void DPRestyleContainerBody(NSView *container, BOOL allowFrame) {
     DPApplySquareCorners(container);
-    CALayer *card = DPChatCard(container).layer;
-    if (!card) return;
-    if (card.cornerCurve != kCACornerCurveContinuous) card.cornerCurve = kCACornerCurveContinuous;
+    if (!allowFrame || !DPChatCard(container)) return;
     NSValue *requested = DPRequestedFrame(container);
     if (requested && !NSEqualRects(container.frame, requested.rectValue) && DPMayAdjust(container)) container.frame = requested.rectValue;
 }
+
+void DPRestyleContainer(NSView *container) { DPRestyleContainerBody(container, YES); }
 
 static void DPQueueRestyle(NSView *container, BOOL checkChat) {
     if (checkChat) DPSet(container, &DPCheckChatKey, @YES);
@@ -33,7 +33,7 @@ static void DPQueueRestyle(NSView *container, BOOL checkChat) {
 
 static void DPContainer_layoutOrUpdateLayer(NSView *self, SEL _cmd) {
     DPCallOriginal(DPContainer_layoutOrUpdateLayer, self);
-    DPRestyleContainer(self);
+    DPRestyleContainerBody(self, _cmd != @selector(updateLayer));
     DPQueueRestyle(self, NO);
 }
 

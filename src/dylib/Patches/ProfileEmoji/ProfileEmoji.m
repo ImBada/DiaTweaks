@@ -17,35 +17,58 @@ static NSString *DPSpaceIDOf(NSView *view, NSDictionary *views) {
     return nil;
 }
 
+static BOOL DPAnySidebarEmoji(NSView *switcher) {
+    if (!DPProfileEmoji.on || !switcher) return NO;
+    NSDictionary *emojis = [DPEmojiDefaults dictionaryForKey:DPEmojisKey];
+    if (!emojis.count) return NO;
+    NSDictionary *views = DPSwiftValue(switcher, @"itemViews");
+    for (id key in views) if (emojis[[key description]]) return YES;
+    return NO;
+}
+
 static void DPShowEmoji(NSView *host, NSView *dot, NSString *emoji, CGFloat size, CGFloat alpha) {
     NSTextField *label = DPGet(host, &DPLabelKey);
     if (!emoji) {
         if (!label) return;
-        dot.hidden = NO;
+        if (dot.hidden) dot.hidden = NO;
         [label removeFromSuperview];
         DPSet(host, &DPLabelKey, nil);
         return;
     }
-    dot.hidden = YES;
+    if (!dot.hidden) dot.hidden = YES;
+    BOOL resized = !label;
     if (!label) {
         label = [NSTextField labelWithString:@""];
         label.alignment = NSTextAlignmentCenter;
         [host addSubview:label];
         DPSet(host, &DPLabelKey, label);
     }
-    label.stringValue = emoji;
-    label.font = [NSFont systemFontOfSize:size];
-    label.alphaValue = alpha;
-    [label sizeToFit];
-    label.frame = (NSRect){ { NSMidX(host.bounds) - label.frame.size.width / 2, NSMidY(host.bounds) - label.frame.size.height / 2 }, label.frame.size };
+    if (![label.stringValue isEqual:emoji]) {
+        label.stringValue = emoji;
+        resized = YES;
+    }
+    if (fabs(label.font.pointSize - size) > 0.01) {
+        label.font = [NSFont systemFontOfSize:size];
+        resized = YES;
+    }
+    if (fabs(label.alphaValue - alpha) > 0.001) label.alphaValue = alpha;
+    if (resized) [label sizeToFit];
+    NSRect target = (NSRect){ { round(NSMidX(host.bounds) - label.frame.size.width / 2), round(NSMidY(host.bounds) - label.frame.size.height / 2) }, label.frame.size };
+    if (!NSEqualRects(label.frame, target)) label.frame = target;
 }
 
 static void DPShowSidebarItem(NSView *item) {
-    if (!DPProfileEmoji.on && !DPGet(item, &DPLabelKey)) return;
+    NSTextField *existing = DPGet(item, &DPLabelKey);
+    if (!DPProfileEmoji.on && !existing) return;
     NSString *emoji = DPEmoji(DPSpaceIDOf(item, DPSwiftValue(item.superview, @"itemViews")));
+    BOOL any = emoji || DPAnySidebarEmoji(item.superview);
+    if (!existing && !any) return;
     BOOL selected = [DPSwiftValue(item, @"isSelected") boolValue];
     NSView *dot = DPSwiftValue(item, @"$__lazy_storage_$_dotView");
-    [dot setFrameOrigin:NSMakePoint(round(NSMidX(item.bounds) - NSWidth(dot.frame) / 2), NSMinY(dot.frame))];
+    if (dot && !emoji) {
+        NSPoint origin = NSMakePoint(round(NSMidX(item.bounds) - NSWidth(dot.frame) / 2), NSMinY(dot.frame));
+        if (!NSEqualPoints(dot.frame.origin, origin)) [dot setFrameOrigin:origin];
+    }
     DPShowEmoji(item, dot, emoji, DPSidebarEmojiSize, selected ? 1 : 0.45);
 }
 
@@ -87,7 +110,17 @@ static void DPSidebarItem_layout(NSView *self, SEL _cmd) {
 
 static void DPSidebarItem_updateLayer(NSView *self, SEL _cmd) {
     DPCallOriginal(DPSidebarItem_updateLayer, self);
-    DPShowSidebarItem(self);
+    NSTextField *label = DPGet(self, &DPLabelKey);
+    if (!DPProfileEmoji.on && !label) return;
+    NSString *emoji = DPEmoji(DPSpaceIDOf(self, DPSwiftValue(self.superview, @"itemViews")));
+    if ((emoji != nil) != (label != nil)) {
+        __weak NSView *weakSelf = self;
+        dispatch_async(dispatch_get_main_queue(), ^{ weakSelf.needsLayout = YES; });
+        return;
+    }
+    if (!label) return;
+    CGFloat alpha = [DPSwiftValue(self, @"isSelected") boolValue] ? 1 : 0.45;
+    if (fabs(label.alphaValue - alpha) > 0.001) label.alphaValue = alpha;
 }
 
 static void DPTopDot_layout(NSView *self, SEL _cmd) {

@@ -133,6 +133,8 @@ void DPPlaceDraggedTab(void) {
     }
 }
 
+void DPClearDraggedTab(void) { DPDragHandedSet = NO; }
+
 static id<NSDraggingInfo> DPDiaDrag(NSView *tabList, id<NSDraggingInfo> info) {
     if (!DPCompactTabRows.on) return info;
     NSCollectionView *list = (NSCollectionView *)DPFindView(tabList, ^BOOL(NSView *view) { return DPIsKind(view, DPDiaTabListCollection); });
@@ -145,15 +147,14 @@ static id<NSDraggingInfo> DPDiaDrag(NSView *tabList, id<NSDraggingInfo> info) {
 
 static NSDragOperation DPTabList_entered(NSView *self, SEL _cmd, id<NSDraggingInfo> info) {
     NSDragOperation operation = DPCallOriginal(DPTabList_entered, self, DPDiaDrag(self, info));
-    DPPlaceDraggedTab();
+    if (DPCompactTabRows.on) DPPlaceDraggedTab();
     return operation;
 }
 static NSDragOperation DPTabList_updated(NSView *self, SEL _cmd, id<NSDraggingInfo> info) {
     NSDragOperation operation = DPCallOriginal(DPTabList_updated, self, DPDiaDrag(self, info));
-    DPPlaceDraggedTab();
+    if (DPCompactTabRows.on) DPPlaceDraggedTab();
     return operation;
 }
-void DPClearDraggedTab(void) { DPDragHandedSet = NO; }
 
 // Clear before a drop so its proxied point isn't applied to the next drag.
 static BOOL DPDropped(BOOL result) {
@@ -191,14 +192,23 @@ static void DPLabel_layout(NSTextField *self, SEL _cmd) {
     self.superview.needsLayout = YES;
 }
 
+static char DPHeaderYKey;
+
 static void DPGroupCell_layout(NSView *self, SEL _cmd) {
     DPCallOriginal(DPGroupCell_layout, self);
     CGFloat target = DPCompactRowHeight();
-    if (!DPCompactTabRows.on || NSHeight(self.bounds) <= target + 0.5) return;
+    BOOL active = DPCompactTabRows.on && NSHeight(self.bounds) > target + 0.5;
     for (NSView *header in self.subviews) {
+        if (DPIsKind(header, DPDiaTabGroupBackground)) continue;
+        if (!active && !DPGet(header, &DPHeaderYKey)) continue;
+        CGFloat diaY = [DPDiaValue(header, &DPHeaderYKey, @(NSMinY(header.frame))) doubleValue];
         CGFloat extra = NSHeight(header.frame) - (target - 3);
-        if (!DPIsKind(header, DPDiaTabGroupBackground) && extra > 0.5 && NSHeight(header.frame) < DPOldRowHeight + 1.5 && NSMinY(header.frame) > 1)
-            [header setFrameOrigin:NSMakePoint(NSMinX(header.frame), NSMinY(header.frame) - extra / 2)];
+        BOOL shift = active && extra > 0.5 && NSHeight(header.frame) < DPOldRowHeight + 1.5 && diaY > 1;
+        CGFloat wantY = shift ? diaY - extra / 2 : diaY;
+        if (shift) DPOverride(header, &DPHeaderYKey, @(diaY), @(wantY));
+        else if (DPGet(header, &DPHeaderYKey)) DPSet(header, &DPHeaderYKey, nil);
+        if (fabs(NSMinY(header.frame) - wantY) > 0.01 && DPMayAdjust(header))
+            [header setFrameOrigin:NSMakePoint(NSMinX(header.frame), wantY)];
     }
 }
 
@@ -330,6 +340,7 @@ static NSArray<NSView *> *DPAllCompactViews(const char *className) {
 
 static void DPApplyCompactTabRows(DPPatch *patch) {
     for (NSView *view in DPAllCompactViews(DPDiaTabListCollection)) [((NSCollectionView *)view).collectionViewLayout invalidateLayout];
+    for (NSView *cell in DPAllCompactViews(DPDiaTabGroupCell)) cell.needsLayout = YES;
     for (NSView *shape in DPAllCompactViews(DPDiaTabShape)) shape.needsLayout = YES;
     for (NSView *label in DPAllCompactViews(DPDiaFeatheredLabel)) {
         label.needsLayout = YES;

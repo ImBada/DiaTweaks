@@ -38,7 +38,7 @@ static void DPPopover_setFrameOrigin(NSView *self, SEL _cmd, NSPoint origin) {
 static void DPRefit(NSView *commandBar) {
     NSView *box = commandBar.superview;
     while (box && !DPIsKind(box, DPDiaPopover) && !(DPIsKind(box, DPDiaAssistantPanel) && DPTrimsPanel(box))) box = box.superview;
-    if (!box) return;
+    if (!box || !DPMayAdjust(box)) return;
     NSRect before = box.frame;
     NSSize full = NSMakeSize(NSWidth(before), NSHeight(before) + DPTrim(box));
     if (fabs(full.height - DPCompactSize(box, full).height - DPTrim(box)) < 0.5) return;
@@ -56,7 +56,7 @@ static void DPCommandBar_layout(NSView *self, SEL _cmd) {
     if (hidden && toolbar && !compact) {
         NSRect frame = toolbar.frame;
         frame.origin.y = NSMaxY(suggestions.frame) - hidden;
-        toolbar.frame = frame;
+        if (!NSEqualRects(toolbar.frame, frame) && DPMayAdjust(toolbar)) toolbar.frame = frame;
     }
     NSStackView *stack = toolbar.subviews.firstObject;
     if (![stack isKindOfClass:NSStackView.class]) return;
@@ -71,7 +71,7 @@ static void DPCommandBar_layout(NSView *self, SEL _cmd) {
     CGFloat cut = MAX(0, NSMaxY([self convertRect:self.bounds toView:nil]) - NSHeight(self.window.frame));
     NSRect frame = toolbar.frame;
     frame.origin.y = (MIN(cut, NSMinY(input.frame)) + rowBottom - NSHeight(frame)) / 2;
-    toolbar.frame = frame;
+    if (!NSEqualRects(toolbar.frame, frame) && DPMayAdjust(toolbar)) toolbar.frame = frame;
 }
 
 static CGFloat DPTextWidth(NSView *input, NSView *text, NSView *go) {
@@ -85,7 +85,7 @@ static void DPCommandBarInput_layout(NSView *self, SEL _cmd) {
     if (!go || !text) return;
     NSRect frame = text.frame;
     frame.size.width = DPTextWidth(self, text, go);
-    text.frame = frame;
+    if (!NSEqualRects(text.frame, frame) && DPMayAdjust(text)) text.frame = frame;
 }
 
 // The toolbar lays Go out after the input, and Go widens to "Go ↵" as you type a URL.

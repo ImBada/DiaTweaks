@@ -90,7 +90,8 @@ void DPPlaceSeparatorBrush(NSView *separator) {
     if (!brush && !line) return;
     CGFloat right = closeAll ? NSMinX(closeAll.frame) - DPCloseAllGap : NSMaxX(separator.bounds) - 7;
     if (DPTidyTabs.on) {
-        brush.frame = NSMakeRect(right - DPTidyBrushSize, round(NSMidY(separator.bounds) - DPTidyBrushSize / 2), DPTidyBrushSize, DPTidyBrushSize);
+        NSRect target = NSMakeRect(right - DPTidyBrushSize, round(NSMidY(separator.bounds) - DPTidyBrushSize / 2), DPTidyBrushSize, DPTidyBrushSize);
+        if (!NSEqualRects(brush.frame, target)) brush.frame = target;
         if (brush.hidden != !shown) brush.hidden = !shown;
     } else {
         [brush removeFromSuperview];
@@ -120,7 +121,8 @@ static void DPSeparator_layout(NSView *self, SEL _cmd) {
 
 static void DPSeparator_updateLayer(NSView *self, SEL _cmd) {
     DPCallOriginal(DPSeparator_updateLayer, self);
-    DPPlaceSeparatorBrush(self);
+    CALayer *line = DPSeparatorLine(self);
+    if (line) DPTidyWave(self.layer, line, line.backgroundColor, DPTidyTabs.on && DPTidyIsBusy());
 }
 
 static NSView *DPCollection_hitTest(NSView *self, SEL _cmd, NSPoint point) {

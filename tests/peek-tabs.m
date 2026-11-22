@@ -151,11 +151,13 @@ static NSMapTable<NSWindow *, id> *gScriptWindows;
 @interface DPPeekTabWindow : NSWindow
 @property NSInteger makeKeyCalls;
 @property BOOL fakeKey;
+@property CGFloat fakeScale;
 @end
 @implementation DPPeekTabWindow
 - (void)makeKeyWindow { self.makeKeyCalls++; }
 - (BOOL)isKeyWindow { return self.fakeKey; }
 - (BOOL)isVisible { return YES; }
+- (CGFloat)backingScaleFactor { return self.fakeScale > 0 ? self.fakeScale : [super backingScaleFactor]; }
 @end
 
 DPPatch DPPeek = { .on = YES }, DPPeekPinnedLinks = { .on = YES }, DPShowLoadingProgress;
@@ -365,6 +367,42 @@ int main(void) {
         Check(NSEqualRects(p1.frame, [holder2 convertRect:pane2.bounds fromView:pane2]), "P1 adopts rebuilt pane2 frame");
         Check(p1.tabBadge.superview == topRowA, "👀 badge reattaches onto rebuilt top-tab rowA");
         Check(window.firstResponder == p1.host, "returning to A restores first responder to P1");
+
+        // 3b. Recycled TabView cell: when rowA is rebound to another tab's contentID and uuidA scrolls off-screen,
+        // DPPeekRefreshTabBadge removes 👀 badge & tracking area from the recycled cell, then re-attaches when uuidA returns.
+        NSString *uuidOther = @"99999999-9999-9999-9999-999999999999";
+        topRowA.viewModel.stateSubject.currentValue.contentID = uuidOther;
+        DPPeekRefreshTabBadge(p1);
+        Check(p1.tabBadge.superview == nil && topRowA.trackingAreas.count == 0,
+              "recycled TabView cell sheds 👀 badge and tracking area when origin tab scrolls off-screen");
+        _TtC5TabUI7TabView *reboundA = MakeTabRow(strip, uuidA, @"selected");
+        DPPeekRefreshTabBadge(p1);
+        Check(p1.tabBadge.superview == reboundA && reboundA.trackingAreas.count == 1,
+              "👀 badge re-attaches cleanly once origin tab reappears");
+        [reboundA removeFromSuperview];
+        topRowA.viewModel.stateSubject.currentValue.contentID = uuidA;
+        DPPeekRefreshTabBadge(p1);
+
+        // 3c. Multi-display backingScaleFactor change (1x <-> 2x) updates Peek card/find borderWidth and control icon contentsScale.
+        window.fakeScale = 1.0;
+        [p1 viewDidChangeBackingProperties];
+        Check(fabs(p1.clip.layer.borderWidth - 1.0) < 0.01, "DPPeekCard updates clip borderWidth for 1x display");
+        DPPeekButton *ctrlBtn = nil;
+        for (NSView *sub in p1.controls.subviews) if ([sub isKindOfClass:DPPeekButton.class]) { ctrlBtn = (DPPeekButton *)sub; break; }
+        [ctrlBtn viewDidChangeBackingProperties];
+        Check(ctrlBtn != nil && fabs(ctrlBtn.iconLayer.contentsScale - 1.0) < 0.01, "DPPeekButton re-rasterizes icon at 1x scale");
+        window.fakeScale = 2.0;
+        [p1 viewDidChangeBackingProperties];
+        [ctrlBtn viewDidChangeBackingProperties];
+        Check(fabs(p1.clip.layer.borderWidth - 0.5) < 0.01 && fabs(ctrlBtn.iconLayer.contentsScale - 2.0) < 0.01,
+              "DPPeekCard and DPPeekButton restore 2x hairline and Retina icon on 2x display");
+        DPPeekFindShortcut(p1, cmdF, NSEventModifierFlagCommand);
+        DPPeekFind *findBar = DPGet(p1, DPPeekFindKey);
+        window.fakeScale = 1.0;
+        [findBar viewDidChangeBackingProperties];
+        Check(findBar != nil && fabs(findBar.layer.borderWidth - 1.0) < 0.01, "DPPeekFind updates borderWidth on scale change");
+        window.fakeScale = 2.0;
+        DPPeekHideFind(p1);
 
         // Address edit end & Find hide while hidden MUST NOT steal focus back to hidden P1.
         DPPeekAddress *addr = (DPPeekAddress *)DPPeekAddressFor(p1Page);

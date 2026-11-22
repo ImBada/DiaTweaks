@@ -42,8 +42,11 @@ CGFloat DPBaseCornerRadius(NSView *container) {
 static void DPSetCornerRadius(NSView *container, CGFloat inset) {
     CGFloat *radius = DPIvar(container, "cornerRadius");
     if (!radius) return;
-    CGFloat base = DPBaseCornerRadius(container), target = MAX(0, base + inset + DPWindowCornerGrowth(container.window));
-    DPOverride(container, &DPRadiusKey, @(base), @(target));
+    CGFloat delta = inset + DPWindowCornerGrowth(container.window);
+    if (delta == 0 && !DPGet(container, &DPRadiusKey)) return;
+    CGFloat base = DPBaseCornerRadius(container), target = MAX(0, base + delta);
+    if (delta != 0) DPOverride(container, &DPRadiusKey, @(base), @(target));
+    else DPSet(container, &DPRadiusKey, nil);
     if (*radius == target) return;
     *radius = target;
     container.needsLayout = YES;
@@ -67,15 +70,20 @@ void DPAnimateLayer(NSView *container, CALayer *layer, NSString *key, id value) 
 }
 
 static void DPContainer_setFrame(NSView *self, SEL _cmd, NSRect frame) {
-    NSAnimationContext *context = NSAnimationContext.currentContext;
-    if (context.allowsImplicitAnimation || CATransaction.animationDuration > 0) {
-        CFTimeInterval duration = context.duration ?: CATransaction.animationDuration;
-        CAMediaTimingFunction *timing = context.timingFunction ?: [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionDefault];
-        DPSet(self, &DPAnimationKey, @[ @(CACurrentMediaTime() + duration), timing ]);
+    BOOL active = DPEdgeToEdge.on || DPEdgeToEdge.progress > 0 || DPWindowCorners.on;
+    if (active) {
+        NSAnimationContext *context = NSAnimationContext.currentContext;
+        if (context.allowsImplicitAnimation || CATransaction.animationDuration > 0) {
+            CFTimeInterval duration = context.duration ?: CATransaction.animationDuration;
+            CAMediaTimingFunction *timing = context.timingFunction ?: [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionDefault];
+            DPSet(self, &DPAnimationKey, @[ @(CACurrentMediaTime() + duration), timing ]);
+        }
+    } else if (DPGet(self, &DPAnimationKey)) {
+        DPSet(self, &DPAnimationKey, nil);
     }
     DPSet(self, &DPRequestedFrameKey, @(frame));
     [DPContainers addObject:self];
-    NSRect adjusted = DPMayAdjust(self) ? DPEdgeToEdgeFrame(self, frame) : frame;
+    NSRect adjusted = active && DPMayAdjust(self) ? DPEdgeToEdgeFrame(self, frame) : frame;
     DPSetCornerRadius(self, NSEqualRects(adjusted, frame) ? 0 : DPEdgeToEdge.progress * DPWindowPadding);
     DPCallOriginal(DPContainer_setFrame, self, adjusted);
 }

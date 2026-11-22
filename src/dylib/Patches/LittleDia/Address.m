@@ -65,10 +65,18 @@
     return [title isKindOfClass:NSString.class] ? title : nil;
 }
 
+- (void)viewDidChangeEffectiveAppearance {
+    [super viewDidChangeEffectiveAppearance];
+    [self refresh];
+}
+
 - (void)refresh {
     BOOL open = self.hovered || self.field;
     [self.effectiveAppearance performAsCurrentDrawingAppearance:^{
+        [CATransaction begin];
+        [CATransaction setDisableActions:YES];
         self.layer.backgroundColor = open ? [NSColor.labelColor colorWithAlphaComponent:0.07].CGColor : nil;
+        [CATransaction commit];
     }];
     if (self.field) return;
     NSURL *url = self.url;

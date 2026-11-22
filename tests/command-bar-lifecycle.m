@@ -95,6 +95,13 @@ void DPCloseTab(id tab) {}
 - (void)doCommandBySelector:(SEL)sel { if (sel == @selector(cancelOperation:)) gCancelPopoverCalls++; }
 @end
 
+@interface DPCountingPanel : NSView
+@property NSInteger frameWrites;
+@end
+@implementation DPCountingPanel
+- (void)setFrame:(NSRect)frame { self.frameWrites++; [super setFrame:frame]; }
+@end
+
 @interface _TtCC14DynamicPopover28DynamicPopoverViewControllerP33_AB0357A1429F4D6D7F128058B713C93F8RootView : NSView
 @end
 @implementation _TtCC14DynamicPopover28DynamicPopoverViewControllerP33_AB0357A1429F4D6D7F128058B713C93F8RootView
@@ -174,6 +181,18 @@ int main(void) {
         overlay.needsLayout = NO;
 
         gChoice = @"window";
+        DPCountingPanel *countingPanel = [[DPCountingPanel alloc] initWithFrame:NSMakeRect(0, 0, 400, 60)];
+        overlay.panel = countingPanel;
+        [overlay addSubview:countingPanel];
+        [overlay layout];
+        NSInteger afterFirst = countingPanel.frameWrites;
+        [overlay layout];
+        [overlay layout];
+        CHECK(afterFirst == 1 && countingPanel.frameWrites == 1,
+              "DPCommandBarOverlay -layout skips redundant panel setFrame: when target rect is unchanged");
+        overlay.panel = nil;
+        [countingPanel removeFromSuperview];
+        overlay.needsLayout = NO;
         DPApplyCommandBar(&DPCommandBarBlur);
         CHECK(overlay.needsLayout && gCancelPopoverCalls == 0,
               "DPApplyCommandBar marks overlay needsLayout and sub-patch toggle does not close Cmd+L popover");

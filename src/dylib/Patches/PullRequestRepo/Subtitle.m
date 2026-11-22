@@ -23,6 +23,12 @@ NSView *DPEnclosingView(NSView *view, const char *className) {
 
 static BOOL DPInTabList(NSView *view) { return DPEnclosingView(view, DPDiaTabListCollection) != nil; }
 
+NSString *DPPRTabIDOf(NSView *view) {
+    view = DPEnclosingView(view, DPDiaTabContentView);
+    id controller = DPSwiftValue(DPSwiftValue(view, @"viewModel"), @"delegate");
+    return DPMatch(@"[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}", [DPSwiftValue(controller, @"tabID") description]);
+}
+
 NSDictionary *DPPullRequestOf(NSView *view) {
     view = DPEnclosingView(view, DPDiaTabContentView);
     id controller = DPSwiftValue(DPSwiftValue(view, @"viewModel"), @"delegate");
@@ -30,7 +36,7 @@ NSDictionary *DPPullRequestOf(NSView *view) {
     if (![item containsString:@".pullRequest("]) return nil;
     NSString *repo = DPMatch(@"github\\.com/[^/\\s]+/([^/\\s)]+)/pull/[0-9]+", item), *number = DPMatch(@"github\\.com/[^\\s)]+/pull/([0-9]+)", item);
     NSString *author = DPMatch(@"author: \"([^\"]+)\"", item), *state = DPMatch(@"PullRequest\\.Status\\.([a-zA-Z]+)", item);
-    NSString *tab = DPMatch(@"[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}", [DPSwiftValue(controller, @"tabID") description]);
+    NSString *tab = DPPRTabIDOf(view);
     if (!repo || !number || !author) return nil;
     NSString *line = [NSString stringWithFormat:@"%@ #%@", repo, number];
     state = state.length ? [[state substringToIndex:1].uppercaseString stringByAppendingString:[state substringFromIndex:1]] : @"";
@@ -74,10 +80,17 @@ static void DPLabel_setStringValue(NSTextField *self, SEL _cmd, NSString *value)
     }
     if (!DPIsPRSubtitle(self)) return DPCallOriginal(DPLabel_setStringValue, self, value);
     NSString *status = nil, *tab = nil, *shown = value ? DPSplit(self, value, &status, &tab) : nil;
+    NSArray *saved = DPGet(self, &DPDiaTextKey);
+    if (!shown && saved && [value isEqual:saved[1]] && DPPullRequestOf(self)) {
+        DPSet(self, &DPCheckedKey, value);
+        DPSet(self, &DPInListKey, @(DPInTabList(self)));
+        return DPCallOriginal(DPLabel_setStringValue, self, value);
+    }
     if (shown) DPOverride(self, &DPDiaTextKey, value, shown);
+    else if (saved) DPSet(self, &DPDiaTextKey, nil);
     DPSet(self, &DPCheckedKey, shown ?: value);
     DPSet(self, &DPInListKey, @(DPInTabList(self)));
-    DPSetPRStatus(self, tab, status);
+    DPSetPRStatus(self, tab ?: DPPRTabIDOf(self), status);
     DPCallOriginal(DPLabel_setStringValue, self, shown ?: value);
 }
 

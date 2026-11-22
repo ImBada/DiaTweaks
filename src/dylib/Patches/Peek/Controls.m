@@ -4,11 +4,13 @@ static const CGFloat DPHintHeight = 26, DPHintPadX = 10, DPHintPadY = 5, DPHintL
 
 @interface DPPeekButton : NSButton
 @property (nonatomic, weak) NSView *pill;
-@property (nonatomic, copy) NSString *hintText;
+@property (nonatomic, copy) NSString *hintText, *symbolName;
 @property (nonatomic, copy) NSArray<NSString *> *hintKeys;
 @property (nonatomic, strong) CAShapeLayer *circle;
 @property (nonatomic, strong) CALayer *iconLayer;
 @end
+
+static id DPPeekIcon(NSString *name, CGFloat side, CGFloat scale);
 
 CATransform3D DPPeekScaled(NSView *view, CGFloat scale) {
     CGFloat cx = NSWidth(view.bounds) / 2, cy = NSHeight(view.bounds) / 2;
@@ -18,18 +20,46 @@ CATransform3D DPPeekScaled(NSView *view, CGFloat scale) {
 @implementation DPPeekButton
 - (BOOL)acceptsFirstMouse:(NSEvent *)event { return YES; }
 
+- (void)refreshIcon {
+    if (!self.symbolName || !self.iconLayer) return;
+    CGFloat scale = self.window.backingScaleFactor ?: (NSScreen.mainScreen.backingScaleFactor ?: 2);
+    if (self.iconLayer.contents && fabs(self.iconLayer.contentsScale - scale) < 0.01) return;
+    CGFloat side = NSWidth(self.bounds) ?: 28;
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    self.iconLayer.contents = DPPeekIcon(self.symbolName, side, scale);
+    self.iconLayer.contentsScale = scale;
+    [CATransaction commit];
+}
+
+- (void)viewDidMoveToWindow {
+    [super viewDidMoveToWindow];
+    if (self.window) [self refreshIcon];
+}
+
+- (void)viewDidChangeBackingProperties {
+    [super viewDidChangeBackingProperties];
+    [self refreshIcon];
+}
+
 - (void)layout {
     [super layout];
-    self.circle.frame = self.bounds;
     CGPathRef path = CGPathCreateWithEllipseInRect(self.bounds, NULL);
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    self.circle.frame = self.bounds;
     self.circle.path = path;
-    CGPathRelease(path);
     self.iconLayer.frame = self.bounds;
+    [CATransaction commit];
+    CGPathRelease(path);
 }
 
 - (void)setHighlighted:(BOOL)highlighted {
     [super setHighlighted:highlighted];
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
     self.circle.fillColor = [NSColor colorWithWhite:0.08 alpha:highlighted ? 0.7 : 0.9].CGColor;
+    [CATransaction commit];
 }
 
 - (void)updateTrackingAreas {
@@ -58,7 +88,10 @@ CATransform3D DPPeekScaled(NSView *view, CGFloat scale) {
 
 - (void)resetHover {
     [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(showHint) object:nil];
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
     self.layer.transform = CATransform3DIdentity;
+    [CATransaction commit];
     self.pill.alphaValue = 0;
 }
 
@@ -223,6 +256,7 @@ NSView *DPPeekControls(id target, SEL action) {
         button.accessibilityLabel = spec[@"a11y"];
         button.hintText = spec[@"hint"];
         button.hintKeys = spec[@"keys"];
+        button.symbolName = spec[@"symbol"];
         button.wantsLayer = YES;
         button.frame = NSMakeRect(0, (specs.count - 1 - i) * (side + gap), side, side);
 

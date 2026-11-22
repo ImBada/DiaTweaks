@@ -30,7 +30,7 @@ static void DPPlainAppearance(NSView *fill, BOOL plain) {
             DPSet(part, &DPAppearanceKey, part.appearance);
             part.appearance = nil;
         } else if (!plain && dia) {
-            if (!part.appearance && !fill.hiddenOrHasHiddenAncestor) part.appearance = dia;
+            if (!part.appearance && !fill.hiddenOrHasHiddenAncestor && fill.layer.backgroundColor) part.appearance = dia;
             DPSet(part, &DPAppearanceKey, nil);
         }
     }
@@ -38,7 +38,14 @@ static void DPPlainAppearance(NSView *fill, BOOL plain) {
 
 static void DPFill_updateLayer(NSView *self, SEL _cmd) {
     DPCallOriginal(DPFill_updateLayer, self);
-    if (!self.layer.backgroundColor || !DPIsTabFill(self)) return;
+    if (!DPIsTabFill(self)) return;
+    if (!self.layer.backgroundColor) {
+        if (DPGet(self, &DPPlainAppliedKey)) {
+            DPPlainAppearance(self, NO);
+            DPSet(self, &DPPlainAppliedKey, nil);
+        }
+        return;
+    }
     [DPTabFills addObject:self];
     NSColor *dia = [NSColor colorWithCGColor:self.layer.backgroundColor];
     DPSet(self, &DPFillKey, dia);
@@ -65,10 +72,33 @@ static void DPInstallPlainSelectedTab(void) {
     DPHook(DPDiaColorView, @selector(updateLayer), (IMP)DPFill_updateLayer);
 }
 
+static void DPCollectTabFills(NSView *view, Class cls, NSMutableArray<NSView *> *out) {
+    if ([view isKindOfClass:cls] && DPIsTabFill(view)) [out addObject:view];
+    for (NSView *sub in view.subviews) DPCollectTabFills(sub, cls, out);
+}
+
 static void DPApplyPlainSelectedTab(DPPatch *patch) {
-    for (NSView *fill in DPTabFills) fill.needsDisplay = YES;
-    for (NSView *fill in DPFindViews(DPDiaColorView))
-        if (DPIsTabFill(fill)) fill.needsDisplay = YES;
+    NSMutableSet<NSView *> *fills = [NSMutableSet setWithArray:DPTabFills.allObjects ?: @[]];
+    Class cls = objc_getClass(DPDiaColorView);
+    if (cls) {
+        NSMutableArray<NSView *> *all = [NSMutableArray new];
+        for (NSWindow *window in NSApp.windows) DPCollectTabFills(window.contentView, cls, all);
+        [fills addObjectsFromArray:all];
+    }
+    for (NSView *fill in fills) {
+        if (!patch->on && DPGet(fill, &DPPlainAppliedKey)) {
+            DPPlainAppearance(fill, NO);
+            DPSet(fill, &DPPlainAppliedKey, nil);
+            NSColor *dia = DPGet(fill, &DPFillKey);
+            if (dia && fill.layer.backgroundColor) {
+                [CATransaction begin];
+                [CATransaction setDisableActions:YES];
+                fill.layer.backgroundColor = dia.CGColor;
+                [CATransaction commit];
+            }
+        }
+        fill.needsDisplay = YES;
+    }
 }
 
 static NSString *DPVerifyPlainSelectedTab(DPPatch *patch) {

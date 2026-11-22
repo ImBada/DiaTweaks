@@ -44,6 +44,12 @@ static NSRect DPPeekCardRect(NSRect area) {
     }
 }
 
+- (void)viewDidChangeBackingProperties {
+    [super viewDidChangeBackingProperties];
+    self.clip.layer.borderWidth = 1 / (self.window.backingScaleFactor ?: 2);
+    self.needsLayout = YES;
+}
+
 - (NSRect)cardFrame {
     NSRect card = DPPeekCardRect(self.bounds), page = self.bounds;
     CGFloat g = self.grown;
@@ -59,7 +65,10 @@ static NSRect DPPeekCardRect(NSRect area) {
     self.dim.frame = self.bounds;
     self.card.frame = NSInsetRect(card, -DPPeekShadowRoom, -DPPeekShadowRoom);
     self.clip.frame = self.shade.frame = NSInsetRect(self.card.bounds, DPPeekShadowRoom, DPPeekShadowRoom);
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
     self.clip.layer.borderColor = [NSColor colorWithWhite:1 alpha:DPPeekEdgeAlpha * (1 - self.grown)].CGColor;
+    [CATransaction commit];
     self.controls.frame = DPPeekControlsFrame(self, (NSRect){{NSMaxX(card) + 12, NSMinY(card) + 4}, self.controls.frame.size});
     // Not animated with the sidebar slide: the page redraws at its new size at once, so it must cover both card sizes meanwhile.
     CGFloat bar = DPPeekToolbarInset(self);

@@ -18,6 +18,8 @@ static void DPStyleBackground(NSView *cell) {
         NSMutableArray *shadows = hidden ? hidden[1] : [NSMutableArray new];
         hidden = @[ hidden ? hidden[0] : @(layer.borderWidth), shadows, (__bridge id)layer.backgroundColor ];
         DPSet(layer, &DPHiddenKey, hidden);
+        [CATransaction begin];
+        [CATransaction setDisableActions:YES];
         for (CALayer *shadow in layer.sublayers) {
             if (shadow.hidden) continue;
             shadow.hidden = YES;
@@ -25,10 +27,14 @@ static void DPStyleBackground(NSView *cell) {
         }
         layer.backgroundColor = nil;
         layer.borderWidth = 0;
+        [CATransaction commit];
     } else if (hidden && (!DPHideTabGroupBackground.on || layer.backgroundColor)) {
+        [CATransaction begin];
+        [CATransaction setDisableActions:YES];
         if (!layer.backgroundColor) layer.backgroundColor = (__bridge CGColorRef)hidden[2];
         layer.borderWidth = [hidden[0] doubleValue];
         for (CALayer *shadow in hidden[1]) shadow.hidden = NO;
+        [CATransaction commit];
         DPSet(layer, &DPHiddenKey, nil);
     }
 }

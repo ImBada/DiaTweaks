@@ -24,6 +24,11 @@ static const CGFloat DPFindWidth = 260, DPFindHeight = 30, DPFindMargin = 8, DPF
     }];
 }
 
+- (void)viewDidChangeBackingProperties {
+    [super viewDidChangeBackingProperties];
+    self.layer.borderWidth = 1 / (self.window.backingScaleFactor ?: 2);
+}
+
 - (instancetype)initForPeek:(DPPeekCard *)peek {
     if (!(self = [super initWithFrame:NSMakeRect(0, 0, DPFindWidth, DPFindHeight)])) return nil;
     self.peek = peek;

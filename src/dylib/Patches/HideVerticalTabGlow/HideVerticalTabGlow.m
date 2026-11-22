@@ -4,16 +4,18 @@ static const char *const DPDecorationIvars[] = { "$__lazy_storage_$_shadowLayer"
 char DPTabStyledKey;
 static NSHashTable<NSView *> *DPStyledShapes;
 
+void DPTrackStyledShape(NSView *shape) {
+    if (!shape) return;
+    if (!DPStyledShapes) DPStyledShapes = [NSHashTable weakObjectsHashTable];
+    [DPStyledShapes addObject:shape];
+}
+
 static void DPStyleTab(NSView *shape) {
     BOOL active = DPHideVerticalTabGlow.on && DPIsVerticalTab(shape);
     if (!active && !DPGet(shape, &DPTabStyledKey)) return;
     DPSet(shape, &DPTabStyledKey, active ? @YES : nil);
-    if (active) {
-        if (!DPStyledShapes) DPStyledShapes = [NSHashTable weakObjectsHashTable];
-        [DPStyledShapes addObject:shape];
-    } else {
-        [DPStyledShapes removeObject:shape];
-    }
+    if (active) DPTrackStyledShape(shape);
+    else [DPStyledShapes removeObject:shape];
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
     for (const char *const *name = DPDecorationIvars; *name; name++) {

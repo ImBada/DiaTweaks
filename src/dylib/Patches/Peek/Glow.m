@@ -43,8 +43,16 @@ static const CGFloat DPGlowEase = 0.15;
 
 - (void)updateLayer {
     [self.effectiveAppearance performAsCurrentDrawingAppearance:^{
+        [CATransaction begin];
+        [CATransaction setDisableActions:YES];
         self.line.backgroundColor = NSColor.controlAccentColor.CGColor;
+        [CATransaction commit];
     }];
+}
+
+- (void)viewDidChangeBackingProperties {
+    [super viewDidChangeBackingProperties];
+    self.needsLayout = YES;
 }
 
 - (void)layout {
@@ -80,7 +88,7 @@ static const CGFloat DPGlowEase = 0.15;
 }
 
 - (void)step {
-    if (self.isHiddenOrHasHiddenAncestor) return;
+    if (self.isHiddenOrHasHiddenAncestor || self.window.isMiniaturized) return;
     NSObject *page = self.page;
     BOOL loading = [DPValueForKey(page, @"isLoading") boolValue];
     if (loading && !self.loading) {

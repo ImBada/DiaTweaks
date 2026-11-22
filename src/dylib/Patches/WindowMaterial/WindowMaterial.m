@@ -1,7 +1,7 @@
 #import "StdPatch/StdPatch.h"
 
 extern DPPatch DPWindowMaterial, DPTranslucentSidebar;
-static char DPHiddenKey, DPDiaHiddenKey, DPMaterialKey, DPGlassKey, DPOpaqueKey, DPAppliedKey;
+static char DPHiddenKey, DPDiaHiddenKey, DPMaterialKey, DPGlassKey, DPOpaqueKey, DPAppliedKey, DPPendingMaterialKey;
 
 static NSString *const DPMaterials[] = {
     [NSVisualEffectMaterialSidebar] = @"Sidebar",
@@ -52,6 +52,7 @@ static void DPHide(NSView *view, BOOL hide) {
     if (!view) return;
     if (!hide && !DPGet(view, &DPHiddenKey)) return;
     if (hide) {
+        if ([DPGet(view, &DPHiddenKey) boolValue] && view.hidden) return;
         BOOL dia = DPGet(view, &DPDiaHiddenKey) ? [DPGet(view, &DPDiaHiddenKey) boolValue] : view.hidden;
         DPHookClass(view.class, @selector(setHidden:), (IMP)DPView_setHidden);
         DPSet(view, &DPHiddenKey, @YES);
@@ -112,15 +113,19 @@ static void DPApplyMaterialUnder(NSView *tint, BOOL floating) {
             if (!DPGet(effect, &DPMaterialKey)) continue;
             NSArray *dia = DPDiaValue(effect, &DPMaterialKey, @[ @(effect.material), @(effect.blendingMode), @(effect.state) ]);
             DPSet(effect, &DPMaterialKey, nil);
-            effect.material = [dia[0] integerValue];
-            effect.blendingMode = [dia[1] integerValue];
-            effect.state = [dia[2] integerValue];
+            NSVisualEffectMaterial diaMat = [dia[0] integerValue];
+            NSVisualEffectBlendingMode diaBlend = [dia[1] integerValue];
+            NSVisualEffectState diaState = [dia[2] integerValue];
+            if (effect.material != diaMat) effect.material = diaMat;
+            if (effect.blendingMode != diaBlend) effect.blendingMode = diaBlend;
+            if (effect.state != diaState) effect.state = diaState;
             continue;
         }
         NSArray *dia = DPDiaValue(effect, &DPMaterialKey, @[ @(effect.material), @(effect.blendingMode), @(effect.state) ]);
-        effect.material = choice ? value : DPWindowBackgroundMaterial(tint.window);
-        effect.blendingMode = blending;
-        effect.state = NSVisualEffectStateActive;
+        NSVisualEffectMaterial wantMat = choice ? value : DPWindowBackgroundMaterial(tint.window);
+        if (effect.material != wantMat) effect.material = wantMat;
+        if (effect.blendingMode != blending) effect.blendingMode = blending;
+        if (effect.state != NSVisualEffectStateActive) effect.state = NSVisualEffectStateActive;
         // Record AppKit's accepted values (e.g. Sidebar clamps WithinWindow to BehindWindow) so restore recognizes them.
         DPOverride(effect, &DPMaterialKey, dia, @[ @(effect.material), @(effect.blendingMode), @(effect.state) ]);
     }
@@ -184,7 +189,19 @@ static void DPBackgroundTile_updateLayer(NSView *self, SEL _cmd) {
     if (!DPWindowMaterial.on && !DPTranslucentSidebar.on) return;
     for (NSView *host = self.superview; host; host = host.superview) {
         NSView *tint = DPTintIn(host);
-        if (tint) return DPApplyMaterialUnder(tint, DPIsKind(host, DPDiaFloatingSidebar));
+        if (!tint) continue;
+        if ([DPGet(tint, &DPPendingMaterialKey) boolValue]) return;
+        DPSet(tint, &DPPendingMaterialKey, @YES);
+        BOOL floating = DPIsKind(host, DPDiaFloatingSidebar);
+        __weak NSView *weakTint = tint;
+        // Defer subview and window mutations out of AppKit's updateLayer display pass.
+        dispatch_async(dispatch_get_main_queue(), ^{
+            NSView *strongTint = weakTint;
+            if (!strongTint) return;
+            DPSet(strongTint, &DPPendingMaterialKey, nil);
+            DPApplyMaterialUnder(strongTint, floating);
+        });
+        return;
     }
 }
 

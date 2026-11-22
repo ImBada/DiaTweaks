@@ -47,7 +47,10 @@ void DPMatchPage(NSView *row, id page) {
     if ([current isEqual:color] || (!color && !current)) return;
     DPSet(row, &DPColorKey, color);
     row.wantsLayer = YES;
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
     row.layer.backgroundColor = color.CGColor;
+    [CATransaction commit];
     CGFloat luminance = 0.2126 * color.redComponent + 0.7152 * color.greenComponent + 0.0722 * color.blueComponent;
     row.appearance = !color ? nil : [NSAppearance appearanceNamed:luminance > 0.55 ? NSAppearanceNameAqua : NSAppearanceNameDarkAqua];
 }
@@ -126,7 +129,10 @@ void DPMatchPage(NSView *row, id page) {
 
 - (void)layout {
     [super layout];
-    if (!self.outerCorner) return;
+    if (!self.outerCorner) {
+        if (self.layer.mask) self.layer.mask = nil;
+        return;
+    }
     CGFloat small = self.layer.cornerRadius, big = MIN(self.outerCorner, NSHeight(self.bounds) / 2);
     CGFloat left = self.outerCornerOnRight ? small : big, right = self.outerCornerOnRight ? big : small;
     NSRect r = self.bounds;
@@ -138,10 +144,14 @@ void DPMatchPage(NSView *row, id page) {
     CGPathAddArcToPoint(path, NULL, NSMaxX(r), bottom, NSMinX(r), bottom, small);
     CGPathAddArcToPoint(path, NULL, NSMinX(r), bottom, NSMinX(r), top, small);
     CGPathCloseSubpath(path);
-    CAShapeLayer *mask = [CAShapeLayer layer];
-    mask.path = path;
+    CAShapeLayer *mask = [self.layer.mask isKindOfClass:CAShapeLayer.class] ? (CAShapeLayer *)self.layer.mask : [CAShapeLayer layer];
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    mask.frame = self.bounds;
+    if (!mask.path || !CGPathEqualToPath(mask.path, path)) mask.path = path;
+    if (self.layer.mask != mask) self.layer.mask = mask;
+    [CATransaction commit];
     CGPathRelease(path);
-    self.layer.mask = mask;
 }
 
 - (void)drawRect:(NSRect)rect {
@@ -291,12 +301,21 @@ static void DPPlaceBar(DPLittleBar *bar) {
     bar.open.frame = NSMakeRect(NSWidth(row.bounds) - gap - chevron - open.width, top, open.width, open.height);
     bar.profiles.frame = NSMakeRect(NSMaxX(bar.open.frame) + DPGap, top, DPChevron, open.height);
     CGFloat corner = [row.window respondsToSelector:@selector(_cornerRadius)] ? ((CGFloat (*)(id, SEL))objc_msgSend)(row.window, @selector(_cornerRadius)) : 16;
+    DPBarButton *openButton = (DPBarButton *)bar.open;
+    if (!bar.profiles.hidden && openButton.outerCorner > 0) {
+        openButton.outerCorner = 0;
+        openButton.needsLayout = YES;
+    }
     for (DPBarButton *button in @[ bar.leading.firstObject, bar.profiles.hidden ? bar.open : bar.profiles ]) {
         NSRect inWindow = [row convertRect:button.frame toView:nil];
-        button.outerCornerOnRight = button != bar.leading.firstObject;
-        CGFloat side = button.outerCornerOnRight ? NSWidth(row.window.frame) - NSMaxX(inWindow) : NSMinX(inWindow);
-        button.outerCorner = MAX(button.layer.cornerRadius, corner - MAX(side, NSHeight(row.window.frame) - NSMaxY(inWindow)));
-        button.needsLayout = YES;
+        BOOL onRight = button != bar.leading.firstObject;
+        CGFloat side = onRight ? NSWidth(row.window.frame) - NSMaxX(inWindow) : NSMinX(inWindow);
+        CGFloat outer = MAX(button.layer.cornerRadius, corner - MAX(side, NSHeight(row.window.frame) - NSMaxY(inWindow)));
+        if (button.outerCornerOnRight != onRight || fabs(button.outerCorner - outer) > 0.01) {
+            button.outerCornerOnRight = onRight;
+            button.outerCorner = outer;
+            button.needsLayout = YES;
+        }
     }
     // Dia's address stays, unseen, so its frame keeps telling this layout where the address belongs.
     if (title.alphaValue != 0) title.alphaValue = 0;

@@ -22,7 +22,10 @@ static const CGFloat DPLineInset = 11;
 
 - (void)updateLayer {
     [self.effectiveAppearance performAsCurrentDrawingAppearance:^{
+        [CATransaction begin];
+        [CATransaction setDisableActions:YES];
         self->_line.backgroundColor = [NSColor.labelColor colorWithAlphaComponent:0.1].CGColor;
+        [CATransaction commit];
     }];
 }
 

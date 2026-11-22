@@ -4,6 +4,7 @@ extern DPPatch DPPullRequestRepo;
 
 BOOL DPIsPRSubtitle(NSView *label);
 NSView *DPEnclosingView(NSView *view, const char *className);
+NSString *DPPRTabIDOf(NSView *view);
 NSDictionary *DPPullRequestOf(NSView *view);
 void DPRefreshPRSubtitles(void);
 void DPInstallPRSubtitles(void);

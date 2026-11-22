@@ -10,9 +10,19 @@ static void DPGrainStripDidLayout(NSViewController *self, SEL _cmd) {
     DPTrackGrainHost(self.view);
 }
 
+static void DPQueueSidebarGrainRefresh(void) {
+    static BOOL scheduled;
+    if (scheduled) return;
+    scheduled = YES;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        scheduled = NO;
+        if (DPSidebarGrain.on) DPRefreshSidebarGrain();
+    });
+}
+
 static void DPGrainSwitcherItemDidUpdate(NSView *self, SEL _cmd) {
     DPCallOriginal(DPGrainSwitcherItemDidUpdate, self);
-    if (DPSidebarGrain.on && [DPSwiftValue(self, @"isSelected") boolValue]) DPRefreshSidebarGrain();
+    if (DPSidebarGrain.on && [DPSwiftValue(self, @"isSelected") boolValue]) DPQueueSidebarGrainRefresh();
 }
 
 static void DPGrainDotDidLayout(NSView *self, SEL _cmd) {
@@ -22,7 +32,7 @@ static void DPGrainDotDidLayout(NSView *self, SEL _cmd) {
 
 static void DPGrainDotDidUpdate(NSView *self, SEL _cmd) {
     DPCallOriginal(DPGrainDotDidUpdate, self);
-    if (DPSidebarGrain.on && [DPSwiftValue(self, @"isSelected") boolValue]) DPRefreshSidebarGrain();
+    if (DPSidebarGrain.on && [DPSwiftValue(self, @"isSelected") boolValue]) DPQueueSidebarGrainRefresh();
 }
 
 static void DPInstallSidebarGrain(void) {

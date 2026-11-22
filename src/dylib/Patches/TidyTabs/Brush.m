@@ -89,7 +89,10 @@ void DPTidySetBusy(BOOL busy) {
     [self.effectiveAppearance performAsCurrentDrawingAppearance:^{
         if (self.plain) self.contentTintColor = self.hovered ? NSColor.secondaryLabelColor : NSColor.tertiaryLabelColor;
         else self.contentTintColor = self.hovered ? NSColor.labelColor : NSColor.secondaryLabelColor;
+        [CATransaction begin];
+        [CATransaction setDisableActions:YES];
         self.layer.backgroundColor = self.hovered && !self.plain ? NSColor.quaternaryLabelColor.CGColor : NSColor.clearColor.CGColor;
+        [CATransaction commit];
     }];
 }
 

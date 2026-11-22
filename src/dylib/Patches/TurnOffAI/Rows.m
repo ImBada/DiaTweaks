@@ -182,8 +182,11 @@ static void DPTable_selectRows(NSTableView *self, SEL _cmd, NSIndexSet *rows, BO
 }
 
 void DPApplyAIRows(void) {
-    for (NSTableView *table in DPFindViews("NSTableView"))
-        if (DPFoldsRows(table)) DPFindAIRows(table);
+    for (NSWindow *window in NSApp.windows)
+        DPFindView(window.contentView, ^BOOL(NSView *view) {
+            if ([view isKindOfClass:NSTableView.class] && DPFoldsRows((NSTableView *)view)) DPFindAIRows((NSTableView *)view);
+            return NO;
+        });
 }
 
 void DPInstallAIRows(void) {

@@ -4,7 +4,7 @@
 
 static const CGFloat DPExtra = 14;
 static NSMutableSet<NSString *> *DPTallTabs;
-static char DPStatusKey, DPLineKey, DPAdjustedKey, DPEditsKey;
+static char DPStatusKey, DPStatusTabKey, DPLineKey, DPAdjustedKey, DPEditsKey;
 
 @implementation DPPRStatusLine
 @end
@@ -30,16 +30,32 @@ static void DPInvalidateRows(void) {
 
 void DPSetPRStatus(NSView *subtitle, NSString *tab, NSString *status) {
     NSView *content = DPEnclosingView(subtitle.superview, DPDiaTabContentView);
+    NSString *tabID = tab.length ? tab : DPPRTabIDOf(content);
     DPSet(content, &DPStatusKey, status);
+    DPSet(content, &DPStatusTabKey, status && tabID.length ? tabID : nil);
     content.needsLayout = YES;
-    if (!tab.length || [DPTallTabs containsObject:tab] == (status != nil)) return;
-    if (status) [DPTallTabs addObject:tab];
-    else [DPTallTabs removeObject:tab];
+    if (!tabID.length || [DPTallTabs containsObject:tabID] == (status != nil)) return;
+    if (status) [DPTallTabs addObject:tabID];
+    else [DPTallTabs removeObject:tabID];
     DPInvalidateRows();
 }
 
 void DPResetPRRows(void) {
     [DPTallTabs removeAllObjects];
+    Class contentCls = objc_getClass(DPDiaTabContentView);
+    if (contentCls) {
+        NSMutableArray<NSView *> *contents = [NSMutableArray new];
+        for (NSWindow *window in NSApp.windows) DPCollectLists(window.contentView, contentCls, contents);
+        for (NSView *content in contents) {
+            NSTextField *line = DPGet(content, &DPLineKey);
+            if (!line && !DPGet(content, &DPStatusKey) && !DPGet(content, &DPStatusTabKey)) continue;
+            [line removeFromSuperview];
+            DPSet(content, &DPLineKey, nil);
+            DPSet(content, &DPStatusKey, nil);
+            DPSet(content, &DPStatusTabKey, nil);
+            content.needsLayout = YES;
+        }
+    }
     DPInvalidateRows();
 }
 
@@ -56,27 +72,47 @@ static id DPObjectIvar(id object, const char *name) {
 
 static void DPLayout_prepareLayout(NSCollectionViewLayout *self, SEL _cmd) {
     DPCallOriginal(DPLayout_prepareLayout, self);
+    void *height = DPIvar(self, "contentHeight");
+    NSArray *(*elements)(id, SEL, NSRect) = (void *)DPDiaIMP(objc_getClass(DPDiaTabListLayout), @selector(layoutAttributesForElementsInRect:));
+    NSArray *prev = DPGet(self, &DPAdjustedKey);
+    if (prev && height) {
+        DPSet(self, &DPAdjustedKey, nil);
+        NSArray<NSArray *> *written = prev[1];
+        BOOL reused = written.count > 0;
+        for (NSArray *entry in written) {
+            NSCollectionViewLayoutAttributes *a = entry[0];
+            if (!NSEqualRects(a.frame, [entry[1] rectValue])) { reused = NO; break; }
+        }
+        if (reused) {
+            for (NSArray *entry in written) {
+                NSCollectionViewLayoutAttributes *a = entry[0];
+                NSRect frame = a.frame;
+                frame.origin.y -= [entry[2] doubleValue];
+                frame.size.height -= [entry[3] doubleValue];
+                a.frame = frame;
+            }
+            *(double *)height -= [prev[0] doubleValue];
+        }
+    }
     if (!DPPullRequestRepo.on || !DPTallTabs.count) {
         if (DPGet(self, &DPEditsKey)) DPSet(self, &DPEditsKey, nil);
-        if (DPGet(self, &DPAdjustedKey)) DPSet(self, &DPAdjustedKey, nil);
         return;
     }
     id diffable = self.collectionView.dataSource;
     id source = DPObjectIvar(diffable, "_impl");
-    void *height = DPIvar(self, "contentHeight");
     if (![source respondsToSelector:@selector(itemIdentifierForIndexPath:)] || !height) return;
     // Use Dia's IMP so we mutate real attributes, not Collapse Pinned Tabs' copies.
-    NSArray *(*elements)(id, SEL, NSRect) = (void *)DPDiaIMP(objc_getClass(DPDiaTabListLayout), @selector(layoutAttributesForElementsInRect:));
     NSArray<NSCollectionViewLayoutAttributes *> *all = elements(self, @selector(layoutAttributesForElementsInRect:), NSMakeRect(-1e5, -1e5, 2e5, 1e7));
     NSMutableArray<NSCollectionViewLayoutAttributes *> *tall = [NSMutableArray new];
     for (NSCollectionViewLayoutAttributes *a in all)
         if (a.representedElementCategory == NSCollectionElementCategoryItem && [DPTallTabs containsObject:DPTabAt(source, a.indexPath)]) [tall addObject:a];
-    if (!tall.count) return DPSet(self, &DPEditsKey, nil);
-    NSArray *last = DPGet(self, &DPAdjustedKey);
-    if (last[0] == tall[0] && NSEqualRects([last[1] rectValue], tall[0].frame)) return;
+    if (!tall.count) {
+        DPSet(self, &DPEditsKey, nil);
+        return;
+    }
     NSMutableArray<NSValue *> *rows = [NSMutableArray new];
     for (NSCollectionViewLayoutAttributes *a in tall) [rows addObject:[NSValue valueWithRect:a.frame]];
-    NSMutableArray *edits = [NSMutableArray new];
+    NSMutableArray *edits = [NSMutableArray new], *written = [NSMutableArray new];
     for (NSCollectionViewLayoutAttributes *a in all) {
         NSRect frame = a.frame;
         for (NSValue *value in rows) {
@@ -84,13 +120,16 @@ static void DPLayout_prepareLayout(NSCollectionViewLayout *self, SEL _cmd) {
             if (NSMinY(a.frame) >= NSMaxY(row) - 0.5) frame.origin.y += DPExtra;
             else if (NSMinY(a.frame) <= NSMinY(row) + 0.5 && NSMaxY(a.frame) >= NSMaxY(row) - 0.5) frame.size.height += DPExtra;
         }
+        CGFloat dy = frame.origin.y - a.frame.origin.y, dh = frame.size.height - a.frame.size.height;
         if (a.representedElementCategory == NSCollectionElementCategoryItem)
-            [edits addObject:@[a, @(frame.origin.y - a.frame.origin.y), @(frame.size.height - a.frame.size.height)]];
+            [edits addObject:@[a, @(dy), @(dh)]];
+        if (dy != 0 || dh != 0) [written addObject:@[a, [NSValue valueWithRect:frame], @(dy), @(dh)]];
         a.frame = frame;
     }
     DPSet(self, &DPEditsKey, edits);
-    *(double *)height += DPExtra * rows.count;
-    DPSet(self, &DPAdjustedKey, @[tall[0], [NSValue valueWithRect:tall[0].frame]]);
+    double added = DPExtra * rows.count;
+    *(double *)height += added;
+    DPSet(self, &DPAdjustedKey, @[@(added), written]);
 }
 
 static NSArray<NSArray<NSValue *> *> *DPMoves(NSCollectionViewLayout *layout) {
@@ -151,26 +190,39 @@ static void DPContent_layout(NSView *self, SEL _cmd) {
         [line removeFromSuperview];
         DPSet(self, &DPLineKey, nil);
         DPSet(self, &DPStatusKey, nil);
+        DPSet(self, &DPStatusTabKey, nil);
         return;
     }
     NSView *title = DPPart(self, "$__lazy_storage_$_titleView"), *subtitle = DPPart(self, "subtitleView"), *icon = DPPart(self, "subtitleIconView");
+    NSString *statusTab = DPGet(self, &DPStatusTabKey), *currentTab = statusTab.length ? DPPRTabIDOf(self) : nil;
+    if (subtitle.hidden || (statusTab.length && currentTab.length && ![currentTab isEqualToString:statusTab])) {
+        DPSet(self, &DPStatusKey, nil);
+        DPSet(self, &DPStatusTabKey, nil);
+        line.hidden = YES;
+        return;
+    }
     NSTextField *source = (NSTextField *)DPSubview(subtitle, DPDiaFeatheredLabel);
     BOOL tall = status && title && source && NSHeight(self.bounds) >= DPCompactRowHeight() + DPExtra - 1;
     line.hidden = !tall;
     if (!tall) return;
     if (!line) DPSet(self, &DPLineKey, line = [DPPRStatusLine labelWithString:@""]);
     if (line.superview != self) [self addSubview:line];
-    line.font = source.font;
-    line.textColor = source.textColor;
+    if (![line.font isEqual:source.font]) line.font = source.font;
+    if (![line.textColor isEqual:source.textColor]) line.textColor = source.textColor;
     line.lineBreakMode = NSLineBreakByTruncatingTail;
-    line.stringValue = status;
+    if (![line.stringValue isEqualToString:status]) line.stringValue = status;
     CGFloat lineHeight = NSHeight(subtitle.frame), bottom = round((NSHeight(self.bounds) - NSHeight(title.frame) - 2 * lineHeight) / 2);
     CGFloat x = NSMinX(subtitle.frame), width = NSWidth(self.bounds) - x - 8;
     CGFloat text = ceil([status sizeWithAttributes:@{NSFontAttributeName: line.font ?: [NSFont systemFontOfSize:11]}].width);
-    line.frame = NSMakeRect(x, bottom, width, lineHeight);
-    [subtitle setFrameOrigin:NSMakePoint(x, bottom + lineHeight)];
-    [title setFrameOrigin:NSMakePoint(NSMinX(title.frame), bottom + 2 * lineHeight)];
-    if (icon && !icon.hidden) [icon setFrameOrigin:NSMakePoint(x + MIN(text, width) + 5, bottom + (lineHeight - NSHeight(icon.frame)) / 2)];
+    NSRect lineFrame = NSMakeRect(x, bottom, width, lineHeight);
+    if (!NSEqualRects(line.frame, lineFrame)) line.frame = lineFrame;
+    NSPoint subOrigin = NSMakePoint(x, bottom + lineHeight), titleOrigin = NSMakePoint(NSMinX(title.frame), bottom + 2 * lineHeight);
+    if (!NSEqualPoints(subtitle.frame.origin, subOrigin)) [subtitle setFrameOrigin:subOrigin];
+    if (!NSEqualPoints(title.frame.origin, titleOrigin)) [title setFrameOrigin:titleOrigin];
+    if (icon && !icon.hidden) {
+        NSPoint iconOrigin = NSMakePoint(x + MIN(text, width) + 5, bottom + (lineHeight - NSHeight(icon.frame)) / 2);
+        if (!NSEqualPoints(icon.frame.origin, iconOrigin)) [icon setFrameOrigin:iconOrigin];
+    }
 }
 
 void DPInstallPRRows(void) {

@@ -90,10 +90,12 @@ static BOOL gGiveSucceeds = YES;
 
 @interface DPPeekTestWindow : NSWindow
 @property NSInteger makeKeyCalls;
+@property BOOL fakeMiniaturized;
 @end
 @implementation DPPeekTestWindow
 - (void)makeKeyWindow { self.makeKeyCalls++; }
 - (BOOL)isVisible { return YES; }
+- (BOOL)isMiniaturized { return self.fakeMiniaturized; }
 @end
 
 DPPatch DPPeek = { .on = YES }, DPPeekPinnedLinks = { .on = YES }, DPShowLoadingProgress;
@@ -170,6 +172,15 @@ int main(void) {
         glow.shown = 0.75;
         [glow draw];
         CHECK(!glow.needsLayout && fabs(NSWidth(glow.line.frame) - 150) < 0.5, "DPPeekGlow draw updates line directly without relayout");
+        [glow viewDidChangeBackingProperties];
+        CHECK(glow.needsLayout, "DPPeekGlow marks needsLayout on backing scale change");
+        glowPage.isLoading = YES;
+        glowPage.loadProgress = 0.4;
+        window.fakeMiniaturized = YES;
+        glow.shown = 0;
+        [glow step];
+        CHECK(!glow.loading && glow.shown == 0, "DPPeekGlow skips 60fps step work while window is miniaturized");
+        window.fakeMiniaturized = NO;
         [glow removeFromSuperview];
 
         // 2. Regression: DPPeekTabBadge has no retain cycle and Selection sync timer stops when all cards close.
