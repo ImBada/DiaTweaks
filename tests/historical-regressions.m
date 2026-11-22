@@ -6,6 +6,7 @@
 #import "Patches/PullRequestRepo/PullRequestRepo.h"
 #import <Carbon/Carbon.h>
 #import <objc/message.h>
+#import "watchdog.h"
 
 // ASan+UBSan regression suite covering historical regressions & cross-feature invariants:
 // 1. DPPeekToolbar z-order click guard (overlays above Peek: Floating Chat, Command Bar, Find bar)
@@ -56,8 +57,24 @@ static int gNavBackCalls;
 - (void)handOver {}
 @end
 
+// A real NSButton tracks a click until a mouse-up that a synthetic event never delivers, and whether it returns first depends on the macOS build.
+static int gBarButtonMouseDowns;
+@interface DPTestBarButton : NSButton
+@end
+@implementation DPTestBarButton
+- (void)mouseDown:(NSEvent *)event { gBarButtonMouseDowns++; }
+@end
+
+// Overlays that let clicks through, so a click on a bar button always reaches it.
+@interface DPClearView : NSView
+@end
+@implementation DPClearView
+- (NSView *)hitTest:(NSPoint)point { return nil; }
+@end
+
 NSButton *DPMakeBarButton(NSString *symbol, NSString *label, NSString *key, void (^action)(void)) {
-    NSButton *b = [NSButton buttonWithTitle:label target:nil action:nil];
+    NSButton *b = [[DPTestBarButton alloc] initWithFrame:NSZeroRect];
+    b.title = label;
     if (action) {
         id target = [NSBlockOperation blockOperationWithBlock:action];
         b.target = target;
@@ -66,13 +83,13 @@ NSButton *DPMakeBarButton(NSString *symbol, NSString *label, NSString *key, void
     }
     return b;
 }
-NSView *DPMakeDivider(void) { return [NSView new]; }
+NSView *DPMakeDivider(void) { return [DPClearView new]; }
 void DPMatchPage(NSView *row, id page) {}
-NSView *DPPeekAddressFor(id page) { return [NSView new]; }
+NSView *DPPeekAddressFor(id page) { return [DPClearView new]; }
 void DPPeekRefreshAddress(NSView *address) {}
 void DPPeekEditAddress(NSView *address) {}
 BOOL DPPeekEditingAddress(NSView *address) { return NO; }
-NSView *DPPeekGlowFor(id page) { return [NSView new]; }
+NSView *DPPeekGlowFor(id page) { return [DPClearView new]; }
 BOOL DPKeptInPlace(NSView *pane) { return NO; }
 void DPShowProgressLine(NSView *pane, CGFloat fraction) {}
 void DPFinishProgressLine(NSView *pane) {}
@@ -209,13 +226,15 @@ static void TestPeekToolbarZOrderAndBarZoneDealloc(void) {
     [win.contentView addSubview:overlayAbove positioned:NSWindowAbove relativeTo:nil];
     NSEvent *(^toolbarMonitor)(NSEvent *) = gMouseMonitors.lastObject;
     CHECK(toolbarMonitor != nil, "DPPeekToolbar registered mouse monitor");
+    DPStage("Peek toolbar click monitor");
+    gBarButtonMouseDowns = 0;
     NSEvent *resCovered = toolbarMonitor ? toolbarMonitor(click) : nil;
-    CHECK(resCovered == click, "covering overlay above Peek prevents DPPeekToolbar from stealing click");
+    CHECK(resCovered == click && gBarButtonMouseDowns == 0, "covering overlay above Peek prevents DPPeekToolbar from stealing click");
 
     // 2. When uncovered, DPPeekToolbar claims the click (returns nil).
     [overlayAbove removeFromSuperview];
     NSEvent *resUncovered = toolbarMonitor ? toolbarMonitor(click) : click;
-    CHECK(resUncovered == nil, "uncovered DPPeekToolbar intercepts click over Dia toolbar");
+    CHECK(resUncovered == nil && gBarButtonMouseDowns == 1, "uncovered DPPeekToolbar intercepts click and hands it to the Back button");
 
     // 3. DPPeekBarZone dealloc invalidates timers & removes notification observer cleanly under ASan.
     __weak DPPeekBarZone *weakZone = nil;
@@ -363,9 +382,10 @@ int main(void) {
         DPHookClass(NSApp.class, @selector(windows), (IMP)DPApp_windows);
         DPHookClass(NSApp.class, @selector(orderedWindows), (IMP)DPApp_orderedWindows);
 
-        TestPeekToolbarZOrderAndBarZoneDealloc();
-        TestLittleDiaOverAndStackRestore();
-        TestMultiTweakDragOffsetNoLeak();
+        DPArmTestWatchdog(120);
+        DPRunTest(TestPeekToolbarZOrderAndBarZoneDealloc);
+        DPRunTest(TestLittleDiaOverAndStackRestore);
+        DPRunTest(TestMultiTweakDragOffsetNoLeak);
 
         if (failures) {
             printf("%d historical regression test(s) failed\n", failures);

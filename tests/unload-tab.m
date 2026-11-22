@@ -4,6 +4,7 @@
 #import "Patches/PinnedTabCloseButton/PinnedTabs.h"
 #import "Patches/CommandBar/Tabs.h"
 #import <objc/message.h>
+#import "watchdog.h"
 
 // Minimal StdPatch & Swift runtime stubs for standalone ASan/UBSan testing.
 void *swift_unknownObjectWeakLoadStrong(void *ref) {
@@ -31,8 +32,13 @@ static void Trigger(NSMenuItem *item) {
     if (item.target && item.action) ((void (*)(id, SEL, id))objc_msgSend)(item.target, item.action, item);
 }
 
+// The main queue is FIFO, so once the sentinel runs, every block queued before it has run too.
 static void DrainMainQueue(void) {
-    [[NSRunLoop mainRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.03]];
+    __block BOOL drained = NO;
+    dispatch_async(dispatch_get_main_queue(), ^{ drained = YES; });
+    NSDate *limit = [NSDate dateWithTimeIntervalSinceNow:30];
+    while (!drained && limit.timeIntervalSinceNow > 0)
+        [NSRunLoop.mainRunLoop runMode:NSDefaultRunLoopMode beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.05]];
 }
 
 static int failures;
@@ -989,14 +995,20 @@ static void TestNonTabIsolationAndEdgeCases(_TtC3ADK18WebContentChromium *chromi
 int main(void) {
     @autoreleasepool {
         [NSApplication sharedApplication];
+        DPArmTestWatchdog(120);
         DPUnloadTab.install();
         DPUnloadTab.on = YES;
         _TtC3ADK18WebContentChromium *chromium = [_TtC3ADK18WebContentChromium new];
 
+        DPStage("TestRegularAndSidebarPinnedTabs");
         TestRegularAndSidebarPinnedTabs(chromium);
+        DPStage("TestDockAndTopTabPinnedTabs");
         TestDockAndTopTabPinnedTabs(chromium);
+        DPStage("TestMultiWindowSyncedAndSharedURL");
         TestMultiWindowSyncedAndSharedURL(chromium);
+        DPStage("TestOffPausedAndVerify");
         TestOffPausedAndVerify(chromium);
+        DPStage("TestNonTabIsolationAndEdgeCases");
         TestNonTabIsolationAndEdgeCases(chromium);
 
         if (failures) {

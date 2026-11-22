@@ -13,6 +13,7 @@
 #import "Patches/CompactCommandBar/CompactCommandBar.h"
 #import "Patches/LittleDia/LittleDia.h"
 #import "Patches/TurnOffAI/TurnOffAI.h"
+#import "watchdog.h"
 
 BOOL DPTesting = YES;
 
@@ -1041,6 +1042,7 @@ static void TestPlainTabGlowLittleDiaAndTurnOffAI(void) {
 int main(void) {
     @autoreleasepool {
         [NSApplication sharedApplication];
+        DPArmTestWatchdog(120);
         DPPanes = [NSHashTable weakObjectsHashTable];
         DPHideHosts = [NSHashTable weakObjectsHashTable];
         method_exchangeImplementations(class_getInstanceMethod(NSUserDefaults.class, @selector(initWithSuiteName:)),
@@ -1066,11 +1068,11 @@ int main(void) {
         DPInstallLittleDiaOver();
         DPTurnOffAI.install();
 
-        TestEdgeToEdgeOffAndRestore();
-        TestWindowMaterialUpdateLayerAndIdempotency();
-        TestPullRequestRepoAndCompactTabRows();
-        TestProfileEmojiTidyTabsGrainAndCA();
-        TestPlainTabGlowLittleDiaAndTurnOffAI();
+        DPRunTest(TestEdgeToEdgeOffAndRestore);
+        DPRunTest(TestWindowMaterialUpdateLayerAndIdempotency);
+        DPRunTest(TestPullRequestRepoAndCompactTabRows);
+        DPRunTest(TestProfileEmojiTidyTabsGrainAndCA);
+        DPRunTest(TestPlainTabGlowLittleDiaAndTurnOffAI);
 
         [[[NSUserDefaults alloc] initWithSuiteName:@"com.diapatches"] removePersistentDomainForName:DPTestSuiteName()];
     }

@@ -208,7 +208,7 @@ UNLOAD_TAB := src/dylib/Patches/UnloadTab/UnloadTab.m src/dylib/Patches/UnloadTa
 	src/dylib/Patches/PinnedTabCloseButton/PinnedTabs.m src/dylib/Patches/CommandBar/Tabs.m \
 	src/dylib/Commands/GroupTabs/Messages.m src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m
 
-build/unload-tab: tests/unload-tab.m $(UNLOAD_TAB) $(wildcard src/dylib/Patches/UnloadTab/*.h src/dylib/Patches/PinnedTabCloseButton/PinnedTabs.h src/dylib/Patches/CommandBar/Tabs.h src/dylib/Commands/GroupTabs/GroupTabs.h src/dylib/StdPatch/*.h) | build
+build/unload-tab: tests/unload-tab.m tests/watchdog.h $(UNLOAD_TAB) $(wildcard src/dylib/Patches/UnloadTab/*.h src/dylib/Patches/PinnedTabCloseButton/PinnedTabs.h src/dylib/Patches/CommandBar/Tabs.h src/dylib/Commands/GroupTabs/GroupTabs.h src/dylib/StdPatch/*.h) | build
 	clang $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -Isrc/dylib -framework AppKit -framework QuartzCore -o $@ tests/unload-tab.m $(UNLOAD_TAB)
 
 PROFILE_COLOR_PICKER := $(wildcard src/dylib/Patches/ProfileColorPicker/*.m) src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m
@@ -220,7 +220,7 @@ HISTORICAL_REGRESSIONS := src/dylib/Patches/CompactTabRows/CompactTabRows.m src/
 	src/dylib/Patches/PullRequestRepo/PullRequestRepo.m src/dylib/Patches/PullRequestRepo/Subtitle.m src/dylib/Patches/PullRequestRepo/Rows.m \
 	src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m
 
-build/historical-regressions: tests/historical-regressions.m src/dylib/Patches/Peek/Toolbar.m src/dylib/Patches/Peek/ToolbarRules.m src/dylib/Patches/LittleDia/Over.m src/dylib/Patches/LittleDia/Stack.m $(HISTORICAL_REGRESSIONS) $(wildcard src/dylib/StdPatch/*.h src/dylib/Patches/Peek/Peek.h src/dylib/Patches/LittleDia/LittleDia.h src/dylib/Patches/HideToolbar/HideToolbar.h src/dylib/Patches/CompactTabRows/CompactTabRows.h src/dylib/Patches/PullRequestRepo/PullRequestRepo.h) | build
+build/historical-regressions: tests/historical-regressions.m tests/watchdog.h src/dylib/Patches/Peek/Toolbar.m src/dylib/Patches/Peek/ToolbarRules.m src/dylib/Patches/LittleDia/Over.m src/dylib/Patches/LittleDia/Stack.m $(HISTORICAL_REGRESSIONS) $(wildcard src/dylib/StdPatch/*.h src/dylib/Patches/Peek/Peek.h src/dylib/Patches/LittleDia/LittleDia.h src/dylib/Patches/HideToolbar/HideToolbar.h src/dylib/Patches/CompactTabRows/CompactTabRows.h src/dylib/Patches/PullRequestRepo/PullRequestRepo.h) | build
 	clang $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -Isrc/dylib -framework AppKit -framework QuartzCore -o $@ tests/historical-regressions.m $(HISTORICAL_REGRESSIONS)
 
 build/abi-kvc-kvo-swift.o: src/dylib/Commands/GroupTabs/Selection.swift tests/abi-kvc-kvo-swift.swift | build
@@ -232,7 +232,7 @@ ABI_KVC_KVO := src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m src/dylib/Pa
 	src/dylib/Patches/Peek/ToolbarRules.m src/dylib/Patches/Peek/ChatContext.m src/dylib/Patches/Peek/Peek.m \
 	src/dylib/Settings/Preview.m
 
-build/abi-kvc-kvo: tests/abi-kvc-kvo.m build/abi-kvc-kvo-swift.o $(ABI_KVC_KVO) src/dylib/Patches/ExtensionsShortcut/ExtensionsShortcut.m src/dylib/Patches/HideHistorySuggestions/HideHistorySuggestions.m $(wildcard src/dylib/StdPatch/*.h src/dylib/Patches/Peek/*.h src/dylib/Patches/LittleDia/*.h src/dylib/Patches/CommandBar/*.h src/dylib/Patches/SkipAccount/*.h src/dylib/Settings/*.h) | build
+build/abi-kvc-kvo: tests/abi-kvc-kvo.m tests/watchdog.h build/abi-kvc-kvo-swift.o $(ABI_KVC_KVO) src/dylib/Patches/ExtensionsShortcut/ExtensionsShortcut.m src/dylib/Patches/HideHistorySuggestions/HideHistorySuggestions.m $(wildcard src/dylib/StdPatch/*.h src/dylib/Patches/Peek/*.h src/dylib/Patches/LittleDia/*.h src/dylib/Patches/CommandBar/*.h src/dylib/Patches/SkipAccount/*.h src/dylib/Settings/*.h) | build
 	clang $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -Isrc/dylib -framework AppKit -framework QuartzCore -framework AVFoundation -framework VideoToolbox -framework CoreMedia -framework CoreVideo \
 		-L$(SWIFT_LIB) -Wl,-rpath,/usr/lib/swift -o $@ tests/abi-kvc-kvo.m $(ABI_KVC_KVO) build/abi-kvc-kvo-swift.o
 
@@ -252,7 +252,7 @@ VIEW_REUSE_LAYOUT := $(wildcard src/dylib/Patches/EdgeToEdge/*.m) src/dylib/Patc
 	$(wildcard src/dylib/Patches/HideVerticalTabGlow/*.m) \
 	src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m
 
-build/view-reuse-layout: tests/view-reuse-layout.m $(VIEW_REUSE_LAYOUT) $(wildcard src/dylib/StdPatch/*.h) | build
+build/view-reuse-layout: tests/view-reuse-layout.m tests/watchdog.h $(VIEW_REUSE_LAYOUT) $(wildcard src/dylib/StdPatch/*.h) | build
 	clang $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -Isrc/dylib -framework AppKit -framework QuartzCore -framework Metal -o $@ tests/view-reuse-layout.m $(VIEW_REUSE_LAYOUT)
 
 COMBINATORIAL := src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m src/dylib/StdPatch/App.m \
@@ -286,7 +286,7 @@ COMBINATORIAL := src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m src/dylib/
 	$(LAUNCH_FLAGS) src/dylib/Patches/SplitClientHello/SplitClientHello.m \
 	src/dylib/Patches/SplitClientHello/Split.m src/dylib/Patches/SplitClientHello/Write.m src/dylib/Patches/SplitClientHello/Send.m
 
-build/combinatorial-stability: tests/combinatorial-stability.m $(COMBINATORIAL) src/dylib/SafeMode/SafeMode.m $(wildcard src/dylib/StdPatch/*.h) | build
+build/combinatorial-stability: tests/combinatorial-stability.m tests/watchdog.h $(COMBINATORIAL) src/dylib/SafeMode/SafeMode.m $(wildcard src/dylib/StdPatch/*.h) | build
 	clang $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -Isrc/dylib -framework AppKit -framework QuartzCore -o $@ tests/combinatorial-stability.m $(COMBINATORIAL)
 
 check: build/diapatch build/diapatch-tests build/group-tabs build/mouse-back-forward build/vertical-tab-glow build/split-client-hello build/peek-cursor build/peek-link build/peek-tabs build/peek-chat build/safe-mode build/pause build/hook-table build/updates-runtime build/settings-preview build/runtime-guards build/tidy-tabs build/drag-offset build/small-tab-shape build/toolbar-permission build/launch-flags build/little-dia-stack build/little-dia-profile build/little-dia-over build/little-dia-focus build/tracking build/hide-toolbar-settle build/command-bar-swap build/command-bar-spare build/tab-titles build/show-address-field build/hide-chat-button build/hide-connect-app-prompt build/open-sidebar-instantly build/native-messaging build/diapatch-passkeys build/passkeys-origin build/app-icon-signing build/little-dia-route build/chat-card build/peek-lifecycle build/hide-toolbar-off build/command-bar-lifecycle build/window-patches build/pinned-tab-close-button build/sidebar-tab-bugs build/unload-tab build/profile-color-picker build/historical-regressions build/abi-kvc-kvo build/view-reuse-layout build/combinatorial-stability build/patches.json

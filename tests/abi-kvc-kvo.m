@@ -11,6 +11,7 @@
 #import "Patches/HideToolbar/HideToolbar.h"
 #import "Patches/SkipAccount/Startup.h"
 #import "Settings/Settings.h"
+#import "watchdog.h"
 
 extern NSString *DPIDKey(id value);
 extern NSArray<NSString *> *DPSelectionIDKeys(id selection);
@@ -150,8 +151,9 @@ static int failures;
 int main(void) {
     @autoreleasepool {
         [NSApplication sharedApplication];
+        DPArmTestWatchdog(120);
 
-        // === 1. DPValueForKey / DPSetValueForKey KVC safety ===
+        DPStage("1. DPValueForKey / DPSetValueForKey KVC safety");
         NSObject *plain = [NSObject new];
         CHECK(DPValueForKey(plain, @"nonexistentKey") == nil, "DPValueForKey returns nil on missing key without NSUndefinedKeyException");
         CHECK(!DPSetValueForKey(plain, @"nonexistentKey", @1), "DPSetValueForKey returns NO on missing key without throwing");
@@ -163,7 +165,7 @@ int main(void) {
               "DPValueForKey/DPSetValueForKey read and write valid keys");
         CHECK(DPValueForKey(@[ kvc, plain ], @"name") == nil, "DPValueForKey catches partial-key NSArray KVC failure safely");
 
-        // === 2. ExtensionsShortcut: missing context/extensions/KVC keys degrade cleanly ===
+        DPStage("2. ExtensionsShortcut: missing context/extensions/KVC keys degrade cleanly");
         NSWindow *win = [[NSWindow alloc] initWithContentRect:NSMakeRect(-30000, -30000, 400, 300)
                                                     styleMask:NSWindowStyleMaskTitled
                                                       backing:NSBackingStoreBuffered defer:NO];
@@ -172,7 +174,7 @@ int main(void) {
               "DPExtensionsMenu degrades cleanly to No Extensions when browser lacks context/extensions");
         CHECK(DPIconFor([NSObject new], win) != nil, "DPIconFor degrades to fallback symbol when extension info lacks name/icon");
 
-        // === 3. HideHistorySuggestions: missing/malformed KVC keys never crash or wipe results ===
+        DPStage("3. HideHistorySuggestions: missing/malformed KVC keys never crash or wipe results");
         DPFakeBrokenAutocompleteResult *brokenRes = [DPFakeBrokenAutocompleteResult new];
         CHECK(DPWithoutHistory(brokenRes) == brokenRes, "DPWithoutHistory returns original result when KVC keys are missing");
 
@@ -185,7 +187,7 @@ int main(void) {
         CHECK(filtered.combinedMatches.count == 2 && filtered.perProviderMatches[@"HistoryURL"] == nil && [filtered.perProviderMatches[@"Search"] count] == 2,
               "DPWithoutHistory filters history matches while surviving missing-key matches and non-array provider values");
 
-        // === 4. CommandBar/Tabs + LittleDia/Profile: non-array & missing-key delegate safety ===
+        DPStage("4. CommandBar/Tabs + LittleDia/Profile: non-array & missing-key delegate safety");
         DPFakeScriptDelegate *delegate = [DPFakeScriptDelegate new];
         delegate.appleScriptWindows = @"not-an-array";
         NSApp.delegate = delegate;
@@ -209,7 +211,7 @@ int main(void) {
         CHECK(!openedResult, "DPOpenInProfile returns NO synchronously when window lacks windowId");
         NSApp.delegate = nil;
 
-        // === 5. Peek Address / CopyURL / Toolbar / ToolbarRules KVC + dealloc lifecycle ===
+        DPStage("5. Peek Address / CopyURL / Toolbar / ToolbarRules KVC + dealloc lifecycle");
         NSObject *opaquePage = [NSObject new];
         NSView *addr = DPPeekAddressFor(opaquePage);
         DPPeekRefreshAddress(addr);
@@ -241,7 +243,7 @@ int main(void) {
         CHECK(weakZone == nil, "DPPeekBarZone deallocates cleanly with no timer/notification retain cycle");
         [NSNotificationCenter.defaultCenter postNotificationName:DPPatchesDidChangeNotification object:nil];
 
-        // === 6. Peek ChatContext KVO off-main-thread detach race & idempotency ===
+        DPStage("6. Peek ChatContext KVO off-main-thread detach race & idempotency");
         DPPeek.on = YES;
         DPKVOObservedPage *kvoPage = [DPKVOObservedPage new];
         DPKVOObservedPage *kvoSource = [DPKVOObservedPage new];
@@ -265,7 +267,7 @@ int main(void) {
         [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.05]];
         CHECK(weakBridge == nil, "DPPeekChatBridge deallocates cleanly after off-main-thread KVO + detach race");
 
-        // === 7. DPStayingAction NSProxy safety ===
+        DPStage("7. DPStayingAction NSProxy safety");
         DPStayingAction *staying = [DPStayingAction alloc];
         staying.action = @"action-target";
         CHECK([staying respondsToSelector:@selector(navigationDisposition)], "DPStayingAction responds to navigationDisposition");
@@ -280,7 +282,7 @@ int main(void) {
               && ![nilStaying isKindOfClass:NSString.class] && ![nilStaying conformsToProtocol:@protocol(NSCopying)],
               "nil-target DPStayingAction never aborts on NSProxy introspection");
 
-        // === 8. Settings Preview: repeating NSTimer & CADisplayLink proxy break retain cycles ===
+        DPStage("8. Settings Preview: repeating NSTimer & CADisplayLink proxy break retain cycles");
         __weak DPPreviewView *weakPreview = nil;
         DPPreviewLinkProxy *linkProxy = [DPPreviewLinkProxy new];
         @autoreleasepool {
@@ -303,7 +305,7 @@ int main(void) {
         CHECK(weakPreview == nil, "DPPreviewView deallocates cleanly with zero NSTimer or CADisplayLink retain cycle");
         [linkProxy step:nil]; // Weak target nil -> safe no-op.
 
-        // === 9. SkipAccount binary patcher NULL/empty guards & RX page round-trip ===
+        DPStage("9. SkipAccount binary patcher NULL/empty guards & RX page round-trip");
         DPSkipPattern badNull = { .signature = NULL, .length = 1 };
         DPSkipInstruction dummy = { 0, 0 };
         DPSkipPattern badEmpty = { .signature = &dummy, .length = 0 };
@@ -334,7 +336,7 @@ int main(void) {
             mach_vm_deallocate(mach_task_self(), codePage, vm_page_size);
         }
 
-        // === 10. Swift reflection (Selection.swift) on pure Swift class (_TtCs12_SwiftObject) ===
+        DPStage("10. Swift reflection (Selection.swift) on pure Swift class (_TtCs12_SwiftObject)");
         NSString *u1 = @"11111111-2222-3333-4444-555555555555";
         NSString *u2 = @"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
         id pureMulti = DPMakePureSwiftSelection(u1, @[ u1, u2 ]);

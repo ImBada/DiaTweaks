@@ -5,6 +5,7 @@
 #import <objc/message.h>
 #import <objc/runtime.h>
 #import "StdPatch/StdPatch.h"
+#import "watchdog.h"
 #import "StdPatch/Hide.h"
 #import "SafeMode/SafeMode.h"
 #import "Settings/Settings.h"
@@ -1784,6 +1785,7 @@ static void TestPermutationAndPauseStress(void) {
 int main(void) {
     @autoreleasepool {
         [NSApplication sharedApplication];
+        DPArmTestWatchdog(120);
         DPTesting = YES;
         gLittleDiaWindows = [NSHashTable weakObjectsHashTable];
         gLittleDiaOpenedLinks = [NSMutableArray array];
@@ -1838,12 +1840,12 @@ int main(void) {
 
         Check(DPPatchCount >= 25, [NSString stringWithFormat:@"registered %lu real patches for combinatorial testing", (unsigned long)DPPatchCount]);
 
-        TestHookChainsAndDPIsHooked();
-        TestClusterAToolbarChrome();
-        TestClusterBThemeMaterialTint();
-        TestClusterCMenusOverlaysAndLayout();
-        TestClusterDLaunchFlagsAndCoveredTweaks();
-        TestPermutationAndPauseStress();
+        DPRunTest(TestHookChainsAndDPIsHooked);
+        DPRunTest(TestClusterAToolbarChrome);
+        DPRunTest(TestClusterBThemeMaterialTint);
+        DPRunTest(TestClusterCMenusOverlaysAndLayout);
+        DPRunTest(TestClusterDLaunchFlagsAndCoveredTweaks);
+        DPRunTest(TestPermutationAndPauseStress);
 
         [NSUserDefaults.standardUserDefaults removePersistentDomainForName:DPCombSuiteName()];
         [NSFileManager.defaultManager removeItemAtPath:scratchDir error:nil];
