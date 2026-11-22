@@ -294,20 +294,25 @@ static void DPTabList_exited(NSView *self, SEL _cmd, id<NSDraggingInfo> info) {
     DPPinnedHeader *header = DPGet(DPListIn(self), &DPHeaderKey);
     if (header) header.springSince = nil;
     if (!refused) DPCallOriginal(DPTabList_exited, self, info);
+    DPClearDraggedTab();
 }
 
 static BOOL DPTabList_prepare(NSView *self, SEL _cmd, id<NSDraggingInfo> info) {
     if (DPGet(self, &DPRefusedKey)) DPSet(self, &DPRefusedKey, nil);
     if (!DPCollapsePinned.on) return DPCallOriginal(DPTabList_prepare, self, info);
     id<NSDraggingInfo> dia = DPDiaDragOf(self, info);
-    return dia && DPCallOriginal(DPTabList_prepare, self, dia);
+    BOOL ok = dia && DPCallOriginal(DPTabList_prepare, self, dia);
+    DPClearDraggedTab();
+    return ok;
 }
 
 static BOOL DPTabList_perform(NSView *self, SEL _cmd, id<NSDraggingInfo> info) {
     if (DPGet(self, &DPRefusedKey)) DPSet(self, &DPRefusedKey, nil);
     if (!DPCollapsePinned.on) return DPCallOriginal(DPTabList_perform, self, info);
     id<NSDraggingInfo> dia = DPDiaDragOf(self, info);
-    return dia && DPCallOriginal(DPTabList_perform, self, dia);
+    BOOL ok = dia && DPCallOriginal(DPTabList_perform, self, dia);
+    DPClearDraggedTab();
+    return ok;
 }
 
 static void DPTabList_backgroundDoubleClick(NSView *self, SEL _cmd, NSGestureRecognizer *click) {

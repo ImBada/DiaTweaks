@@ -2,7 +2,7 @@
 #import <QuartzCore/QuartzCore.h>
 #import "Patches/CommandBar/CommandBar.m"
 
-static int gCleanHideTabCalls, gUpdateSpareTimerCalls, gForgetSpareCalls, gDropSpareCalls, gClearCatchUpCalls, gFinishHandOverCalls, gCancelPopoverCalls;
+static int gCleanHideTabCalls, gUpdateSpareTimerCalls, gForgetSpareCalls, gDropSpareCalls, gClearCatchUpCalls, gFinishHandOverCalls, gCancelPopoverCalls, gHandToDiaCalls;
 static DPCommandBarOverlay *gHandedOver;
 static NSString *gChoice = @"macos";
 static NSArray<NSWindow *> *gWindows;
@@ -33,7 +33,7 @@ void DPHandOver(DPCommandBarOverlay *overlay) {}
 void DPFinishHandOver(NSWindow *window) { gFinishHandOverCalls++; }
 DPCommandBarOverlay *DPTakeHandOver(NSWindow *window) { DPCommandBarOverlay *o = gHandedOver; gHandedOver = nil; return o; }
 void DPClearCatchUp(NSWindow *window) { gClearCatchUpCalls++; }
-NSEvent *DPHandToDia(NSWindow *window, NSEvent *event, BOOL newTab) { return nil; }
+NSEvent *DPHandToDia(NSWindow *window, NSEvent *event, BOOL newTab) { gHandToDiaCalls++; return nil; }
 BOOL DPWaitForDia(NSWindow *window, NSEvent *event, BOOL newTab) { return NO; }
 void DPDiaCaughtUp(NSWindow *window) {}
 BOOL DPParkSpare(DPCommandBarOverlay *overlay) { return NO; }
@@ -59,10 +59,24 @@ void DPCloseTab(id tab) {}
 
 @interface _TtC6Window14PlatformWindow : NSWindow
 @property (strong) NSWindow *fakeSheet;
+@property (weak) NSResponder *fakeResponder;
 @end
 @implementation _TtC6Window14PlatformWindow
 - (NSWindow *)attachedSheet { return self.fakeSheet; }
+- (NSResponder *)firstResponder { return self.fakeResponder ?: [super firstResponder]; }
 - (BOOL)isVisible { return NO; }
+@end
+
+@interface DPPeekCard : NSView
+@property BOOL closing;
+@property (strong) NSView *toolbar;
+@end
+@implementation DPPeekCard
+@end
+
+@interface _TtC20AssistantPanelUIBase22AssistantPanelRootView : NSView
+@end
+@implementation _TtC20AssistantPanelUIBase22AssistantPanelRootView
 @end
 
 @interface _TtC5Popup19PlatformPopupWindow : NSWindow
@@ -187,6 +201,29 @@ int main(void) {
         [NSNotificationCenter.defaultCenter postNotificationName:NSWindowWillCloseNotification object:browser];
         CHECK(DPGet(browser, &DPOverlayKey) == nil && !openOverlay.watch.valid && gHandedOver == nil && gForgetSpareCalls == 1 && gClearCatchUpCalls == 1,
               "NSWindowWillCloseNotification cleans up open overlay, handed-over overlay, spare, and catch-up");
+
+        // 6. Regression: Cmd+L over a visible Peek card with toolbar passes straight to Peek without arming DPHandToDia,
+        // while Cmd+T and Cmd+L from Side Chat still go through DPHandToDia.
+        DPPeekCard *peekCard = [[DPPeekCard alloc] initWithFrame:browser.contentView.bounds];
+        peekCard.toolbar = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 400, 38)];
+        [browser.contentView addSubview:peekCard];
+        gHandToDiaCalls = 0;
+        NSEvent *peekL = DPKey(browser, @"l", 37), *peekT = DPKey(browser, @"t", 17);
+        CHECK(DPCommandBarKey(peekL) == peekL && gHandToDiaCalls == 0,
+              "Cmd+L over visible Peek with toolbar bypasses DPHandToDia");
+        CHECK(DPCommandBarKey(peekT) == nil && gHandToDiaCalls == 1,
+              "Cmd+T over visible Peek still hands off to Command Bar");
+        _TtC20AssistantPanelUIBase22AssistantPanelRootView *sideChat =
+            [[_TtC20AssistantPanelUIBase22AssistantPanelRootView alloc] initWithFrame:NSMakeRect(0, 0, 200, 400)];
+        NSView *chatField = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 100, 20)];
+        [sideChat addSubview:chatField];
+        [browser.contentView addSubview:sideChat];
+        browser.fakeResponder = chatField;
+        CHECK(DPCommandBarKey(peekL) == nil && gHandToDiaCalls == 2,
+              "Cmd+L with focus inside Side Chat still reaches Command Bar");
+        browser.fakeResponder = nil;
+        [sideChat removeFromSuperview];
+        [peekCard removeFromSuperview];
 
         if (failures) return 1;
         puts("PASS: CommandBar key-window guard, dealloc/window-close cleanup, and off-tweak teardown");

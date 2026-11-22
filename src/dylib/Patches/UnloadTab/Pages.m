@@ -108,10 +108,23 @@ NSCountedSet<NSURL *> *DPScriptTabURLCounts(void) {
     return counts;
 }
 
+static BOOL DPIsAuxiliaryPage(id page) {
+    if (!page || ![page respondsToSelector:@selector(nativeView)]) return NO;
+    NSView *view = ((NSView *(*)(id, SEL))objc_msgSend)(page, @selector(nativeView));
+    if (![view isKindOfClass:NSView.class]) return NO;
+    if (DPIsKind(view.window, "_TtC5Popup19PlatformPopupWindow")) return YES;
+    Class card = NSClassFromString(@"DPPeekCard");
+    if (!card) return NO;
+    for (NSView *up = view; up; up = up.superview)
+        if ([up isKindOfClass:card]) return YES;
+    return NO;
+}
+
 static id DPPageAt(NSURL *url, NSString *contentID) {
     id found = nil;
     for (id page in DPPages.allObjects) {
         if (![page respondsToSelector:@selector(url)] || ![[page valueForKey:@"url"] isEqual:url]) continue;
+        if (DPIsAuxiliaryPage(page)) continue;
         NSString *owner = [DPPagePaneID objectForKey:page];
         if (contentID && owner && ![owner isEqualToString:contentID]) continue;
         if (found) return nil;

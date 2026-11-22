@@ -39,14 +39,31 @@ static BOOL DPPeekWindowCommand(NSEvent *event) {
     return [title isEqualToString:@"New Tab"] || [title isEqualToString:@"New Window"] || [title isEqualToString:@"New Incognito Window"];
 }
 
+static BOOL DPPeekCoveredByCommandBar(NSWindow *window) {
+    Class overlay = NSClassFromString(@"DPCommandBarOverlay");
+    if (!overlay) return NO;
+    for (NSView *sub in window.contentView.subviews)
+        if ([sub isKindOfClass:overlay] && !sub.isHiddenOrHasHiddenAncestor) return YES;
+    return NO;
+}
+
+static BOOL DPPeekExternalTextFocus(DPPeekCard *peek, id responder) {
+    if (![responder isKindOfClass:NSView.class] || [(NSView *)responder isDescendantOf:peek]) return NO;
+    if ([responder isKindOfClass:NSText.class]) return YES;
+    for (NSView *view = responder; view; view = view.superview)
+        if (DPIsKind(view, DPDiaCommandBar) || DPIsKind(view, DPDiaAddressField)) return YES;
+    return NO;
+}
+
 NSEvent *DPPeekHandleKeyEvent(DPPeekCard *peek, NSEvent *event) {
     if (!peek || !DPPeek.on || event.window != peek.window) return event;
     DPPeekSyncTabs(event.window);
     if (DPPeekCardIn(event.window) != peek) return event;
+    if (DPPeekCoveredByCommandBar(peek.window)) return event;
     NSEventModifierFlags mods = event.modifierFlags & NSEventModifierFlagDeviceIndependentFlagsMask & ~(NSEventModifierFlagCapsLock | NSEventModifierFlagNumericPad);
     // A page's field is not an NSText; Escape there must cancel an input method's composition, not close the card.
     id responder = peek.window.firstResponder;
-    if (DPPeekResponderInChat(responder)) return event;
+    if (DPPeekResponderInChat(responder) || DPPeekExternalTextFocus(peek, responder)) return event;
     BOOL command = mods == NSEventModifierFlagCommand, control = mods == NSEventModifierFlagControl;
     BOOL editing = [responder isKindOfClass:NSText.class] || ([responder conformsToProtocol:@protocol(NSTextInputClient)] && [responder hasMarkedText]);
     BOOL onPage = [responder isKindOfClass:NSView.class] && [(NSView *)responder isDescendantOf:peek.host];

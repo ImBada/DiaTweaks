@@ -67,7 +67,9 @@
 
 - (void)refresh {
     BOOL open = self.hovered || self.field;
-    self.layer.backgroundColor = open ? [NSColor.labelColor colorWithAlphaComponent:0.07].CGColor : nil;
+    [self.effectiveAppearance performAsCurrentDrawingAppearance:^{
+        self.layer.backgroundColor = open ? [NSColor.labelColor colorWithAlphaComponent:0.07].CGColor : nil;
+    }];
     if (self.field) return;
     NSURL *url = self.url;
     NSString *host = url.host ?: @"", *rest = @"";
@@ -176,10 +178,14 @@ static DPAddressView *DPAddressIn(NSWindow *window) {
 
 // Chromium focuses the new window's page a moment after it opens, which would end the typing.
 static void DPEditAddressSoon(NSWindow *window, int tries) {
+    if (!DPLittleDia.on || !window) return;
     DPAddressView *address = DPAddressIn(window);
     if (address && window.isKeyWindow) return [address begin];
+    __weak NSWindow *weak = window;
     if (tries > 0 && window.visible)
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 100 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{ DPEditAddressSoon(window, tries - 1); });
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 100 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
+            if (weak) DPEditAddressSoon(weak, tries - 1);
+        });
 }
 
 void DPEditLittleDiaAddress(NSWindow *window) {

@@ -141,9 +141,11 @@ static NSDragOperation DPTabList_updated(NSView *self, SEL _cmd, id<NSDraggingIn
     DPPlaceDraggedTab();
     return operation;
 }
+void DPClearDraggedTab(void) { DPDragHandedSet = NO; }
+
 // Clear before a drop so its proxied point isn't applied to the next drag.
 static BOOL DPDropped(BOOL result) {
-    DPDragHandedSet = NO;
+    DPClearDraggedTab();
     return result;
 }
 static BOOL DPTabList_prepare(NSView *self, SEL _cmd, id<NSDraggingInfo> info) { return DPDropped(DPCallOriginal(DPTabList_prepare, self, DPDiaDrag(self, info))); }

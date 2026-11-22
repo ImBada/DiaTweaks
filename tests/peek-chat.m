@@ -228,6 +228,11 @@ BOOL DPPeekIsShortcut(NSEvent *event, NSMenuItem *item) {
 static int failures;
 #define CHECK(cond, msg) do { if (!(cond)) { printf("FAIL: %s\n", msg); failures++; } } while (0)
 
+@interface DPCommandBarOverlay : NSView
+@end
+@implementation DPCommandBarOverlay
+@end
+
 static NSEvent *MakeKeyEvent(NSWindow *window, NSString *chars, unsigned short code, NSEventModifierFlags mods) {
     return [NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:mods timestamp:0
                         windowNumber:window.windowNumber context:nil characters:chars charactersIgnoringModifiers:chars
@@ -475,6 +480,23 @@ int main(void) {
         CHECK(DPPeekResponderInChat(chatInput), "docked AI Side Chat input detected as chat responder");
         CHECK(DPPeekResponderInChat(floatingInput), "floating chat popover input detected as chat responder");
         CHECK(DPPeekResponderInChat(extInput), "Extension Side Panel input detected as chat responder");
+
+        // 5b. Regression: Command Bar overlay or external text focus prevents Peek from hijacking Cmd+W / Cmd+O / Escape.
+        window.mockResponder = peek.host;
+        NSEvent *cmdW = MakeKeyEvent(window, @"w", kVK_ANSI_W, NSEventModifierFlagCommand);
+        NSEvent *esc = MakeKeyEvent(window, @"\x1b", kVK_Escape, 0);
+        DPCommandBarOverlay *cmdOverlay = [[DPCommandBarOverlay alloc] initWithFrame:window.contentView.bounds];
+        [window.contentView addSubview:cmdOverlay];
+        CHECK(DPPeekHandleKeyEvent(peek, cmdW) == cmdW && !peek.closing, "visible DPCommandBarOverlay passes Cmd+W through without closing Peek");
+        CHECK(DPPeekHandleKeyEvent(peek, esc) == esc && !peek.closing, "visible DPCommandBarOverlay passes Escape through without closing Peek");
+        cmdOverlay.hidden = YES;
+        NSTextView *sidebarRename = [[NSTextView alloc] initWithFrame:NSMakeRect(0, 0, 120, 20)];
+        [sidebarRoot addSubview:sidebarRename];
+        window.mockResponder = sidebarRename;
+        CHECK(DPPeekHandleKeyEvent(peek, cmdW) == cmdW && !peek.closing, "external NSText focus passes Cmd+W through without closing Peek");
+        [sidebarRename removeFromSuperview];
+        [cmdOverlay removeFromSuperview];
+        window.mockResponder = peek.host;
 
         // 6. Page context routing while Peek is visible.
         ArcBrowserContextPageContentExtraction *extractor = [ArcBrowserContextPageContentExtraction new];

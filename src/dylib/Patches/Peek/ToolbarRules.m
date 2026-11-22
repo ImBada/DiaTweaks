@@ -100,6 +100,13 @@ static BOOL DPPeekCanReveal(DPPeekBarZone *zone) { return DPHideToolbar.on && DP
                                                                     queue:NSOperationQueue.mainQueue
                                                                usingBlock:^(NSNotification *note) { [weak check]; }];
 }
+
+- (void)dealloc {
+    [_watch invalidate];
+    [_ease invalidate];
+    [_hide invalidate];
+    if (_patches) [NSNotificationCenter.defaultCenter removeObserver:_patches];
+}
 @end
 
 void DPPeekAddToolbar(DPPeekCard *peek) {

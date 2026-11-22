@@ -2,7 +2,7 @@
 #import "Commands/GroupTabs/GroupTabs.h"
 #import <objc/message.h>
 
-static char DPLittleKey, DPPageKey, DPChromeKey, DPSourceKey, DPPromotedKey, DPOpenedKey, DPProfileKey;
+static char DPLittleKey, DPPageKey, DPChromeKey, DPSourceKey, DPPromotedKey, DPClosedKey, DPOpenedKey, DPProfileKey;
 
 static NSMutableArray<NSDictionary *> *DPExpected;
 static NSMutableArray *DPPendingPages;
@@ -84,9 +84,11 @@ static void DPClaim(NSWindow *window) {
     // Chromium re-sizes and re-focuses ~300 ms later; reassert frame, stack order, and page focus.
     __weak NSWindow *weakWindow = window;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 300 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
-        [weakWindow setFrame:frame display:YES];
-        DPRestoreStack(weakWindow, noted);
-        DPFocusPage(weakWindow);
+        NSWindow *w = weakWindow;
+        if (!DPLittleDia.on || !w || w.miniaturized || DPGet(w, &DPPromotedKey) || DPGet(w, &DPClosedKey)) return;
+        [w setFrame:frame display:YES];
+        DPRestoreStack(w, noted);
+        DPFocusPage(w);
     });
     DPRefreshLittleDiaWindows();
     DPFocusPage(window);
@@ -153,7 +155,7 @@ void DPPromoteLittleDiaWindow(NSWindow *window) { DPSet(window, &DPPromotedKey, 
 
 static void DPShowMainWindow(void) {
     for (NSWindow *window in NSApp.orderedWindows)
-        if (DPIsKind(window, DPDiaWindow) && window.visible) {
+        if (DPIsKind(window, DPDiaWindow) && window.visible && !window.miniaturized && window.level == NSNormalWindowLevel && window.alphaValue > 0.01) {
             [NSApp activateIgnoringOtherApps:YES];
             [window makeKeyAndOrderFront:nil];
             return;
@@ -173,7 +175,9 @@ static void DPRememberFrame(NSWindow *window) {
 }
 
 static void DPWindowWillClose(NSWindow *window) {
-    if (!DPLittleDia.on || !DPIsLittleDiaWindow(window)) return;
+    if (!DPIsLittleDiaWindow(window)) return;
+    DPSet(window, &DPClosedKey, @YES);
+    if (!DPLittleDia.on) return;
     if (DPLittleDiaRemember.on) DPRememberFrame(window);
     pid_t source = [DPGet(window, &DPSourceKey) intValue];
     BOOL key = window.isKeyWindow, promoted = [DPGet(window, &DPPromotedKey) boolValue];

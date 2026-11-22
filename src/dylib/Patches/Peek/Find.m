@@ -18,8 +18,10 @@ static const CGFloat DPFindWidth = 260, DPFindHeight = 30, DPFindMargin = 8, DPF
 - (void)mouseDown:(NSEvent *)event {}  // Swallows the click; the card's mouseDown would close it.
 
 - (void)updateLayer {
-    self.layer.backgroundColor = NSColor.windowBackgroundColor.CGColor;
-    self.layer.borderColor = NSColor.separatorColor.CGColor;
+    [self.effectiveAppearance performAsCurrentDrawingAppearance:^{
+        self.layer.backgroundColor = NSColor.windowBackgroundColor.CGColor;
+        self.layer.borderColor = NSColor.separatorColor.CGColor;
+    }];
 }
 
 - (instancetype)initForPeek:(DPPeekCard *)peek {

@@ -126,8 +126,16 @@ static NSDragOperation DPTabList_updated(NSView *self, SEL _cmd, id<NSDraggingIn
     if (DPPullRequestRepo.on) DPPlaceDraggedTab();
     return operation;
 }
-static BOOL DPTabList_prepare(NSView *self, SEL _cmd, id<NSDraggingInfo> info) { return DPCallOriginal(DPTabList_prepare, self, DPDiaDrag(self, info)); }
-static BOOL DPTabList_perform(NSView *self, SEL _cmd, id<NSDraggingInfo> info) { return DPCallOriginal(DPTabList_perform, self, DPDiaDrag(self, info)); }
+static BOOL DPTabList_prepare(NSView *self, SEL _cmd, id<NSDraggingInfo> info) {
+    BOOL ok = DPCallOriginal(DPTabList_prepare, self, DPDiaDrag(self, info));
+    DPClearDraggedTab();
+    return ok;
+}
+static BOOL DPTabList_perform(NSView *self, SEL _cmd, id<NSDraggingInfo> info) {
+    BOOL ok = DPCallOriginal(DPTabList_perform, self, DPDiaDrag(self, info));
+    DPClearDraggedTab();
+    return ok;
+}
 
 static NSView *DPPart(NSView *content, const char *name) {
     id part = DPObjectIvar(content, name);

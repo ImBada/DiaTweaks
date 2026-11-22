@@ -15,6 +15,10 @@ static void DPInstallLittleDia(void) {
 }
 
 static void DPApplyLittleDia(DPPatch *patch) {
+    if (!patch->on) {
+        DPUncoverAllLittleDia();
+        DPRestoreLittleDiaStack();
+    }
     DPRefreshLittleDiaWindows();
     DPRefreshLittleDiaNewWindow();
     if (patch->on && !gLoadedOn) DPWriteLittleDiaExtension(YES);

@@ -39,7 +39,9 @@ static const CGFloat DPInset = 6, DPGap = 2, DPButton = 28, DPAddressHeight = 30
     return self;
 }
 
-- (void)updateLayer { self.layer.backgroundColor = NSColor.windowBackgroundColor.CGColor; }
+- (void)updateLayer {
+    [self.effectiveAppearance performAsCurrentDrawingAppearance:^{ self.layer.backgroundColor = NSColor.windowBackgroundColor.CGColor; }];
+}
 - (void)resetCursorRects { [self addCursorRect:self.bounds cursor:NSCursor.arrowCursor]; }
 
 - (void)layout {
@@ -73,6 +75,11 @@ static const CGFloat DPInset = 6, DPGap = 2, DPButton = 28, DPAddressHeight = 30
         if (!bar || event.window != bar.window || bar.hiddenOrHasHiddenAncestor || bar.closing) return event;
         NSPoint inClip = [clip convertPoint:event.locationInWindow fromView:nil];
         if (!NSPointInRect(inClip, clip.bounds) || !NSPointInRect(inClip, bar.frame)) return event;
+        // Let overlays above Peek (floating chat, command bar, floating sidebar, Find bar) take clicks first.
+        NSView *root = bar.window.contentView;
+        NSPoint inRoot = root.superview ? [root.superview convertPoint:event.locationInWindow fromView:nil] : event.locationInWindow;
+        NSView *top = [root hitTest:inRoot];
+        if (root && top != bar && ![top isDescendantOf:bar]) return event;
         [[bar hitTest:inClip] ?: bar mouseDown:event];
         return nil;
     }];

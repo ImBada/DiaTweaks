@@ -496,6 +496,16 @@ static void TestRegularAndSidebarPinnedTabs(_TtC3ADK18WebContentChromium *chromi
     [win close];
 }
 
+@interface DPPeekCard : NSView
+@end
+@implementation DPPeekCard
+@end
+
+@interface _TtC5Popup19PlatformPopupWindow : NSWindow
+@end
+@implementation _TtC5Popup19PlatformPopupWindow
+@end
+
 static void TestDockAndTopTabPinnedTabs(_TtC3ADK18WebContentChromium *chromium) {
     DPTestWindow *win = MakeWindow(@"WIN-DOCK");
     NSString *dockColdTabID = @"A1111111-1111-1111-1111-111111111111";
@@ -605,6 +615,34 @@ static void TestDockAndTopTabPinnedTabs(_TtC3ADK18WebContentChromium *chromium) 
     // 7. DPVerifyUnloadTab passes on dock tiles (cold, discarded, loaded, single-tab front).
     NSString *err = DPUnloadTab.verify(&DPUnloadTab);
     Check(err == nil, [NSString stringWithFormat:@"DPVerifyUnloadTab passes with dock tiles (got: %@)", err]);
+
+    // 8. Regression: cold tab must never steal or discard a live Peek or Little Dia page sharing its URL.
+    ArcWebContents *peekPage = [ArcWebContents new];
+    peekPage.url = [NSURL URLWithString:@"https://cold.test/"];
+    DPPeekCard *peekCard = [[DPPeekCard alloc] initWithFrame:NSMakeRect(0, 0, 400, 400)];
+    NSView *peekNV = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 400, 400)];
+    [peekCard addSubview:peekNV];
+    [win.contentView addSubview:peekCard];
+    peekPage.nativeView = peekNV;
+    [peekPage setVisibility:2];
+    Check([DPTabContextMenu(coldDock) itemWithTitle:@"Unload Tab"] == nil, @"cold tab never steals a Peek card's page sharing its URL");
+
+    _TtC5Popup19PlatformPopupWindow *popupWin = [[_TtC5Popup19PlatformPopupWindow alloc] initWithContentRect:NSMakeRect(0, 0, 400, 300)
+                                                                                                   styleMask:NSWindowStyleMaskBorderless
+                                                                                                     backing:NSBackingStoreBuffered defer:YES];
+    popupWin.releasedWhenClosed = NO;
+    ArcWebContents *littlePage = [ArcWebContents new];
+    littlePage.url = [NSURL URLWithString:@"https://cold.test/"];
+    NSView *littleNV = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 400, 300)];
+    [popupWin.contentView addSubview:littleNV];
+    littlePage.nativeView = littleNV;
+    [littlePage setVisibility:2];
+    Check([DPTabContextMenu(coldDock) itemWithTitle:@"Unload Tab"] == nil, @"cold tab never steals a Little Dia popup page sharing its URL");
+
+    [chromium webContents:peekPage didCloseWithSessionID:@13];
+    [chromium webContents:littlePage didCloseWithSessionID:@14];
+    [peekCard removeFromSuperview];
+    [popupWin close];
 
     [chromium webContents:homePage didCloseWithSessionID:@10];
     [chromium webContents:navPage didCloseWithSessionID:@11];

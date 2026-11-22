@@ -66,6 +66,13 @@ const uintptr_t DPFirstFill = 4;
 @interface RenderWidgetHostViewCocoa : NSView
 @end
 @implementation RenderWidgetHostViewCocoa
+- (BOOL)acceptsFirstResponder { return YES; }
+@end
+
+@interface DPPeekCard : NSView
+@property(strong) NSView *host;
+@end
+@implementation DPPeekCard
 @end
 
 @interface DPTestWindow : NSWindow
@@ -73,6 +80,10 @@ const uintptr_t DPFirstFill = 4;
 @end
 @implementation DPTestWindow
 - (NSResponder *)firstResponder { return self.fakeResponder ?: super.firstResponder; }
+- (BOOL)makeFirstResponder:(NSResponder *)responder {
+    self.fakeResponder = responder;
+    return [super makeFirstResponder:responder];
+}
 @end
 
 static DPFakeDefaults *gDefaults;
@@ -404,6 +415,45 @@ int main(void) {
         CHECK(DPSpareTimer == nil && !DPHidden.count && !DPParked.count && !DPOwner.count,
               "turning HideTab off stops spare timer and clears hidden/parked tables");
         (void)hidTab;
+
+        // Regression: DPMakeSpare skips background spare creation while a visible Peek card is open,
+        // and DPParkSpare restores focus to Peek's web view rather than the covered background tab.
+        DPCommandBarHideTab.on = YES;
+        DPCommandBarSpare.on = YES;
+        DPCommandBar.on = YES;
+        [profA.appleScriptTabs removeAllObjects];
+        [profA.appleScriptTabs addObject:pageA];
+        swA.activeTab = pageA;
+        DPPeekCard *peekCard = [[DPPeekCard alloc] initWithFrame:NSMakeRect(0, 0, 100, 100)];
+        RenderWidgetHostViewCocoa *peekWeb = [[RenderWidgetHostViewCocoa alloc] initWithFrame:NSMakeRect(0, 0, 100, 100)];
+        peekCard.host = peekWeb;
+        [peekCard addSubview:peekWeb];
+        [winA.contentView addSubview:peekCard];
+        winA.fakeResponder = peekWeb;
+        gIdleSeconds = 10;
+        gSendActionCalls = 0;
+        DPWanted = YES;
+        DPSpareUntil = 0;
+        DPMakeSpare();
+        CHECK(gSendActionCalls == 0, "DPMakeSpare does not create a background spare while a visible Peek card is open");
+
+        DPFakeTab *overPeekSpare = DPAddHiddenTab(winA, profA, @"over-peek-spare");
+        DPCommandBarOverlay *overPeekOverlay = DPMakeOverlay(winA, overPeekSpare, pageA);
+        [winA.contentView addSubview:overPeekOverlay];
+        winA.fakeResponder = overPeekOverlay;
+        CHECK(DPParkSpare(overPeekOverlay), "DPParkSpare succeeds over a visible Peek card");
+        CHECK(winA.firstResponder == peekWeb, "DPParkSpare focuses visible Peek web view instead of covered tab");
+        DPDropSpare(winA);
+        [overPeekOverlay removeFromSuperview];
+        peekCard.hidden = YES;
+        winA.fakeResponder = webA;
+        DPWanted = YES;
+        DPSpareUntil = 0;
+        gSendActionCalls = 0;
+        DPMakeSpare();
+        CHECK(gSendActionCalls == 1, "DPMakeSpare resumes once Peek card is parked/hidden");
+        DPStopExpecting();
+        [peekCard removeFromSuperview];
 
         if (failures) return 1;
         puts("PASS: command bar spare guards, launch cleanup, and timer lifecycle");

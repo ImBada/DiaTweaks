@@ -46,10 +46,12 @@ void DPPromoteLittleDiaWindow(NSWindow *window);
 void DPInstallLittleDiaOver(void);
 void DPPutLittleDiaOver(NSWindow *little, NSWindow *window);
 BOOL DPLittleDiaIsOver(NSWindow *window);
+void DPUncoverAllLittleDia(void);
 
 void DPInstallLittleDiaStack(void);
 NSDictionary *DPNoteStackForLink(void);
 void DPRestoreStack(NSWindow *little, NSDictionary *noted);
+void DPRestoreLittleDiaStack(void);
 NSArray<NSDictionary *> *DPWindowStack(void);
 void DPReturnToSource(pid_t pid, NSWindow *little, NSArray<NSDictionary *> *stack);
 void DPBringBackPutAway(NSWindow *little);

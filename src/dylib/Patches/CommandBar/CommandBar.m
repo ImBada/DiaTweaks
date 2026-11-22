@@ -1,4 +1,5 @@
 #import "StdPatch/StdPatch.h"
+#import <objc/message.h>
 #import "Patches/CommandBar/Tabs.h"
 #import "Patches/CommandBar/AutoPip.h"
 #import "Patches/CommandBar/HideTab.h"
@@ -739,6 +740,28 @@ static void DPTabList_backgroundDoubleClick(NSView *self, SEL _cmd, id gesture) 
 
 static BOOL DPToolbarShowing(NSWindow *window);
 
+static BOOL DPResponderInSidePanel(id responder) {
+    if (![responder isKindOfClass:NSView.class]) return NO;
+    for (NSView *view = responder; view; view = view.superview) {
+        if (DPIsKind(view, DPDiaAssistantPanel) || DPIsKind(view, DPDiaChatHeader)) return YES;
+        if (DPIsKind(view, DPDiaPopover) && DPIsFloatingChat(view)) return YES;
+        if ([NSStringFromClass(view.class) containsString:@"ExtensionSidePanel"]) return YES;
+    }
+    return NO;
+}
+
+static BOOL DPVisiblePeekTakesCommandL(NSWindow *window) {
+    Class card = NSClassFromString(@"DPPeekCard");
+    if (!card || DPResponderInSidePanel(window.firstResponder)) return NO;
+    NSView *peek = DPFindView(window.contentView, ^BOOL(NSView *view) {
+        return [view isKindOfClass:card] && !view.isHiddenOrHasHiddenAncestor;
+    });
+    if (!peek) return NO;
+    SEL closingSel = NSSelectorFromString(@"closing"), toolbarSel = NSSelectorFromString(@"toolbar");
+    if ([peek respondsToSelector:closingSel] && ((BOOL (*)(id, SEL))objc_msgSend)(peek, closingSel)) return NO;
+    return [peek respondsToSelector:toolbarSel] && ((id (*)(id, SEL))objc_msgSend)(peek, toolbarSel) != nil;
+}
+
 static NSEvent *DPCommandBarKey(NSEvent *event) {
     NSWindow *window = event.window;
     if (!DPCommandBar.on || !DPIsKind(window, DPDiaWindow) || window.attachedSheet) return event;
@@ -764,6 +787,7 @@ static NSEvent *DPCommandBarKey(NSEvent *event) {
         if (overlay) DPFocusBar(overlay);
         return nil;
     }
+    if (!overlay && !newTab && DPVisiblePeekTakesCommandL(window)) return event;
     if (DPWaitForDia(window, event, newTab)) return nil;
     if (newTab && DPIsKind(overlay.page, DPDiaPopover) && !DPSpareIn(window)) {
         DPExpectNewTab(window);

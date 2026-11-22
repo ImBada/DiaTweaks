@@ -1,6 +1,7 @@
 #import "Patches/CommandBar/CommandBarOverlay.h"
 #import "Patches/CommandBar/Tabs.h"
 #import "Patches/CommandBar/HideTab.h"
+#import <objc/message.h>
 
 static char DPSpareKey;
 
@@ -99,7 +100,17 @@ BOOL DPParkSpare(DPCommandBarOverlay *overlay) {
     DPStandInForTab(window, tabID);
     NSResponder *typing = window.firstResponder;
     if ([typing isKindOfClass:NSView.class] && ![(NSView *)typing isDescendantOf:overlay]) return YES;
-    NSView *web = DPFindView(window.contentView, ^BOOL(NSView *view) { return DPIsKind(view, "RenderWidgetHostViewCocoa") && !view.isHiddenOrHasHiddenAncestor; });
+    Class card = NSClassFromString(@"DPPeekCard");
+    NSView *peek = card ? DPFindView(window.contentView, ^BOOL(NSView *view) {
+        return [view isKindOfClass:card] && !view.isHiddenOrHasHiddenAncestor;
+    }) : nil;
+    NSView *web = peek ? DPFindView(peek, ^BOOL(NSView *view) { return DPIsKind(view, "RenderWidgetHostViewCocoa") && !view.isHiddenOrHasHiddenAncestor; }) : nil;
+    SEL hostSel = NSSelectorFromString(@"host");
+    if (!web && peek && [peek respondsToSelector:hostSel]) {
+        id host = ((id (*)(id, SEL))objc_msgSend)(peek, hostSel);
+        if ([host isKindOfClass:NSView.class] && !((NSView *)host).isHiddenOrHasHiddenAncestor) web = host;
+    }
+    if (!web) web = DPFindView(window.contentView, ^BOOL(NSView *view) { return DPIsKind(view, "RenderWidgetHostViewCocoa") && !view.isHiddenOrHasHiddenAncestor; });
     [window makeFirstResponder:web];
     return YES;
 }

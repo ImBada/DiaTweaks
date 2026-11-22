@@ -27,8 +27,9 @@ static void DPFadeToolbars(NSWindow *window, BOOL hidden) {
 }
 
 BOOL DPLittleDiaIsOver(NSWindow *window) {
-    if (!window || !gOver.count) return NO;
-    return [gOver objectForKey:window].visible;
+    if (!DPLittleDia.on || !window || !gOver.count) return NO;
+    NSWindow *little = [gOver objectForKey:window];
+    return little.visible && !little.miniaturized;
 }
 
 static void DPUncover(NSWindow *little) {
@@ -39,6 +40,13 @@ static void DPUncover(NSWindow *little) {
         }
 }
 
+void DPUncoverAllLittleDia(void) {
+    for (NSWindow *window in gOver.keyEnumerator.allObjects) {
+        [gOver removeObjectForKey:window];
+        DPFadeToolbars(window, NO);
+    }
+}
+
 void DPPutLittleDiaOver(NSWindow *little, NSWindow *window) {
     if (!little || !window || little == window) return;
     [gOver setObject:little forKey:window];
@@ -47,9 +55,10 @@ void DPPutLittleDiaOver(NSWindow *little, NSWindow *window) {
 
 void DPInstallLittleDiaOver(void) {
     gOver = [NSMapTable weakToWeakObjectsMapTable];
-    [NSNotificationCenter.defaultCenter addObserverForName:NSWindowWillCloseNotification object:nil queue:nil usingBlock:^(NSNotification *note) {
-        if (gOver.count && DPIsLittleDiaWindow(note.object)) DPUncover(note.object);
-    }];
+    for (NSNotificationName name in @[ NSWindowWillCloseNotification, NSWindowWillMiniaturizeNotification ])
+        [NSNotificationCenter.defaultCenter addObserverForName:name object:nil queue:nil usingBlock:^(NSNotification *note) {
+            if (gOver.count && DPIsLittleDiaWindow(note.object)) DPUncover(note.object);
+        }];
     NSEventMask clicks = NSEventMaskLeftMouseDown | NSEventMaskRightMouseDown | NSEventMaskOtherMouseDown;
     [NSEvent addLocalMonitorForEventsMatchingMask:clicks handler:^NSEvent *(NSEvent *event) {
         if (!DPLittleDia.on || !DPLittleDiaIsOver(event.window)) return event;

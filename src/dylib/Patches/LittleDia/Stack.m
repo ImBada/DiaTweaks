@@ -32,7 +32,7 @@ static void DPPutAwayWindow(NSWindow *window) {
 }
 
 static BOOL DPPutAwayIfHidden(void) {
-    if (!DPUnhiddenAt || DPUnhiddenAt.timeIntervalSinceNow < -2) return NO;
+    if (!DPLittleDia.on || !DPUnhiddenAt || DPUnhiddenAt.timeIntervalSinceNow < -2) return NO;
     for (NSWindow *window in NSApp.orderedWindows)
         if (!DPIsLittleDiaWindow(window) && window.visible && window.level == NSNormalWindowLevel) DPPutAwayWindow(window);
     return YES;
@@ -42,6 +42,12 @@ static BOOL DPPutAwayIfHidden(void) {
 static void DPUnveil(void) {
     for (NSWindow *window in DPVeiled) window.alphaValue = [[DPVeiled objectForKey:window] doubleValue];
     [DPVeiled removeAllObjects];
+}
+
+void DPRestoreLittleDiaStack(void) {
+    DPUnveil();
+    DPBringBackPutAway(nil);
+    DPUnhiddenAt = nil;
 }
 
 void DPLinkArrived(void) {
