@@ -252,7 +252,41 @@ VIEW_REUSE_LAYOUT := $(wildcard src/dylib/Patches/EdgeToEdge/*.m) src/dylib/Patc
 build/view-reuse-layout: tests/view-reuse-layout.m $(VIEW_REUSE_LAYOUT) $(wildcard src/dylib/StdPatch/*.h) | build
 	clang $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -Isrc/dylib -framework AppKit -framework QuartzCore -framework Metal -o $@ tests/view-reuse-layout.m $(VIEW_REUSE_LAYOUT)
 
-check: build/diapatch build/diapatch-tests build/group-tabs build/mouse-back-forward build/vertical-tab-glow build/split-client-hello build/peek-cursor build/peek-link build/peek-tabs build/peek-chat build/safe-mode build/pause build/hook-table build/updates-runtime build/runtime-guards build/tidy-tabs build/drag-offset build/small-tab-shape build/toolbar-permission build/launch-flags build/little-dia-stack build/little-dia-profile build/little-dia-over build/little-dia-focus build/tracking build/hide-toolbar-settle build/command-bar-swap build/command-bar-spare build/tab-titles build/show-address-field build/hide-chat-button build/hide-connect-app-prompt build/open-sidebar-instantly build/native-messaging build/diapatch-passkeys build/passkeys-origin build/app-icon-signing build/little-dia-route build/chat-card build/peek-lifecycle build/hide-toolbar-off build/command-bar-lifecycle build/window-patches build/pinned-tab-close-button build/sidebar-tab-bugs build/unload-tab build/profile-color-picker build/historical-regressions build/abi-kvc-kvo build/view-reuse-layout build/patches.json
+COMBINATORIAL := src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m src/dylib/StdPatch/App.m \
+	src/dylib/StdPatch/Hide.m src/dylib/StdPatch/HideHosts.m src/dylib/StdPatch/Patch.m \
+	src/dylib/StdPatch/Shortcut.m src/dylib/StdPatch/Extensions.m src/dylib/StdPatch/Zoom.m \
+	src/dylib/Settings/Controls.m src/dylib/Settings/Items.m src/dylib/Settings/Overview.m \
+	src/dylib/Settings/Home.m src/dylib/Settings/Page.m \
+	src/dylib/Commands/GroupTabs/Messages.m src/dylib/Commands/GroupTabs/Tracking.m src/dylib/Commands/GroupTabs/Menu.m \
+	$(HIDE_TOOLBAR) src/dylib/Patches/ShowAddressField/ShowAddressField.m \
+	src/dylib/Patches/HideChatButton/HideChatButton.m src/dylib/Patches/HideChatsButton/HideChatsButton.m \
+	src/dylib/Patches/HideUpgradeBanner/HideUpgradeBanner.m src/dylib/Patches/HidePersonalizeButton/HidePersonalizeButton.m \
+	src/dylib/Patches/HideSkillsSuggestions/HideSkillsSuggestions.m src/dylib/Patches/HideConnectAppPrompts/HideConnectAppPrompts.m \
+	src/dylib/Patches/TurnOffAI/TurnOffAI.m src/dylib/Patches/TurnOffAI/Rows.m \
+	src/dylib/Patches/HideTrafficLights/HideTrafficLights.m src/dylib/Patches/CompactSidebarHeader/CompactSidebarHeader.m \
+	src/dylib/Patches/WindowCorners/WindowCorners.m \
+	$(wildcard src/dylib/Patches/EdgeToEdge/*.m) \
+	$(wildcard src/dylib/Patches/ProfileColorPicker/*.m) \
+	src/dylib/Patches/PrivateWindowTheme/PrivateWindowTheme.m \
+	src/dylib/Patches/WindowMaterial/WindowMaterial.m src/dylib/Patches/TranslucentSidebar/TranslucentSidebar.m \
+	src/dylib/Patches/HidePinnedTabBorder/HidePinnedTabBorder.m src/dylib/Patches/HideTabGroupBackground/HideTabGroupBackground.m \
+	src/dylib/Patches/UnloadTab/UnloadTab.m src/dylib/Patches/UnloadTab/Pages.m src/dylib/Patches/UnloadTab/Recent.m \
+	src/dylib/Patches/PinnedTabCloseButton/PinnedTabs.m \
+	src/dylib/Patches/CollapsePinned/CollapsePinned.m src/dylib/Patches/CompactTabRows/CompactTabRows.m \
+	src/dylib/Patches/CommandBar/CommandBar.m src/dylib/Patches/CommandBar/AutoPip.m \
+	src/dylib/Patches/CommandBar/HideTabLayout.m src/dylib/Patches/CommandBar/Tabs.m \
+	src/dylib/Patches/LittleDia/LinkMenu.m src/dylib/Patches/LittleDia/Options.m \
+	src/dylib/Patches/Peek/Peek.m src/dylib/Patches/Peek/Card.m src/dylib/Patches/Peek/Pages.m \
+	src/dylib/Patches/Peek/Keys.m src/dylib/Patches/Peek/Chat.m src/dylib/Patches/Peek/ChatContext.m \
+	src/dylib/Patches/Peek/Visibility.m src/dylib/Patches/Peek/Motion.m src/dylib/Patches/Peek/Selection.m \
+	src/dylib/Patches/Peek/Tab.m src/dylib/Patches/Peek/Zoom.m \
+	$(LAUNCH_FLAGS) src/dylib/Patches/SplitClientHello/SplitClientHello.m \
+	src/dylib/Patches/SplitClientHello/Split.m src/dylib/Patches/SplitClientHello/Write.m src/dylib/Patches/SplitClientHello/Send.m
+
+build/combinatorial-stability: tests/combinatorial-stability.m $(COMBINATORIAL) src/dylib/SafeMode/SafeMode.m $(wildcard src/dylib/StdPatch/*.h) | build
+	clang $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -Isrc/dylib -framework AppKit -framework QuartzCore -o $@ tests/combinatorial-stability.m $(COMBINATORIAL)
+
+check: build/diapatch build/diapatch-tests build/group-tabs build/mouse-back-forward build/vertical-tab-glow build/split-client-hello build/peek-cursor build/peek-link build/peek-tabs build/peek-chat build/safe-mode build/pause build/hook-table build/updates-runtime build/runtime-guards build/tidy-tabs build/drag-offset build/small-tab-shape build/toolbar-permission build/launch-flags build/little-dia-stack build/little-dia-profile build/little-dia-over build/little-dia-focus build/tracking build/hide-toolbar-settle build/command-bar-swap build/command-bar-spare build/tab-titles build/show-address-field build/hide-chat-button build/hide-connect-app-prompt build/open-sidebar-instantly build/native-messaging build/diapatch-passkeys build/passkeys-origin build/app-icon-signing build/little-dia-route build/chat-card build/peek-lifecycle build/hide-toolbar-off build/command-bar-lifecycle build/window-patches build/pinned-tab-close-button build/sidebar-tab-bugs build/unload-tab build/profile-color-picker build/historical-regressions build/abi-kvc-kvo build/view-reuse-layout build/combinatorial-stability build/patches.json
 	tests/tweaks-update
 	build/diapatch-tests
 	build/group-tabs
@@ -303,6 +337,7 @@ check: build/diapatch build/diapatch-tests build/group-tabs build/mouse-back-for
 	build/historical-regressions
 	build/abi-kvc-kvo
 	build/view-reuse-layout
+	build/combinatorial-stability
 	tests/sidebar-grain
 	scripts/check-patches
 
