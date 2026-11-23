@@ -304,9 +304,9 @@ build/profile-color-picker: tests/profile-color-picker.m $(PROFILE_COLOR_PICKER)
 
 HISTORICAL_REGRESSIONS := src/dylib/Patches/CompactTabRows/CompactTabRows.m src/dylib/Patches/CollapsePinned/CollapsePinned.m \
 	src/dylib/Patches/PullRequestRepo/PullRequestRepo.m src/dylib/Patches/PullRequestRepo/Subtitle.m src/dylib/Patches/PullRequestRepo/Rows.m \
-	src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m
+	src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m src/dylib/Patches/CommandBar/Tabs.m
 
-build/historical-regressions: tests/historical-regressions.m tests/watchdog.h tests/runloop.h src/dylib/Patches/Peek/Toolbar.m src/dylib/Patches/Peek/ToolbarRules.m src/dylib/Patches/LittleDia/Over.m src/dylib/Patches/LittleDia/Stack.m $(HISTORICAL_REGRESSIONS) $(wildcard src/dylib/StdPatch/*.h src/dylib/Patches/Peek/Peek.h src/dylib/Patches/LittleDia/LittleDia.h src/dylib/Patches/HideToolbar/HideToolbar.h src/dylib/Patches/CompactTabRows/CompactTabRows.h src/dylib/Patches/PullRequestRepo/PullRequestRepo.h) | build
+build/historical-regressions: tests/historical-regressions.m tests/watchdog.h tests/runloop.h src/dylib/Patches/Peek/Toolbar.m src/dylib/Patches/Peek/ToolbarRules.m src/dylib/Patches/LittleDia/Over.m src/dylib/Patches/LittleDia/Stack.m $(HISTORICAL_REGRESSIONS) $(wildcard src/dylib/StdPatch/*.h src/dylib/Patches/Peek/Peek.h src/dylib/Patches/LittleDia/LittleDia.h src/dylib/Patches/HideToolbar/HideToolbar.h src/dylib/Patches/CompactTabRows/CompactTabRows.h src/dylib/Patches/PullRequestRepo/PullRequestRepo.h src/dylib/Patches/CommandBar/Tabs.h) | build
 	clang $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -Isrc/dylib -framework AppKit -framework QuartzCore -o $@ tests/historical-regressions.m $(HISTORICAL_REGRESSIONS)
 
 # DiaPatches' constructor skips helper processes, so the suite runs as one and loads the patch table itself.
@@ -345,10 +345,10 @@ VIEW_REUSE_LAYOUT := $(wildcard src/dylib/Patches/EdgeToEdge/*.m) src/dylib/Patc
 	src/dylib/Patches/LittleDia/Over.m src/dylib/Patches/LittleDia/Bar.m src/dylib/Patches/LittleDia/Address.m \
 	src/dylib/Patches/TurnOffAI/TurnOffAI.m src/dylib/Patches/TurnOffAI/Rows.m \
 	src/dylib/Patches/HideToolbar/PlainTab.m src/dylib/Patches/HideToolbar/ProgressLine.m \
-	$(wildcard src/dylib/Patches/HideVerticalTabGlow/*.m) \
+	$(wildcard src/dylib/Patches/HideVerticalTabGlow/*.m) src/dylib/Patches/CommandBar/Tabs.m \
 	src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m
 
-build/view-reuse-layout: tests/view-reuse-layout.m tests/watchdog.h $(VIEW_REUSE_LAYOUT) $(wildcard src/dylib/StdPatch/*.h) | build
+build/view-reuse-layout: tests/view-reuse-layout.m tests/watchdog.h $(VIEW_REUSE_LAYOUT) $(wildcard src/dylib/StdPatch/*.h) src/dylib/Patches/CommandBar/Tabs.h | build
 	clang $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -Isrc/dylib -framework AppKit -framework QuartzCore -framework Metal -o $@ tests/view-reuse-layout.m $(VIEW_REUSE_LAYOUT)
 
 COMBINATORIAL := src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m src/dylib/StdPatch/App.m \
