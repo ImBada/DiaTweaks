@@ -6,6 +6,7 @@
 #import <objc/runtime.h>
 #import "StdPatch/StdPatch.h"
 #import "watchdog.h"
+#import "runloop.h"
 #import "StdPatch/Hide.h"
 #import "SafeMode/SafeMode.h"
 #import "Settings/Settings.h"
@@ -69,7 +70,6 @@ void *swift_unknownObjectWeakLoadStrong(void *ref) {
 
 @implementation DPPreviewView
 - (instancetype)initWithKey:(NSString *)key { return [super initWithFrame:NSZeroRect]; }
-+ (void)preload {}
 @end
 
 @implementation DPSoftwareUpdateView
@@ -161,6 +161,7 @@ void DPForgetSpare(NSWindow *window) {}
 void DPUpdateSpareTimer(void) {}
 DPCommandBarOverlay *DPSpareIn(NSWindow *window) { return nil; }
 void DPNoteSpare(NSString *tabID, BOOL parked) {}
+void DPNoteOpenTab(NSString *tabID, BOOL open) {}
 BOOL DPAdoptSpare(NSWindow *window, NSView *page) { return NO; }
 void DPNotMakingSpare(void) {}
 NSView *DPCommandBarPart(NSView *commandBar, const char *className) { return nil; }
@@ -264,17 +265,6 @@ static void Check(BOOL ok, NSString *msg) {
     if (ok) return;
     gFailures++;
     printf("FAIL: %s\n", msg.UTF8String);
-}
-
-// The main queue is FIFO, so once the sentinel runs, every block queued before it has run too, however long a slow runner stalls.
-static void DrainRunLoop(NSTimeInterval seconds) {
-    NSDate *until = [NSDate dateWithTimeIntervalSinceNow:seconds];
-    __block BOOL drained = NO;
-    dispatch_async(dispatch_get_main_queue(), ^{ drained = YES; });
-    NSDate *limit = [NSDate dateWithTimeIntervalSinceNow:30];
-    while (!drained && limit.timeIntervalSinceNow > 0)
-        [NSRunLoop.mainRunLoop runMode:NSDefaultRunLoopMode beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
-    [NSRunLoop.mainRunLoop runUntilDate:until];
 }
 
 static NSArray<NSWindow *> *DPApp_windows(NSApplication *self, SEL _cmd) { return gMockWindows ?: @[]; }
@@ -968,7 +958,6 @@ static DPMockWindowBundle *BuildMockWindow(BOOL incognito, BOOL visible, NSStrin
     [tint addSubview:gradient];
     [content addSubview:tint];
 
-    // Floating sidebar with its own effect/tint/wash
     NSView *floating = [[objc_getClass(DPDiaFloatingSidebar) alloc] initWithFrame:NSMakeRect(8, 8, 220, 624)];
     floating.wantsLayer = YES;
     floating.layer.cornerRadius = 12;
@@ -987,7 +976,6 @@ static DPMockWindowBundle *BuildMockWindow(BOOL incognito, BOOL visible, NSStrin
     [floatInner addSubview:floatTint];
     [content addSubview:floating];
 
-    // Sidebar + header + traffic lights
     DPCombSidebarController *sidebarCtrl = [objc_getClass(DPDiaSidebarController) new];
     DPCombFlippedView *sidebarView = [[DPCombFlippedView alloc] initWithFrame:NSMakeRect(0, 0, 220, 640)];
     DPCombSidebarHeader *header = [[objc_getClass(DPDiaSidebarHeader) alloc] initWithFrame:NSMakeRect(0, 0, 220, 44)];
@@ -1016,7 +1004,6 @@ static DPMockWindowBundle *BuildMockWindow(BOOL incognito, BOOL visible, NSStrin
     DPSet(win, "dp_comb_sidebar_ctrl", sidebarCtrl);
     [content addSubview:sidebarView];
 
-    // Content container -> Content pane -> toolbar + bookmarks + pageHost
     DPCombFlippedView *container = [[objc_getClass(DPDiaContentContainer) alloc] initWithFrame:NSMakeRect(220, 6, 734, 628)];
     container.wantsLayer = YES;
     container.layer.cornerRadius = 10;
@@ -1115,14 +1102,12 @@ static void TestHookChainsAndDPIsHooked(void) {
     Check(DPIsHooked(DPChainSub.class, @selector(ping), (IMP)DPChainHookB), @"DPIsHooked finds subclass hook");
     Check(!DPIsHooked(DPChainBase.class, @selector(ping), (IMP)DPChainUnhooked), @"DPIsHooked rejects unhooked IMP");
 
-    // External clobber breaks reachability for all hooks on DPChainBase.
     Method m = class_getInstanceMethod(DPChainBase.class, @selector(ping));
     IMP saved = method_setImplementation(m, (IMP)DPChainClobber);
     Check(!DPIsHooked(DPChainBase.class, @selector(ping), (IMP)DPChainHookA), @"DPIsHooked detects external clobber on inner hook");
     Check(!DPIsHooked(DPChainBase.class, @selector(ping), (IMP)DPChainHookC), @"DPIsHooked detects external clobber on outer hook");
     method_setImplementation(m, saved);
 
-    // Real production stacked hooks verify cleanly when all patches are installed together.
     DPPatch *privTheme = DPPatchNamed(@"privateWindowTheme");
     DPPatch *colorPicker = DPPatchNamed(@"profileColorPicker");
     DPPatch *peek = DPPatchNamed(@"peek");
@@ -1141,7 +1126,6 @@ static void TestClusterAToolbarChrome(void) {
     gMockWindows = @[ b.window ];
     gMockKeyWindow = b.window;
 
-    // 1. Off-tweak zero-mutation baseline.
     [b.sidebarController viewWillLayout];
     [b.sidebarHeader layout];
     [b.pane layout];
@@ -1153,7 +1137,6 @@ static void TestClusterAToolbarChrome(void) {
     Check(!b.addressField.ownedDelayed->isHoverActive, @"Cluster A baseline: address field hover untouched when off");
     Check(b.window.fakeCornerRadius == 10 && b.container.layer.cornerRadius == 10, @"Cluster A baseline: corners untouched when off");
 
-    // 2. HideToolbar x ShowAddressField toggled in both orders.
     SetPatchImmediate(@"hideToolbar", YES, YES);
     [b.pane layout];
     Check(b.toolbar.alphaValue < 0.01 && fabs(NSMinY(b.pageHost.frame)) < 0.5, @"HideToolbar hides toolbar and lifts page");
@@ -1168,7 +1151,6 @@ static void TestClusterAToolbarChrome(void) {
     [b.addressField layout];
     Check(!b.addressField.ownedDelayed->isHoverActive, @"ShowAddressField OFF clears forced hover cleanly");
 
-    // 3. HideChatButton x TurnOffAI co-hiding matrix.
     [DPHideHosts addObject:b.toolbar];
     DPEnforceHides(b.toolbar);
     Check(!b.chatButton.hidden, @"chat button starts visible");
@@ -1186,7 +1168,6 @@ static void TestClusterAToolbarChrome(void) {
     SetPatchImmediate(@"hideChatButton", NO, YES);
     Check(!b.chatButton.hidden, @"chat button restored after HideChatButton OFF");
 
-    // 4. CompactSidebarHeader x HideTrafficLights combined and partial toggles.
     [DPHideHosts addObject:b.sidebarHeader];
     SetPatchImmediate(@"compactSidebarHeader", YES, YES);
     SetPatchImmediate(@"hideTrafficLights", YES, YES);
@@ -1212,7 +1193,6 @@ static void TestClusterAToolbarChrome(void) {
     Check(fabs(NSHeight(b.sidebarHeader.frame) - 44) < 0.5, @"turning CompactSidebarHeader OFF restores full header height");
     Check(fabs(NSMinX(b.headerStack.frame) - 6) < 0.5, @"HideTrafficLights keeps x=6 after CompactSidebarHeader turns OFF");
 
-    // 5. WindowCorners x EdgeToEdge x SquareSidebarCorners + Pause Tweaks restoration.
     SetPatchImmediate(@"windowCorners", YES, YES);
     SetPatchImmediate(@"edgeToEdge", YES, YES);
     SetPatchImmediate(@"squareSidebarCorners", YES, YES);
@@ -1250,7 +1230,6 @@ static void TestClusterBThemeMaterialTint(void) {
     gMockWindows = @[ normal.window, priv.window, minPriv.window ];
     gMockKeyWindow = normal.window;
 
-    // 1. Enable ProfileColorPicker + PrivateWindowTheme together and set custom hex.
     SetPatchImmediate(@"profileColorPicker", YES, YES);
     SetPatchImmediate(@"privateWindowTheme", YES, YES);
     DPSetProfileHexForSpace(@"space-main", @"#E05A2B");
@@ -1261,7 +1240,6 @@ static void TestClusterBThemeMaterialTint(void) {
     Check([priv.gradientLayer.colors isEqual:customOrange], @"PrivateWindowTheme synchronously mirrors custom hex to visible private window");
     Check([minPriv.gradientLayer.colors isEqual:customOrange], @"PrivateWindowTheme synchronously mirrors custom hex to minimized private window");
 
-    // 2. Live hex edit propagates synchronously even via single-window refresh.
     DPSetProfileHexForSpace(@"space-main", @"#1B8A5A");
     DPRefreshProfileColorForWindow(normal.window);
     NSArray *customGreen = normal.gradientLayer.colors;
@@ -1269,20 +1247,17 @@ static void TestClusterBThemeMaterialTint(void) {
     Check([priv.gradientLayer.colors isEqual:customGreen], @"PrivateWindowTheme mirrors single-window hex update");
     Check([minPriv.gradientLayer.colors isEqual:customGreen], @"PrivateWindowTheme mirrors single-window hex update to minimized window");
 
-    // 3. Turn OFF ProfileColorPicker while PrivateWindowTheme stays ON -> both revert to normalDiaColors!
     SetPatchImmediate(@"profileColorPicker", NO, YES);
     Check([normal.gradientLayer.colors isEqual:normalDiaColors], @"normal window restores Dia colors when ProfileColorPicker turns OFF");
     Check([priv.gradientLayer.colors isEqual:normalDiaColors], @"private window immediately drops stale custom hex and mirrors normal Dia colors");
     Check([minPriv.gradientLayer.colors isEqual:normalDiaColors], @"minimized private window also mirrors restored normal Dia colors");
 
-    // 4. Turn ProfileColorPicker back ON, then turn OFF PrivateWindowTheme while ProfileColorPicker stays ON!
     SetPatchImmediate(@"profileColorPicker", YES, YES);
     Check([priv.gradientLayer.colors isEqual:customGreen], @"re-enabling ProfileColorPicker re-syncs private window to custom green");
     SetPatchImmediate(@"privateWindowTheme", NO, YES);
     Check([priv.gradientLayer.colors isEqual:privateDiaColors], @"turning PrivateWindowTheme OFF restores private window's original colors");
     Check([normal.gradientLayer.colors isEqual:customGreen], @"normal window keeps custom green while PrivateWindowTheme is OFF");
 
-    // 5. WindowMaterial x TranslucentSidebar subset toggles.
     DPPatch *matPatch = DPPatchNamed(@"windowMaterial");
     DPSetChoice(matPatch, @"material.7");
     SetPatchImmediate(@"windowMaterial", YES, YES);
@@ -1301,7 +1276,6 @@ static void TestClusterBThemeMaterialTint(void) {
     Check(!normal.floatingWash.hidden, @"disabling TranslucentSidebar restores floating sidebar wash");
     Check(normal.floatingEffect.material == NSVisualEffectMaterialHUDWindow, @"disabling TranslucentSidebar restores original floating sidebar material");
 
-    // 6. HidePinnedTabBorder + HideTabGroupBackground + Pause Tweaks full round-trip.
     NSView *pinnedTabHost = [[objc_getClass(DPDiaPinnedTab) alloc] initWithFrame:NSMakeRect(0, 0, 40, 40)];
     NSView *pinnedOutline = [[objc_getClass(DPDiaPinnedTabOutline) alloc] initWithFrame:NSMakeRect(0, 0, 32, 32)];
     pinnedOutline.wantsLayer = YES;
@@ -1353,7 +1327,6 @@ static void TestClusterCMenusOverlaysAndLayout(void) {
     gMockWindows = @[ b.window ];
     gMockKeyWindow = b.window;
 
-    // 1. Context menu collisions: UnloadTab x GroupTabs/Menu x TurnOffAI on a reused tab menu.
     SetPatchImmediate(@"unloadTab", YES, YES);
     SetPatchImmediate(@"groupTabsByDomain", YES, YES);
     SetPatchImmediate(@"turnOffAI", YES, YES);
@@ -1362,7 +1335,7 @@ static void TestClusterCMenusOverlaysAndLayout(void) {
     NSString *paneUUID = @"33333333-3333-3333-3333-333333333333";
     DPCombWebContents *page = [objc_getClass(DPDiaWebContents) new];
     page.url = [NSURL URLWithString:@"https://example.com/doc"];
-    page.visibilityValue = 0; // background loaded tab
+    page.visibilityValue = 0;
     page.nativeView = [[NSView alloc] initWithFrame:b.pane.bounds];
     b.pane.contentPaneID = paneUUID;
     [b.pane addSubview:page.nativeView];
@@ -1399,7 +1372,6 @@ static void TestClusterCMenusOverlaysAndLayout(void) {
     Check(groupIdx < unloadIdx && unloadIdx < closeIdx, @"GroupTabs items stay before Unload Tab and Close Tab");
     Check(chatItem.hidden, @"TurnOffAI hides AI item inside tab context menu");
 
-    // Repeated invocation on reused menu must not duplicate Unload Tab or Group Tabs items.
     [tabView menuForEvent:MakeRightClick(b.window)];
     NSInteger unloadCount = 0, groupCount = 0;
     for (NSMenuItem *it in reused.itemArray) {
@@ -1408,12 +1380,10 @@ static void TestClusterCMenusOverlaysAndLayout(void) {
     }
     Check(unloadCount == 1 && groupCount == 1, @"reused tab menu has zero duplicate Unload Tab or Group Tabs items");
 
-    // Nil menu from Dia must not crash.
     tabView.returnNilMenu = YES;
     Check([tabView menuForEvent:MakeRightClick(b.window)] == nil, @"nil menuForEvent passes through safely");
     tabView.returnNilMenu = NO;
 
-    // Turning OFF UnloadTab, GroupTabs, and TurnOffAI cleans reused menu immediately without stale items.
     SetPatchImmediate(@"groupTabsByDomain", NO, YES);
     Check([reused itemWithTitle:@"Group Tabs by Domain"].hidden, @"turning GroupTabs OFF immediately hides items in reused context menu");
     SetPatchImmediate(@"unloadTab", NO, YES);
@@ -1422,7 +1392,6 @@ static void TestClusterCMenusOverlaysAndLayout(void) {
     SetPatchImmediate(@"turnOffAI", NO, YES);
     Check(!chatItem.hidden, @"turning TurnOffAI OFF unhides AI context menu item");
 
-    // 2. LittleDia/LinkMenu x non-web menu isolation.
     DPLittleDia.on = YES;
     [gLittleDiaOpenedLinks removeAllObjects];
     DPCombWebContentChromium *wcDelegate = [objc_getClass(DPDiaWebContent) new];
@@ -1443,12 +1412,10 @@ static void TestClusterCMenusOverlaysAndLayout(void) {
     Check([webMenu indexOfItemWithTitle:@"Open Link in Little Dia"] == 1,
           @"web link menu still receives Open Link in Little Dia after non-web menu popup");
 
-    // Second popup without a fresh link strips previously tagged item.
     [NSMenu popUpContextMenu:webMenu withEvent:MakeRightClick(b.window) forView:renderView];
     Check([webMenu itemWithTitle:@"Open Link in Little Dia"] == nil, @"stale Little Dia link item is stripped on menu reuse");
     DPLittleDia.on = NO;
 
-    // 3. Escape & shortcut priority: Sheet > CommandBarOverlay > Peek > LittleDia.
     SetPatchImmediate(@"peek", YES, YES);
     SetPatchImmediate(@"commandBar", YES, YES);
     DPLittleDia.on = YES;
@@ -1469,7 +1436,6 @@ static void TestClusterCMenusOverlaysAndLayout(void) {
     [b.window.contentView addSubview:overlay];
     DPSet(b.window, &DPOverlayKey, overlay);
 
-    // 3a. With attached sheet, NONE of CommandBar, Peek, or LittleDia steal Escape/Cmd+W in either monitor order.
     NSWindow *fakeSheet = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 200, 120) styleMask:NSWindowStyleMaskTitled backing:NSBackingStoreBuffered defer:NO];
     b.window.fakeSheet = fakeSheet;
     NSEvent *esc = MakeKeyEvent(b.window, @"\x1b", kVK_Escape, 0);
@@ -1480,14 +1446,12 @@ static void TestClusterCMenusOverlaysAndLayout(void) {
     Check(!peekCard.closing && !b.window.closeCalled, @"attached sheet protects Peek and LittleDia from Escape");
     b.window.fakeSheet = nil;
 
-    // 3b. With CommandBarOverlay above Peek (no sheet), Peek & LittleDia yield Escape and Cmd+W to CommandBar.
     Check(DPPeekHandleKeyEvent(peekCard, esc) == esc, @"Peek yields Escape when CommandBarOverlay is visible above it");
     Check(DPPeekHandleKeyEvent(peekCard, cmdW) == cmdW, @"Peek yields Cmd+W when CommandBarOverlay is visible above it");
     Check(DispatchToKeyMonitors(esc, YES) == esc || (!peekCard.closing && !b.window.closeCalled),
           @"LittleDia Escape monitor yields while CommandBarOverlay and Peek are open");
     Check(!peekCard.closing && !b.window.closeCalled, @"Peek and LittleDia stay open while CommandBarOverlay is active");
 
-    // 3c. Remove CommandBarOverlay -> Peek is now topmost; Cmd+L yields from CommandBarKey to Peek, Escape closes Peek (not LittleDia).
     [overlay removeFromSuperview];
     DPSet(b.window, &DPOverlayKey, nil);
     gPeekEditAddressCalls = 0;
@@ -1498,14 +1462,12 @@ static void TestClusterCMenusOverlaysAndLayout(void) {
           @"Escape closes Peek first without closing LittleDia behind it");
     DPPeekCloseAll();
 
-    // 3d. With both CommandBarOverlay and Peek gone, Escape reaches LittleDia and closes it.
     b.window.closeCalled = NO;
     Check(DispatchToKeyMonitors(esc, NO) == nil && b.window.closeCalled,
           @"Escape closes LittleDia once all higher-priority overlays are gone");
     b.window.closeCalled = NO;
     [gLittleDiaWindows removeObject:b.window];
 
-    // 4. CollapsePinned x CompactTabRows x HideTabLayout freeze + double-click on Pinned header.
     DPCombTabListView *tabList = [[objc_getClass(DPDiaTabList) alloc] initWithFrame:NSMakeRect(0, 0, 220, 400)];
     DPCombTabListDelegate *tlDel = [DPCombTabListDelegate new];
     tlDel.spaceID = @"space-c";
@@ -1530,7 +1492,6 @@ static void TestClusterCMenusOverlaysAndLayout(void) {
     NSView *pinnedHeader = DPFindView(collection, ^BOOL(NSView *v) { return [v isKindOfClass:NSClassFromString(@"DPPinnedHeader")]; });
     Check(pinnedHeader && !pinnedHeader.hidden && fabs(NSMinY(pinnedHeader.frame)) < 0.5, @"CollapsePinned mounts Pinned header at y=0");
 
-    // Freeze list via CommandBar HideTabLayout, then run prepareLayout again -> header must NOT drift to y=+28!
     DPHideTabRow(@"temp-hidden", b.window);
     DPFreezeLists(b.window);
     [listLayout prepareLayout];
@@ -1540,7 +1501,6 @@ static void TestClusterCMenusOverlaysAndLayout(void) {
     DPShowTabRow(@"temp-hidden", YES);
     DPRelayoutLists();
 
-    // Double-click on visible Pinned header must be ignored by CommandBar, AutoPip, AND CollapsePinned.
     gCommandBarExpectCount = 0;
     gPipRequests = 0;
     DPCombGesture *clickOnHeader = [DPCombGesture new];
@@ -1552,7 +1512,6 @@ static void TestClusterCMenusOverlaysAndLayout(void) {
     Check(gCommandBarExpectCount == 0 && tabList.diaDoubleClicks == 0 && gPipRequests == 1,
           @"double-click on Pinned header does not open CommandBar, hold AutoPip, or create a new tab");
 
-    // 5. GroupTabs/Tracking x Peek: ignored disposition (0) must not track phantom webContents.
     DPCombWebContents *opener = [b.browser createWebContents:nil];
     DPCombWebContents *ignoredWC = [objc_getClass(DPDiaWebContents) new];
     DPCombWebContents *realWC = [objc_getClass(DPDiaWebContents) new];
@@ -1571,7 +1530,6 @@ static void TestClusterCMenusOverlaysAndLayout(void) {
 static void TestClusterDLaunchFlagsAndCoveredTweaks(void) {
     ResetAllPatchesOff();
 
-    // 1. Combined launch flag merging & selective stale-flag dropping across self-relaunch.
     NSString *passkeysExt = DPAppSupport(@"DiaPatches/passkeys-extension");
     NSString *staleExt = DPAppSupport(@"DiaPatches/stale-old-extension");
     NSString *userExt = @"/Users/test/Extensions/custom-ext";
@@ -1606,7 +1564,6 @@ static void TestClusterDLaunchFlagsAndCoveredTweaks(void) {
     Check([joined1 containsString:[NSString stringWithFormat:@"--load-extension=%@,%@", userExt, passkeysExt]] && ![joined1 containsString:staleExt],
           @"user and active DiaPatches extensions merge while stale DiaPatches extension is dropped");
 
-    // 2. All 6 .coveredBy = @"turnOffAI" tweaks + Settings UI consistency across Pause Tweaks.
     NSArray<NSString *> *coveredKeys = @[
         @"hideChatButton", @"hideChatsButton", @"hideUpgradeBanner",
         @"hidePersonalizeButton", @"hideSkillsSuggestions", @"hideConnectAppPrompts"
@@ -1633,7 +1590,6 @@ static void TestClusterDLaunchFlagsAndCoveredTweaks(void) {
     Check([DPWhyHidden(showAddr) isEqualToString:@"Hidden while Hide Toolbar is on"], @"disabledBy tweak shows hidden reason while unpaused");
     Check(DPWhyDisabled(cbBlur) == nil, @"sub-option with ON parent is not disabled while unpaused");
 
-    // Pause Tweaks: saved relationships MUST stay accurate while switches disable.
     Check([DPRelaunchingOnPause() containsObject:@"Turn Off AI"], @"DPRelaunchingOnPause reports Turn Off AI before pausing");
     DPSetTweaksPaused(YES, nil);
     [chatSwitch sync];
@@ -1648,7 +1604,6 @@ static void TestClusterDLaunchFlagsAndCoveredTweaks(void) {
     Check(!chatSwitch.enabled && !addrSwitch.enabled && !blurSwitch.enabled && blurSwitch.state == NSControlStateValueOn,
           @"switches stay disabled and display saved state while paused");
 
-    // HideConnectAppPrompts obeys TurnOffAI || HideConnectAppPrompts when unpaused, and neither when paused.
     DPMockWindowBundle *hostWin = BuildMockWindow(NO, YES, @"space-d", @[ (id)NSColor.systemBlueColor.CGColor ]);
     gMockWindows = @[ hostWin.window ];
     DPCombDialogPanel *dialog = [[objc_getClass(DPDiaDialogPanel) alloc] initWithFrame:NSMakeRect(0, 0, 400, 200)];
@@ -1664,14 +1619,13 @@ static void TestClusterDLaunchFlagsAndCoveredTweaks(void) {
     DPCombDialogVC *dvc = [objc_getClass(DPDiaDialogPanelVC) new];
     dvc.panel = dialog;
     [hostWin.window.contentView addSubview:dvc.view];
-    DrainRunLoop(0.05);
+    DPDrainMainQueue(0.05);
     Check(dialog.declineClicks == 0, @"paused TurnOffAI does not auto-decline Connect App dialog");
 
     DPSetTweaksPaused(NO, nil);
-    DrainRunLoop(0.05);
+    DPDrainMainQueue(0.05);
     Check(dialog.declineClicks == 1, @"resumed TurnOffAI auto-declines Connect App dialog even with HideConnectAppPrompts OFF");
 
-    // 3. TurnOffAI/Rows.m restores folded AI rows in a minimized (non-visible) window.
     DPMockWindowBundle *minWin = BuildMockWindow(NO, NO, @"space-min", @[ (id)NSColor.systemBlueColor.CGColor ]);
     gMockWindows = @[ minWin.window ];
     NSTableView *table = [[NSTableView alloc] initWithFrame:NSMakeRect(0, 0, 240, 200)];
@@ -1783,7 +1737,7 @@ static void TestPermutationAndPauseStress(void) {
         gMockWindows = nil;
         gMockKeyWindow = nil;
     }
-    DrainRunLoop(0.05);
+    DPDrainMainQueue(0.05);
     Check(YES, @"60-iteration multi-cluster permutation stress + teardown completed cleanly under ASan/UBSan");
 }
 
@@ -1820,7 +1774,6 @@ int main(void) {
         DPHookClass(NSApp.class, @selector(orderedWindows), (IMP)DPApp_orderedWindows);
         DPHookClass(NSApp.class, @selector(keyWindow), (IMP)DPApp_keyWindow);
 
-        // Minimal main menu for CommandBar / GroupTabs / TurnOffAI menu hooks.
         NSMenu *mainMenu = [[NSMenu alloc] initWithTitle:@"Main"];
         NSMenuItem *fileItem = [[NSMenuItem alloc] initWithTitle:@"File" action:nil keyEquivalent:@""];
         NSMenu *fileMenu = [[NSMenu alloc] initWithTitle:@"File"];

@@ -12,15 +12,15 @@ NSScrollView *DPTidyListScroll(NSView *list) {
 static void DPTabList_layout(NSView *self, SEL _cmd) {
     DPCallOriginal(DPTabList_layout, self);
     [DPTidyLists addObject:self];
-    if (!DPTidyTabs.on) {
+    BOOL on = DPTidyTabs.on;
+    if (on) {
+        DPSet(self, &DPActiveKey, @YES);
+    } else {
         [[DPTidyHover forList:self] detach];
         if (!DPGet(self, &DPActiveKey)) return;
         DPSet(self, &DPActiveKey, nil);
-    } else {
-        DPSet(self, &DPActiveKey, @YES);
     }
-    DPTidyHover *hover = DPTidyTabs.on ? [DPTidyHover attachToList:self] : [DPTidyHover forList:self];
-    CGFloat progress = DPTidyTabs.on ? hover.progress : 0;
+    CGFloat progress = on ? [DPTidyHover attachToList:self].progress : 0;
     NSView *separator = DPTidySeparatorIn(self);
     if (separator) DPPlaceSeparatorBrush(separator);
     CGFloat inset = separator ? 0 : round(DPTidyRowHeight * progress);
@@ -36,7 +36,7 @@ static void DPTabList_layout(NSView *self, SEL _cmd) {
 
     DPTidyRowView *row = DPTidyRowIn(self, inset > 0);
     if (!row) return;
-    if (!DPTidyTabs.on) return [row removeFromSuperview];
+    if (!on) return [row removeFromSuperview];
     CGFloat y = self.isFlipped ? NSMinY(laidOut) : NSMaxY(laidOut) - inset;
     row.frame = NSMakeRect(NSMinX(laidOut), y, NSWidth(laidOut), inset);
     row.alphaValue = progress;

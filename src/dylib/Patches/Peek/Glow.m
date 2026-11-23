@@ -43,10 +43,7 @@ static const CGFloat DPGlowEase = 0.15;
 
 - (void)updateLayer {
     [self.effectiveAppearance performAsCurrentDrawingAppearance:^{
-        [CATransaction begin];
-        [CATransaction setDisableActions:YES];
-        self.line.backgroundColor = NSColor.controlAccentColor.CGColor;
-        [CATransaction commit];
+        DPWithoutAnimation(^{ self.line.backgroundColor = NSColor.controlAccentColor.CGColor; });
     }];
 }
 
@@ -57,14 +54,13 @@ static const CGFloat DPGlowEase = 0.15;
 
 - (void)layout {
     [super layout];
-    [CATransaction begin];
-    [CATransaction setDisableActions:YES];
-    self.shader.frame = self.bounds;
-    self.shader.mask.frame = self.shader.bounds;
-    self.shader.contentsScale = self.window.backingScaleFactor ?: 2;
-    self.shader.drawableSize = CGSizeMake(NSWidth(self.bounds) * self.shader.contentsScale, NSHeight(self.bounds) * self.shader.contentsScale);
-    self.line.frame = NSMakeRect(0, 0, round(NSWidth(self.bounds) * self.shown), 2);
-    [CATransaction commit];
+    DPWithoutAnimation(^{
+        self.shader.frame = self.bounds;
+        self.shader.mask.frame = self.shader.bounds;
+        self.shader.contentsScale = self.window.backingScaleFactor ?: 2;
+        self.shader.drawableSize = CGSizeMake(NSWidth(self.bounds) * self.shader.contentsScale, NSHeight(self.bounds) * self.shader.contentsScale);
+        [self placeLine];
+    });
     if (self.shader) [self draw];
 }
 
@@ -74,14 +70,10 @@ static const CGFloat DPGlowEase = 0.15;
     return nil;
 }
 
+- (void)placeLine { self.line.frame = NSMakeRect(0, 0, round(NSWidth(self.bounds) * self.shown), 2); }
+
 - (void)draw {
-    if (!self.shader) {
-        [CATransaction begin];
-        [CATransaction setDisableActions:YES];
-        self.line.frame = NSMakeRect(0, 0, round(NSWidth(self.bounds) * self.shown), 2);
-        [CATransaction commit];
-        return;
-    }
+    if (!self.shader) return DPWithoutAnimation(^{ [self placeLine]; });
     simd_float3 primary, secondary;
     DPProgressColors(self.pane, @"dia", &primary, &secondary);
     DPDrawProgressShader(self.shader, self.shown, fmod(CACurrentMediaTime(), DPGlowCycle) / DPGlowCycle, primary, secondary);

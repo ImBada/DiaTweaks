@@ -105,7 +105,6 @@ static void installFakeRelay(void) {
 }
 
 static void testHostFolderFallback(void) {
-    // 1. Chrome absent and creatable (macOS 14-26 without Chrome): creates and uses Chrome folder.
     gAppSupportRoot = makeTempDir();
     NSError *err = nil;
     NSString *chrome = DPAppSupport(@"Google/Chrome/NativeMessagingHosts");
@@ -115,7 +114,7 @@ static void testHostFolderFallback(void) {
     NSCAssert([[DPHostFolder(NO, nil) stringByStandardizingPath] isEqualToString:chrome.stringByStandardizingPath], @"read-only lookup sees chrome");
     unlockAndRemove(gAppSupportRoot);
 
-    // 2. Chrome absent and creating Google/Chrome returns EPERM (macOS 27.3 App-Data TCC via uchg).
+    // Chrome absent and creating Google/Chrome returns EPERM (macOS 27.3 App-Data TCC via uchg).
     gAppSupportRoot = makeTempDir();
     chrome = DPAppSupport(@"Google/Chrome/NativeMessagingHosts");
     dia = DPAppSupport(@"Dia/User Data/NativeMessagingHosts");
@@ -128,7 +127,6 @@ static void testHostFolderFallback(void) {
     NSCAssert([DPHostFolder(NO, nil) isEqualToString:dia], @"read-only lookup must match fallback Dia/User Data");
     unlockAndRemove(gAppSupportRoot);
 
-    // 3. Google/Chrome exists and is read-only (0555), NativeMessagingHosts missing -> falls back to Dia/User Data.
     gAppSupportRoot = makeTempDir();
     chrome = DPAppSupport(@"Google/Chrome/NativeMessagingHosts");
     dia = DPAppSupport(@"Dia/User Data/NativeMessagingHosts");
@@ -140,7 +138,6 @@ static void testHostFolderFallback(void) {
     NSCAssert([got isEqualToString:dia] && !err, @"missing NativeMessagingHosts under read-only Chrome must fall back, got %@", got);
     unlockAndRemove(gAppSupportRoot);
 
-    // 4. Google/Chrome exists and is untraversable (0000) -> stat fails, falls back to Dia/User Data.
     gAppSupportRoot = makeTempDir();
     dia = DPAppSupport(@"Dia/User Data/NativeMessagingHosts");
     chromeParent = DPAppSupport(@"Google/Chrome");
@@ -151,7 +148,6 @@ static void testHostFolderFallback(void) {
     NSCAssert([got isEqualToString:dia] && !err, @"untraversable Chrome dir must fall back, got %@", got);
     unlockAndRemove(gAppSupportRoot);
 
-    // 5. #384: Google/Chrome/NativeMessagingHosts ALREADY exists and is read-only (0555) -> stays on chrome so write surfaces repair command.
     gAppSupportRoot = makeTempDir();
     chrome = DPAppSupport(@"Google/Chrome/NativeMessagingHosts");
     [NSFileManager.defaultManager createDirectoryAtPath:chrome withIntermediateDirectories:YES attributes:nil error:nil];
@@ -166,7 +162,6 @@ static void testHostFolderFallback(void) {
     NSCAssert([msg containsString:@"sudo chown -R \"$(whoami)\""], @"#384 repair command expected, got: %@", msg);
     unlockAndRemove(gAppSupportRoot);
 
-    // 6. Corrupted file at Google/Chrome/NativeMessagingHosts -> falls back to Dia/User Data.
     gAppSupportRoot = makeTempDir();
     chrome = DPAppSupport(@"Google/Chrome/NativeMessagingHosts");
     dia = DPAppSupport(@"Dia/User Data/NativeMessagingHosts");
@@ -177,7 +172,6 @@ static void testHostFolderFallback(void) {
     NSCAssert([got isEqualToString:dia] && !err, @"regular file at Chrome host dir must fall back, got %@", got);
     unlockAndRemove(gAppSupportRoot);
 
-    // 7. Both Chrome and Dia unwritable -> returns nil with error.
     gAppSupportRoot = makeTempDir();
     google = DPAppSupport(@"Google");
     NSString *diaParent = DPAppSupport(@"Dia");
@@ -203,13 +197,11 @@ static void testPasskeysChromelessAndTransition(void) {
     [NSFileManager.defaultManager createDirectoryAtPath:google withIntermediateDirectories:YES attributes:nil error:nil];
     NSCAssert(chflags(google.fileSystemRepresentation, UF_IMMUTABLE) == 0, @"uchg google");
 
-    // Off-tweak invariant: install while off creates nothing.
     DPPasskeys.on = NO;
     DPPasskeys.install();
     NSCAssert(![NSFileManager.defaultManager fileExistsAtPath:diaHost], @"off passkeys must not write manifest");
     NSCAssert(![NSFileManager.defaultManager fileExistsAtPath:DPAppSupport(@"Dia/User Data")], @"off passkeys must not create Dia dir");
 
-    // Enable passkeys while Google/Chrome fails with EPERM.
     DPPasskeys.on = YES;
     DPPasskeys.apply(&DPPasskeys);
     NSString *problem = DPPasskeys.ready(&DPPasskeys);
@@ -218,20 +210,17 @@ static void testPasskeysChromelessAndTransition(void) {
     NSCAssert([manifest[@"name"] isEqual:@"com.diapatches.passkeys"], @"manifest written to Dia/User Data");
     NSCAssert([manifest[@"path"] isEqual:DPAppSupport(@"DiaPatches/bin/diapatch")], @"manifest points to diapatch");
 
-    // Later Chrome gets installed: re-applying migrates manifest to Chrome and removes stale Dia copy.
     NSCAssert(chflags(google.fileSystemRepresentation, 0) == 0, @"nouchg google");
     DPPasskeys.apply(&DPPasskeys);
     NSCAssert(DPPasskeys.ready(&DPPasskeys) == nil, @"passkeys valid after Chrome installed");
     NSCAssert([NSFileManager.defaultManager fileExistsAtPath:chromeHost], @"manifest now in Chrome folder");
     NSCAssert(![NSFileManager.defaultManager fileExistsAtPath:diaHost], @"stale Dia manifest removed");
 
-    // Turning off removes Chrome manifest and extension folder.
     DPPasskeys.on = NO;
     DPPasskeys.install();
     NSCAssert(![NSFileManager.defaultManager fileExistsAtPath:chromeHost], @"off passkeys removes Chrome manifest");
     NSCAssert(![NSFileManager.defaultManager fileExistsAtPath:DPAppSupport(@"DiaPatches/passkeys-extension")], @"off passkeys removes extension");
 
-    // Turning off after Chrome-less enable also cleans up Dia manifest.
     [NSFileManager.defaultManager removeItemAtPath:DPAppSupport(@"Google/Chrome") error:nil];
     NSCAssert(chflags(google.fileSystemRepresentation, UF_IMMUTABLE) == 0, @"uchg google again");
     DPPasskeys.on = YES;
@@ -241,7 +230,6 @@ static void testPasskeysChromelessAndTransition(void) {
     DPPasskeys.install();
     NSCAssert(![NSFileManager.defaultManager fileExistsAtPath:diaHost], @"off passkeys removes Dia manifest");
 
-    // #384: existing read-only Chrome NativeMessagingHosts still reports sudo chown repair.
     NSCAssert(chflags(google.fileSystemRepresentation, 0) == 0, @"nouchg google");
     NSString *chromeDir = chromeHost.stringByDeletingLastPathComponent;
     [NSFileManager.defaultManager createDirectoryAtPath:chromeDir withIntermediateDirectories:YES attributes:nil error:nil];
@@ -267,17 +255,14 @@ static void testICloudPasswordsTemplatesAndChromeless(void) {
     writeJSON(templates, @{ @"name" : @"com.apple.passwordmanager", @"path" : appleHelper });
     gAppleManifests = @[ missingLib, templates, cryptex ];
 
-    // EPERM on Google/Chrome + /Library/Google/Chrome manifest missing (Templates present).
     NSString *google = DPAppSupport(@"Google");
     [NSFileManager.defaultManager createDirectoryAtPath:google withIntermediateDirectories:YES attributes:nil error:nil];
     NSCAssert(chflags(google.fileSystemRepresentation, UF_IMMUTABLE) == 0, @"uchg google");
 
-    // Off-tweak invariant: turning off when never on creates nothing.
     DPICloudPasswords.on = NO;
     DPICloudPasswords.apply(&DPICloudPasswords);
     NSCAssert(![NSFileManager.defaultManager fileExistsAtPath:DPAppSupport(@"Dia/User Data")], @"off iCloud Passwords must not create Dia dir");
 
-    // Pre-existing OpenPasswordsHelper manifest in Dia/User Data should be backed up and restored.
     NSString *diaDir = DPAppSupport(@"Dia/User Data/NativeMessagingHosts");
     NSString *openPath = [diaDir stringByAppendingPathComponent:@"com.openpasswords.icloud.json"];
     writeJSON(openPath, @{ @"name" : @"com.openpasswords.icloud", @"path" : @"/Applications/OpenPasswords.app/Contents/MacOS/OpenPasswordsHelper" });
@@ -292,13 +277,11 @@ static void testICloudPasswordsTemplatesAndChromeless(void) {
     NSCAssert([readJSON(openPath)[@"path"] isEqual:DPAppSupport(@"DiaPatches/bin/diapatch")], @"OpenPasswords relay written to Dia/User Data");
     NSCAssert([NSFileManager.defaultManager fileExistsAtPath:DPAppSupport(@"DiaPatches/com.openpasswords.icloud.json")], @"original OpenPasswords manifest kept");
 
-    // Turning off removes relays and restores original OpenPasswords manifest.
     DPICloudPasswords.on = NO;
     DPICloudPasswords.apply(&DPICloudPasswords);
     NSCAssert(![NSFileManager.defaultManager fileExistsAtPath:diaApple], @"Apple relay removed when off");
     NSCAssert([[readJSON(openPath)[@"path"] lastPathComponent] isEqual:@"OpenPasswordsHelper"], @"original OpenPasswords manifest restored");
 
-    // Transition from Chrome-less -> Chrome installed migrates relay and removes stale Dia copy.
     DPICloudPasswords.on = YES;
     DPICloudPasswords.apply(&DPICloudPasswords);
     NSCAssert([NSFileManager.defaultManager fileExistsAtPath:diaApple], @"Dia relay exists before Chrome install");
@@ -312,7 +295,6 @@ static void testICloudPasswordsTemplatesAndChromeless(void) {
     DPICloudPasswords.apply(&DPICloudPasswords);
     NSCAssert(![NSFileManager.defaultManager fileExistsAtPath:chromeApple], @"Chrome Apple relay removed when off");
 
-    // #384: existing read-only Chrome NativeMessagingHosts still reports sudo chown repair.
     NSString *chromeDir = chromeApple.stringByDeletingLastPathComponent;
     chmod(chromeDir.fileSystemRepresentation, 0555);
     DPICloudPasswords.on = YES;
@@ -323,20 +305,17 @@ static void testICloudPasswordsTemplatesAndChromeless(void) {
     [NSFileManager.defaultManager removeItemAtPath:DPAppSupport(@"Google/Chrome") error:nil];
     NSCAssert(chflags(google.fileSystemRepresentation, UF_IMMUTABLE) == 0, @"uchg google again");
 
-    // Broken /Library manifest (non-executable path) falls through to Cryptex manifest.
     writeJSON(missingLib, @{ @"name" : @"com.apple.passwordmanager", @"path" : @"/nonexistent/helper" });
     [NSFileManager.defaultManager removeItemAtPath:templates error:nil];
     writeJSON(cryptex, @{ @"name" : @"com.apple.passwordmanager", @"path" : appleHelper });
     NSCAssert([DPAppleHelperPath() isEqualToString:appleHelper], @"must skip broken primary and use Cryptex fallback");
 
-    // Missing everywhere reports missing Apple helper.
     [NSFileManager.defaultManager removeItemAtPath:cryptex error:nil];
     DPICloudPasswords.on = YES;
     DPICloudPasswords.apply(&DPICloudPasswords);
     problem = DPICloudPasswords.ready(&DPICloudPasswords);
     NSCAssert([problem containsString:@"doesn’t have Apple’s iCloud Passwords helper"], @"missing helper message expected, got: %@", problem);
 
-    // diapatch PasswordsHost.m appleHelperIn & onePasswordHostIn parity.
     writeJSON(templates, @{ @"name" : @"com.apple.passwordmanager", @"path" : appleHelper });
     NSCAssert([appleHelperIn(@[ missingLib, templates, cryptex ]) isEqualToString:appleHelper], @"diapatch appleHelperIn falls back to Templates");
     NSCAssert(appleHelperIn(@[ missingLib ]) == nil, @"diapatch appleHelperIn rejects non-executable path");
@@ -347,7 +326,6 @@ static void testICloudPasswordsTemplatesAndChromeless(void) {
     NSDictionary *op = onePasswordHostIn(@[ DPAppSupport(@"Google/Chrome/NativeMessagingHosts"), diaDir ]);
     NSCAssert([op[@"path"] hasSuffix:@"/1Password-BrowserSupport"], @"diapatch onePasswordHostIn falls back to Dia/User Data");
 
-    // Live system smoke check: on macOS 14+, DPAppleHelper() finds Apple's real executable.
     NSString *liveHelper = DPAppleHelper();
     if (liveHelper) NSCAssert([NSFileManager.defaultManager isExecutableFileAtPath:liveHelper], @"live Apple helper must be executable");
 
@@ -377,7 +355,6 @@ static void testBitwardenAndOnePasswordChromeless(void) {
     DPBitwarden.apply(&DPBitwarden);
     NSCAssert(![NSFileManager.defaultManager fileExistsAtPath:diaBw], @"Bitwarden removes our Dia manifest when off");
 
-    // Third-party Bitwarden manifest is untouched when toggling on and off.
     writeJSON(diaBw, @{ @"name" : @"com.8bit.bitwarden", @"description" : @"Bitwarden desktop", @"path" : proxy });
     DPBitwarden.on = YES;
     DPBitwarden.apply(&DPBitwarden);
@@ -386,7 +363,6 @@ static void testBitwardenAndOnePasswordChromeless(void) {
     DPBitwarden.apply(&DPBitwarden);
     NSCAssert([NSFileManager.defaultManager fileExistsAtPath:diaBw], @"Bitwarden does not delete third-party manifest when off");
 
-    // #384: existing read-only Chrome NativeMessagingHosts still reports sudo chown repair.
     NSCAssert(chflags(google.fileSystemRepresentation, 0) == 0, @"nouchg google");
     NSString *chromeDir = DPAppSupport(@"Google/Chrome/NativeMessagingHosts");
     [NSFileManager.defaultManager createDirectoryAtPath:chromeDir withIntermediateDirectories:YES attributes:nil error:nil];
@@ -399,7 +375,6 @@ static void testBitwardenAndOnePasswordChromeless(void) {
     [NSFileManager.defaultManager removeItemAtPath:DPAppSupport(@"Google/Chrome") error:nil];
     NSCAssert(chflags(google.fileSystemRepresentation, UF_IMMUTABLE) == 0, @"uchg google");
 
-    // OnePassword ready check sees manifest in Dia/User Data when Chrome folder is absent/EPERM.
     DPTesting = NO;
     NSString *diaOp = DPAppSupport(@"Dia/User Data/NativeMessagingHosts/com.1password.1password.json");
     writeJSON(diaOp, @{ @"name" : @"com.1password.1password", @"path" : @"/Applications/1Password.app/Contents/MacOS/1Password-BrowserSupport" });
@@ -423,14 +398,12 @@ static void testProtonPass(void) {
     chmod(hostBin.fileSystemRepresentation, 0755);
     NSCAssert([DPExecutableHostInApp(fakeApp) isEqualToString:hostBin], @"executable host binary discovered inside app");
 
-    // Off-tweak invariant: install while off creates nothing.
     gProtonPassHost = hostBin;
     DPProtonPass.on = NO;
     DPProtonPass.install();
     NSCAssert(![NSFileManager.defaultManager fileExistsAtPath:DPAppSupport(@"Google")], @"off Proton Pass must not create Google dir");
     NSCAssert(![NSFileManager.defaultManager fileExistsAtPath:DPAppSupport(@"Dia")], @"off Proton Pass must not create Dia dir");
 
-    // Missing app: ready() reports missing desktop app unless DPTesting is YES.
     gProtonPassHost = nil;
     DPProtonPass.on = YES;
     DPProtonPass.apply(&DPProtonPass);
@@ -441,7 +414,6 @@ static void testProtonPass(void) {
     NSCAssert(DPProtonPass.ready(&DPProtonPass) == nil, @"DPTesting passes when Proton Pass app is absent");
     DPTesting = NO;
 
-    // Standard install with full 3-origin JSON schema.
     gProtonPassHost = hostBin;
     NSArray<NSString *> *expectedOrigins = @[
         @"chrome-extension://ghmbeldphafepmbegfdlkpapadhbakde/",
@@ -460,12 +432,10 @@ static void testProtonPass(void) {
     NSCAssert([manifest[@"type"] isEqual:@"stdio"], @"manifest type");
     NSCAssert([manifest[@"allowed_origins"] isEqual:expectedOrigins], @"manifest allowed_origins: %@", manifest[@"allowed_origins"]);
 
-    // Off/pause removes our Chrome manifest.
     DPProtonPass.on = NO;
     DPProtonPass.apply(&DPProtonPass);
     NSCAssert(![NSFileManager.defaultManager fileExistsAtPath:chromePp], @"off Proton Pass removes Chrome manifest");
 
-    // Chrome-less EPERM fallback writes to Dia/User Data/NativeMessagingHosts.
     [NSFileManager.defaultManager removeItemAtPath:DPAppSupport(@"Google/Chrome") error:nil];
     NSString *google = DPAppSupport(@"Google");
     [NSFileManager.defaultManager createDirectoryAtPath:google withIntermediateDirectories:YES attributes:nil error:nil];
@@ -477,14 +447,12 @@ static void testProtonPass(void) {
     NSDictionary *diaManifest = readJSON(diaPp);
     NSCAssert([diaManifest[@"path"] isEqual:hostBin] && [diaManifest[@"allowed_origins"] isEqual:expectedOrigins], @"Dia fallback manifest matches schema");
 
-    // Chrome later becomes available: re-apply migrates to Chrome and cleans stale Dia copy.
     NSCAssert(chflags(google.fileSystemRepresentation, 0) == 0, @"nouchg google");
     DPProtonPass.apply(&DPProtonPass);
     NSCAssert(DPProtonPass.ready(&DPProtonPass) == nil, @"Proton Pass ready after Chrome appears");
     NSCAssert([NSFileManager.defaultManager fileExistsAtPath:chromePp], @"manifest migrated to Chrome folder");
     NSCAssert(![NSFileManager.defaultManager fileExistsAtPath:diaPp], @"stale Dia manifest removed");
 
-    // Off/pause cleans up Chrome-less Dia copy too.
     DPProtonPass.on = NO;
     DPProtonPass.apply(&DPProtonPass);
     [NSFileManager.defaultManager removeItemAtPath:DPAppSupport(@"Google/Chrome") error:nil];
@@ -496,7 +464,6 @@ static void testProtonPass(void) {
     DPProtonPass.install();
     NSCAssert(![NSFileManager.defaultManager fileExistsAtPath:diaPp], @"off/install removes Dia fallback manifest");
 
-    // Preserving user/app-owned manifest across on/off, plus broken/invalid manifest diagnostics.
     writeJSON(diaPp, @{
         @"name" : @"me.proton.pass.nm",
         @"description" : @"Proton Pass host for native messaging with the desktop app",
@@ -524,7 +491,6 @@ static void testProtonPass(void) {
     NSCAssert(invalidMsg && [invalidMsg containsString:@"isn’t a valid host file"], @"invalid host message expected, got: %@", invalidMsg);
     [NSFileManager.defaultManager removeItemAtPath:diaPp error:nil];
 
-    // Stale DiaTweaks Dia copy is removed even when Chrome gains a third-party manifest.
     DPProtonPass.on = YES;
     DPProtonPass.apply(&DPProtonPass);
     NSCAssert([NSFileManager.defaultManager fileExistsAtPath:diaPp], @"ours written in Dia");
@@ -535,7 +501,6 @@ static void testProtonPass(void) {
     NSCAssert(![NSFileManager.defaultManager fileExistsAtPath:diaPp], @"stale DiaTweaks copy cleaned when Chrome has third-party manifest");
     [NSFileManager.defaultManager removeItemAtPath:chromePp error:nil];
 
-    // #384: existing read-only Chrome NativeMessagingHosts reports sudo chown repair.
     NSString *chromeDir = chromePp.stringByDeletingLastPathComponent;
     chmod(chromeDir.fileSystemRepresentation, 0555);
     DPProtonPass.on = YES;
@@ -544,7 +509,6 @@ static void testProtonPass(void) {
     NSCAssert(permMsg && [permMsg containsString:@"sudo chown -R \"$(whoami)\""], @"#384 Proton Pass repair expected, got: %@", permMsg);
     chmod(chromeDir.fileSystemRepresentation, 0755);
 
-    // Symlinked app & host succeed; directory or broken symlink at host binary is rejected.
     NSString *symlinkApp = [gAppSupportRoot stringByAppendingPathComponent:@"ProtonPassLink.app"];
     NSCAssert([NSFileManager.defaultManager createSymbolicLinkAtPath:symlinkApp withDestinationPath:fakeApp error:nil], @"create app symlink");
     NSCAssert([DPExecutableHostInApp(symlinkApp) hasSuffix:@"/ProtonPassLink.app/Contents/Resources/assets/proton_pass_nm_host"],
@@ -567,14 +531,12 @@ static void testProtonPass(void) {
     [NSFileManager.defaultManager createSymbolicLinkAtPath:brokenHost withDestinationPath:@"/nonexistent/proton_pass_nm_host" error:nil];
     NSCAssert(DPExecutableHostInApp(brokenApp) == nil, @"broken symlink at host binary must be rejected");
 
-    // Ownership requires BOTH name and description; matching description with another name is preserved.
     writeJSON(chromePp, @{ @"name" : @"other.host", @"description" : @"DiaTweaks link to the Proton Pass app", @"path" : hostBin });
     DPProtonPass.on = NO;
     DPProtonPass.apply(&DPProtonPass);
     NSCAssert([NSFileManager.defaultManager fileExistsAtPath:chromePp], @"manifest with wrong name must not be deleted even if description matches");
     [NSFileManager.defaultManager removeItemAtPath:chromePp error:nil];
 
-    // Uninstalling Proton Pass while tweak stays ON removes stale DiaTweaks-owned manifest.
     gProtonPassHost = hostBin;
     DPProtonPass.on = YES;
     DPProtonPass.apply(&DPProtonPass);

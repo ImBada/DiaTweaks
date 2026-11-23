@@ -70,6 +70,23 @@ static id DPObjectIvar(id object, const char *name) {
     return ivar ? object_getIvar(object, ivar) : nil;
 }
 
+static void DPUndoAdjustment(NSArray *previous, void *height) {
+    NSArray<NSArray *> *written = previous[1];
+    if (!written.count) return;
+    for (NSArray *entry in written) {
+        NSCollectionViewLayoutAttributes *a = entry[0];
+        if (!NSEqualRects(a.frame, [entry[1] rectValue])) return;
+    }
+    for (NSArray *entry in written) {
+        NSCollectionViewLayoutAttributes *a = entry[0];
+        NSRect frame = a.frame;
+        frame.origin.y -= [entry[2] doubleValue];
+        frame.size.height -= [entry[3] doubleValue];
+        a.frame = frame;
+    }
+    *(double *)height -= [previous[0] doubleValue];
+}
+
 static void DPLayout_prepareLayout(NSCollectionViewLayout *self, SEL _cmd) {
     DPCallOriginal(DPLayout_prepareLayout, self);
     void *height = DPIvar(self, "contentHeight");
@@ -77,22 +94,7 @@ static void DPLayout_prepareLayout(NSCollectionViewLayout *self, SEL _cmd) {
     NSArray *prev = DPGet(self, &DPAdjustedKey);
     if (prev && height) {
         DPSet(self, &DPAdjustedKey, nil);
-        NSArray<NSArray *> *written = prev[1];
-        BOOL reused = written.count > 0;
-        for (NSArray *entry in written) {
-            NSCollectionViewLayoutAttributes *a = entry[0];
-            if (!NSEqualRects(a.frame, [entry[1] rectValue])) { reused = NO; break; }
-        }
-        if (reused) {
-            for (NSArray *entry in written) {
-                NSCollectionViewLayoutAttributes *a = entry[0];
-                NSRect frame = a.frame;
-                frame.origin.y -= [entry[2] doubleValue];
-                frame.size.height -= [entry[3] doubleValue];
-                a.frame = frame;
-            }
-            *(double *)height -= [prev[0] doubleValue];
-        }
+        DPUndoAdjustment(prev, height);
     }
     if (!DPPullRequestRepo.on || !DPTallTabs.count) {
         if (DPGet(self, &DPEditsKey)) DPSet(self, &DPEditsKey, nil);

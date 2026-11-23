@@ -44,5 +44,6 @@ DP_PATCH(DPOnePassword) {
     .symbol = @"lock.shield.fill",
     .tint = @"systemGreenColor",
     .section = @"Passwords",
+    .group = @"passwordManagers",
     .ready = DPOnePasswordProblem,
 };

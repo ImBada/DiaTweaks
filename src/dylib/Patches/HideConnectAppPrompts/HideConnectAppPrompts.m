@@ -2,11 +2,9 @@
 #import "Patches/TurnOffAI/TurnOffAI.h"
 #import <objc/message.h>
 
-static Class DPDialogPanelClass;
-static Class DPDialogButtonClass;
-static Class DPDialogPanelVCClass;
-static Class DPDialogPanelWCClass;
+static Class DPDialogPanelClass, DPDialogButtonClass, DPDialogPanelVCClass, DPDialogPanelWCClass;
 static char DPDismissedKey, DPHandledKey, DPDeclineButtonKey, DPHiddenAtLoadKey;
+static BOOL DPHidAtLoad;
 
 static BOOL DPSuppressConnectPrompts(void) {
     return DPHideConnectAppPrompts.on || DPTurnOffAI.on;
@@ -16,7 +14,9 @@ static BOOL DPIsConnectTitle(NSString *raw) {
     if (![raw isKindOfClass:NSString.class]) return NO;
     NSString *text = [raw stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
     if (![text hasSuffix:@" to Dia?"]) return NO;
-    NSUInteger prefixLen = [text hasPrefix:@"Connect "] ? 8 : [text hasPrefix:@"Reconnect "] ? 10 : 0;
+    NSUInteger prefixLen = 0;
+    if ([text hasPrefix:@"Connect "]) prefixLen = 8;
+    else if ([text hasPrefix:@"Reconnect "]) prefixLen = 10;
     if (!prefixLen || text.length <= prefixLen + 8) return NO;
     NSString *app = [[text substringWithRange:NSMakeRange(prefixLen, text.length - prefixLen - 8)]
         stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
@@ -38,13 +38,30 @@ static BOOL DPIsConnectAppPrompt(NSView *panel) {
     }) != nil;
 }
 
+// The Ask-on-Page and New Tab single-app upsells are bars, not dialogs: "Bring the full context from <App> into Dia".
+BOOL DPIsSingleAppUpsellBar(NSView *view) {
+    if (!DPIsKind(view, DPDiaAppsUpsellBar)) return NO;
+    return DPFindView(view, ^BOOL(NSView *sub) {
+        if (![sub isKindOfClass:NSTextField.class] || sub.hidden) return NO;
+        NSString *text = ((NSTextField *)sub).stringValue;
+        return [text hasPrefix:@"Bring the full context from "] && [text hasSuffix:@" into Dia"];
+    }) != nil;
+}
+
+static void DPAppsUpsellBar_layout(NSView *self, SEL _cmd) {
+    [DPHideHosts addObject:self];
+    DPEnforceHides(self);
+    DPCallOriginal(DPAppsUpsellBar_layout, self);
+}
+
+// Dia tags each dialog button with its 0-based index, so the decline button is tag 0 whenever it comes first.
 static NSButton *DPDeclineButtonIn(NSView *panel) {
     if (!panel) return nil;
     return (NSButton *)DPFindView(panel, ^BOOL(NSView *view) {
         if (![view isKindOfClass:NSButton.class]) return NO;
         if (DPDialogButtonClass && ![view isKindOfClass:DPDialogButtonClass]) return NO;
         NSButton *button = (NSButton *)view;
-        return button.target == panel && button.action == @selector(handleButton:) && button.tag != 0 && DPIsDeclineTitle(button.title);
+        return button.target == panel && button.action == @selector(handleButton:) && DPIsDeclineTitle(button.title);
     });
 }
 
@@ -63,7 +80,7 @@ static NSView *DPConnectPromptIn(NSView *root, NSButton **declineOut) {
 }
 
 static void DPRestoreHiddenAtLoadIn(NSView *root) {
-    if (!root) return;
+    if (!root || !DPHidAtLoad) return;
     DPFindView(root, ^BOOL(NSView *view) {
         NSView *host = DPGet(view, &DPHiddenAtLoadKey);
         if (!host) return NO;
@@ -128,18 +145,15 @@ static void DPDialogPanel_handleButton(NSView *self, SEL _cmd, id sender) {
 }
 
 static void DPWindow_beginSheet(NSWindow *self, SEL _cmd, NSWindow *sheet, void (^handler)(NSModalResponse)) {
-    if (sheet && !DPSuppressConnectPrompts()) DPRestoreHiddenAtLoadIn(sheet.contentView);
-    if (DPSuppressConnectPrompts() && sheet) {
-        NSButton *decline = nil;
-        NSView *panel = DPConnectPromptIn(sheet.contentView, &decline);
-        if (panel) {
-            DPHidePromptWindow(sheet, panel);
-            DPCallOriginal(DPWindow_beginSheet, self, sheet, handler);
-            DPScheduleDecline(panel, decline);
-            return;
-        }
+    NSButton *decline = nil;
+    NSView *panel = nil;
+    if (sheet) {
+        if (DPSuppressConnectPrompts()) panel = DPConnectPromptIn(sheet.contentView, &decline);
+        else DPRestoreHiddenAtLoadIn(sheet.contentView);
     }
+    if (panel) DPHidePromptWindow(sheet, panel);
     DPCallOriginal(DPWindow_beginSheet, self, sheet, handler);
+    if (panel) DPScheduleDecline(panel, decline);
 }
 
 static BOOL DPSuppressPanelWindow(NSWindow *window) {
@@ -173,6 +187,7 @@ static void DPDialogPanelVC_viewDidLoad(NSViewController *self, SEL _cmd) {
     NSButton *decline = nil;
     NSView *panel = DPConnectPromptIn(self.view, &decline);
     if (!panel) return;
+    DPHidAtLoad = YES;
     DPSet(panel, &DPHiddenAtLoadKey, self.view);
     self.view.hidden = YES;
     panel.hidden = YES;
@@ -224,9 +239,11 @@ static void DPInstallHideConnectAppPrompts(void) {
     DPHook(DPDiaDialogPanelVC, @selector(viewDidLoad), (IMP)DPDialogPanelVC_viewDidLoad);
     DPHook(DPDiaDialogPanel, @selector(viewDidMoveToWindow), (IMP)DPDialogPanel_viewDidMoveToWindow);
     DPHook(DPDiaDialogPanel, @selector(handleButton:), (IMP)DPDialogPanel_handleButton);
+    DPHook(DPDiaAppsUpsellBar, @selector(layout), (IMP)DPAppsUpsellBar_layout);
 }
 
 static void DPApplyHideConnectAppPrompts(DPPatch *patch) {
+    DPApplyHides(patch);
     if (DPSuppressConnectPrompts()) DPDismissConnectAppPrompts();
 }
 
@@ -234,12 +251,14 @@ DP_PATCH(DPHideConnectAppPrompts) {
     .key = @"hideConnectAppPrompts",
     .order = 220,
     .title = @"Hide Connect App Prompt",
-    .detail = @"Stop the “Connect to Dia?” prompts that ask to link logged-in apps for Chat. You can still connect apps from Dia’s Apps settings.",
+    .detail = @"Stop the “Connect to Dia?” prompts and app upsell bars that ask to link logged-in apps for Chat. You can still connect apps from Dia’s Apps settings.",
     .symbol = @"app.connected.to.app.below.fill link.circle.fill",
     .tint = @"systemPurpleColor",
     .section = @"AI",
+    .group = @"aiPrompts",
     .coveredBy = @"turnOffAI",
     .classes = DPClasses(DPDiaDialogPanel, DPDiaDialogButton, DPDiaDialogPanelVC, DPDiaDialogPanelWC),
+    .hides = DPIsSingleAppUpsellBar,
     .install = DPInstallHideConnectAppPrompts,
     .apply = DPApplyHideConnectAppPrompts,
 };

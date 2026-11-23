@@ -129,7 +129,6 @@ int main(void) {
         if ([[DPMidChain new] value] != 112) { failures++; printf("FAIL mid [super] chain returned wrong value\n"); }
         if ([[DPBaseChain new] value] != 11) { failures++; printf("FAIL base returned wrong value\n"); }
 
-        // Recursive [self sel] on a hooked class without superclass hooks still works.
         DPHookClass(DPBaseChain.class, @selector(recurse:), (IMP)DPRecurse_hook);
         if ([[DPBaseChain new] recurse:5] != 5) { failures++; printf("FAIL recursive [self] hook failed\n"); }
 
@@ -142,7 +141,6 @@ int main(void) {
         if (DPDiaIMP(DPInheritedSub.class, @selector(ping)) != realBasePing) { failures++; printf("FAIL DPDiaIMP(DPInheritedSub) did not unwind to base original IMP\n"); }
         if (DPDiaIMP(DPOverrideSub.class, @selector(ping)) != realOverridePing) { failures++; printf("FAIL DPDiaIMP(DPOverrideSub) did not return subclass's own IMP\n"); }
 
-        // 4 hooks on the exact same (Class, SEL) execute in LIFO stack order and unwind cleanly via DPDiaIMP.
         IMP realStack = class_getMethodImplementation(DPMultiTarget.class, @selector(stack));
         DPHookClass(DPMultiTarget.class, @selector(stack), (IMP)DPMulti_h1);
         DPHookClass(DPMultiTarget.class, @selector(stack), (IMP)DPMulti_h2);

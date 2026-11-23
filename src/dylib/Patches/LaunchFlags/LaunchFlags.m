@@ -71,12 +71,12 @@ static void DPApplyLaunchFlags(DPPatch *patch) {
 
 DP_PATCH(DPLaunchFlags) {
     .key = @"launchFlags",
-    .order = 230,
+    .order = 99,
     .title = @"Launch Flags",
     .detail = @"Pass extra Chromium flags whenever Dia opens, whether from the Dock, a launcher, a link, or a relaunch. Useful for flags like --force-renderer-accessibility=complete. Relaunch Dia after changing flags.",
     .symbol = @"terminal.fill",
-    .tint = @"systemBrownColor",
-    .section = @"Window",
+    .tint = @"systemYellowColor",
+    .section = @"App",
     .classes = DPClasses(DPDiaAppConfiguration),
     .relaunch = YES,
     .rows = DPLaunchFlagsRows,

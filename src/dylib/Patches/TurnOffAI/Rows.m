@@ -162,14 +162,18 @@ CGFloat DPHiddenSuggestionsHeight(NSView *suggestions) {
     return height;
 }
 
+static void DPRefreshAIRows(NSTableView *table) {
+    if ((DPTurnOffAI.on || [DPGet(table, &DPAIRowsKey) count]) && DPFoldsRows(table)) DPFindAIRows(table);
+}
+
 static void DPTable_endUpdates(NSTableView *self, SEL _cmd) {
     DPCallOriginal(DPTable_endUpdates, self);
-    if ((DPTurnOffAI.on || [DPGet(self, &DPAIRowsKey) count]) && DPFoldsRows(self)) DPFindAIRows(self);
+    DPRefreshAIRows(self);
 }
 
 static void DPTable_reloadData(NSTableView *self, SEL _cmd) {
     DPCallOriginal(DPTable_reloadData, self);
-    if ((DPTurnOffAI.on || [DPGet(self, &DPAIRowsKey) count]) && DPFoldsRows(self)) DPFindAIRows(self);
+    DPRefreshAIRows(self);
 }
 
 // An arrow onto the chat row moves on; Dia's own pick of it must not, or the field fills with the next suggestion.

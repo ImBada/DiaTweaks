@@ -35,6 +35,14 @@ impl Env {
     pub fn staged(&self) -> PathBuf {
         self.support.join("staged/Dia.app")
     }
+
+    pub fn local(&self) -> PathBuf {
+        self.support.join("local")
+    }
+
+    pub fn local_state(&self) -> PathBuf {
+        self.support.join("local-state.json")
+    }
 }
 
 fn var_os(name: &str) -> Option<OsString> {

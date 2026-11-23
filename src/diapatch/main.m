@@ -5,6 +5,7 @@
 #import "LaunchServices.h"
 #import "Passkeys.h"
 #import "Passwords.h"
+#include <dlfcn.h>
 #include <libproc.h>
 #include <mach-o/loader.h>
 #include <sys/clonefile.h>
@@ -215,6 +216,8 @@ static void waitForQuit(pid_t pid) {
     for (int i = 0; i < 240 && ((pid > 0 && kill(pid, 0) == 0) || appRunning()); i++) usleep(250000);
 }
 
+static BOOL malformed(NSString *path) { return fail(@"%@ has malformed load commands", path); }
+
 static BOOL addLoadCommand(NSString *path, NSString *dylib) {
     struct stat st;
     if (lstat(path.fileSystemRepresentation, &st) != 0 || !S_ISREG(st.st_mode))
@@ -233,26 +236,26 @@ static BOOL addLoadCommand(NSString *path, NSString *dylib) {
             return fail(@"%@ is not a thin arm64 executable", path);
         end = sizeof *header + (uint64_t)header->sizeofcmds;
         uint64_t firstSection = data.length;
-        if (end > data.length) return fail(@"%@ has malformed load commands", path);
+        if (end > data.length) return malformed(path);
         for (uint64_t offset = sizeof *header, i = 0; i < header->ncmds; i++) {
-            if (offset + sizeof(struct load_command) > end) return fail(@"%@ has malformed load commands", path);
+            if (offset + sizeof(struct load_command) > end) return malformed(path);
             const struct load_command *lc = (const void *)(bytes + offset);
             if (lc->cmdsize < sizeof(struct load_command) || (lc->cmdsize & 7) != 0 || offset + lc->cmdsize > end)
-                return fail(@"%@ has malformed load commands", path);
+                return malformed(path);
             if (lc->cmd == LC_LOAD_WEAK_DYLIB || lc->cmd == LC_LOAD_DYLIB) {
-                if (lc->cmdsize < sizeof(struct dylib_command)) return fail(@"%@ has malformed load commands", path);
+                if (lc->cmdsize < sizeof(struct dylib_command)) return malformed(path);
                 const struct dylib_command *dc = (const void *)lc;
                 uint32_t nameOff = dc->dylib.name.offset;
-                if (nameOff < sizeof(struct dylib_command) || nameOff >= lc->cmdsize) return fail(@"%@ has malformed load commands", path);
+                if (nameOff < sizeof(struct dylib_command) || nameOff >= lc->cmdsize) return malformed(path);
                 const char *existing = (const char *)lc + nameOff;
                 size_t maxLen = lc->cmdsize - nameOff, existingLen = strnlen(existing, maxLen);
-                if (existingLen == maxLen) return fail(@"%@ has malformed load commands", path);
+                if (existingLen == maxLen) return malformed(path);
                 if (lc->cmd == LC_LOAD_WEAK_DYLIB && existingLen == nameLen && memcmp(existing, name, nameLen) == 0) alreadyLoaded = YES;
             } else if (lc->cmd == LC_SEGMENT_64) {
-                if (lc->cmdsize < sizeof(struct segment_command_64)) return fail(@"%@ has malformed load commands", path);
+                if (lc->cmdsize < sizeof(struct segment_command_64)) return malformed(path);
                 const struct segment_command_64 *segment = (const void *)lc;
                 if (sizeof *segment + (uint64_t)segment->nsects * sizeof(struct section_64) > segment->cmdsize)
-                    return fail(@"%@ has malformed load commands", path);
+                    return malformed(path);
                 if (!strncmp(segment->segname, SEG_TEXT, sizeof segment->segname)) {
                     const struct section_64 *sections = (const void *)(segment + 1);
                     for (uint32_t s = 0; s < segment->nsects; s++) {
@@ -295,11 +298,17 @@ static BOOL addLoadCommand(NSString *path, NSString *dylib) {
         if (n1 != (ssize_t)size) savedErr = n1 < 0 ? errno : EIO;
         else if (n2 != (ssize_t)sizeof counts) savedErr = n2 < 0 ? errno : EIO;
         else written = YES;
-        if (close(fd) != 0 && written) savedErr = errno, written = NO;
+        if (close(fd) != 0 && written) {
+            savedErr = errno;
+            written = NO;
+        }
     } else {
         savedErr = errno;
     }
-    if (written && rename(dst, src) != 0) savedErr = errno, written = NO;
+    if (written && rename(dst, src) != 0) {
+        savedErr = errno;
+        written = NO;
+    }
     if (!written) {
         unlink(dst);
         return fail(@"cannot write %@: %s", path, strerror(savedErr));
@@ -530,15 +539,20 @@ static NSString *sha256(NSString *file) {
     return [@"sha256:" stringByAppendingString:hex];
 }
 
+static NSDictionary *jsonObject(NSString *text) {
+    NSData *data = [text dataUsingEncoding:NSUTF8StringEncoding];
+    id object = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:NULL] : nil;
+    return [object isKindOfClass:NSDictionary.class] ? object : nil;
+}
+
 static NSDictionary *latestTweaks(int seconds, NSString **problem) {
     NSString *url = env("DIAPATCH_RELEASES") ?: kReleases, *output;
     if (fetch(url, seconds, nil, &output) != 0) {
         *problem = [NSString stringWithFormat:@"cannot reach %@: %@", url, trimmed(output) ?: @"unknown error"];
         return nil;
     }
-    NSData *jsonData = [output dataUsingEncoding:NSUTF8StringEncoding];
-    NSDictionary *release = jsonData ? [NSJSONSerialization JSONObjectWithData:jsonData options:0 error:NULL] : nil;
-    NSArray *assets = [release isKindOfClass:NSDictionary.class] && [release[@"assets"] isKindOfClass:NSArray.class] ? release[@"assets"] : nil;
+    NSDictionary *release = jsonObject(output);
+    NSArray *assets = [release[@"assets"] isKindOfClass:NSArray.class] ? release[@"assets"] : nil;
     NSDictionary *asset;
     for (id candidate in assets)
         if ([candidate isKindOfClass:NSDictionary.class] && [candidate[@"name"] isEqual:kReleaseAsset]) asset = candidate;
@@ -576,10 +590,7 @@ static NSString *sourceNotOlder(NSDictionary *latest) {
     // Without per_page the answer lists every commit and file between the two.
     NSString *url = [NSString stringWithFormat:@"%@/%@...%@%@", base, tag, commit, [base hasPrefix:@"https:"] ? @"?per_page=1" : @""];
     if (fetch(url, 10, nil, &output) != 0) return nil;
-    NSData *jsonData = [output dataUsingEncoding:NSUTF8StringEncoding];
-    NSDictionary *compared = jsonData ? [NSJSONSerialization JSONObjectWithData:jsonData options:0 error:NULL] : nil;
-    NSString *status = [compared isKindOfClass:NSDictionary.class] ? compared[@"status"] : nil;
-    return [@[ @"ahead", @"identical" ] containsObject:status] ? [commit substringToIndex:7] : nil;
+    return [@[ @"ahead", @"identical" ] containsObject:jsonObject(output)[@"status"]] ? [commit substringToIndex:7] : nil;
 }
 
 static BOOL tweaksInstalled(NSDictionary *latest) {
@@ -647,6 +658,19 @@ static NSNumber *inodeOf(NSString *path) {
     return lstat(path.fileSystemRepresentation, &info) == 0 ? @(info.st_ino) : nil;
 }
 
+// A DiaTweaks update changes the headers local tweaks compile against, so rebuild them before Dia reopens.
+static void rebuildLocalTweaks(void) {
+    BOOL any = NO;
+    for (NSString *name in [NSFileManager.defaultManager contentsOfDirectoryAtPath:inHome(@"local") error:NULL])
+        if (![name hasPrefix:@"."] && ![name isEqual:@"README.md"]) any = YES;
+    if (!any) return;
+    NSString *output = nil;
+    if (run(@[ inHome(@"bin/diapatch"), @"local", @"build" ], &output) != 0)
+        note(@"your local tweaks need a rebuild: %@", trimmed(output) ?: @"run `diatweaks local build`");
+    else
+        note(@"rebuilt your local tweaks against the new DiaTweaks");
+}
+
 static BOOL applyTweaks(void) {
     NSString *problem;
     NSDictionary *latest = stagedRelease() ? latestTweaks(15, &problem) : nil;
@@ -677,6 +701,7 @@ static BOOL applyTweaks(void) {
         else ok = ok && moveBundle(from, targets[name]);
     }
     ok = ok && moveBundle([gStagedTweaks stringByAppendingPathComponent:@"release.plist"], inHome(@"release.plist"));
+    if (ok) rebuildLocalTweaks();
     return ok && removeTree(gStagedTweaks) && say(@"installed DiaTweaks %@", tag);
 }
 
@@ -709,7 +734,10 @@ static BOOL apply(void) {
 }
 
 static BOOL applyChosen(BOOL dia, BOOL tweaks) {
-    if (!dia && !tweaks) dia = YES, tweaks = installedRelease()[@"tag"] != nil;
+    if (!dia && !tweaks) {
+        dia = YES;
+        tweaks = installedRelease()[@"tag"] != nil;
+    }
     return (!tweaks || applyTweaks()) && (!dia || apply());
 }
 
@@ -722,7 +750,10 @@ static BOOL install(BOOL relaunch) {
         NSString *copy = [gPristine stringByAppendingString:@".new"];
         BOOL adopted = removeTree(copy) && makeDir(gPristine.stringByDeletingLastPathComponent) && clone(gApp, copy)
             && verifyOfficial(copy) && moveBundle(copy, gPristine);
-        if (!adopted) return removeTree(copy), NO;
+        if (!adopted) {
+            removeTree(copy);
+            return NO;
+        }
     }
     removeRelay();
     DPForgetApp(gPristine);
@@ -829,7 +860,9 @@ static BOOL purge(void) {
     for (NSString *name in @[ @"download", @"release", @"previews" ])
         if (!removeTree([gCache stringByAppendingPathComponent:name])) return NO;
     rmdir(gCache.fileSystemRepresentation);
+    BOOL keptLocal = exists(inHome(@"local"));
     if (rmdir(gHome.fileSystemRepresentation) == 0) return say(@"deleted %@", gHome);
+    if (keptLocal) say(@"kept your local tweaks in %@", inHome(@"local"));
     return say(@"kept %@: it holds files DiaPatches did not create", gHome);
 }
 
@@ -843,11 +876,26 @@ static BOOL uninstall(BOOL purgeFiles) {
     NSString *signature = signatureOf(gApp);
     if (needRestore) {
         NSString *copy = [gPristine stringByAppendingString:@".restore"];
-        if (!removeTree(copy) || !clone(gPristine, copy) || !moveBundle(copy, gApp)) return removeTree(copy), NO;
+        if (!removeTree(copy) || !clone(gPristine, copy) || !moveBundle(copy, gApp)) {
+            removeTree(copy);
+            return NO;
+        }
     }
     forgetScreenRecordingIfResigned(signature);
     say(@"%@ is the official Dia %@", gApp, versionOf(gApp));
     return unstage() && (!purgeFiles || purge());
+}
+
+// The local tweak engine lives in the dylib, so `diapatch local` loads it and lets it exit the process.
+static BOOL localCommand(int argc, const char *argv[]) {
+    NSString *dylib = inHome(@DYLIB);
+    if (!exists(dylib)) return fail(@"%@ is missing; reinstall DiaPatches", dylib);
+    setenv("DIAPATCH_LOCAL_BUILD", "1", 1);
+    void *handle = dlopen(dylib.fileSystemRepresentation, RTLD_NOW);
+    if (!handle) return fail(@"%s", dlerror());
+    int (*build)(int, const char *const *) = (int (*)(int, const char *const *))dlsym(handle, "DPLocalBuildCommand");
+    if (!build) return fail(@"%@ has no local tweak engine; update DiaTweaks", dylib);
+    return build(argc, argv) == 0;
 }
 
 static BOOL printJSON(NSDictionary *object) {
@@ -924,9 +972,21 @@ static const char kUsage[] =
     "  uninstall [--wait PID] [--relaunch] [--purge]\n"
     "                   put the official Dia back; --purge also deletes DiaPatches' files and the diatweaks command\n"
     "  status [--json]  official, installed, staged and offered versions, and the update channel\n"
+    "  local [list|build [NAME...]|doctor]\n"
+    "                   list, compile or check the tweaks in DiaPatches/local\n"
     "environment: DIAPATCH_IDENTITY (codesigning identity, remembered by install), DIAPATCH_HOME,\n"
     "  DIAPATCH_APP, DIAPATCH_CACHE, DIAPATCH_FEED, DIAPATCH_RELEASES, DIAPATCH_COMMIT (the source commit installed), DIAPATCH_COMPARE, DIATWEAKS_LINK_DIR, DIAPATCH_NO_RELAUNCH (ignore --relaunch)\n"
     "  DIAPATCH_APP (also keeps apply and uninstall from clearing Dia's Screen Recording permission)\n";
+
+static BOOL runCommand(NSString *command, NSSet<NSString *> *flags) {
+    if ([command isEqualToString:@"install"]) return install([flags containsObject:@"--relaunch"]);
+    if ([command isEqualToString:@"set-icon"]) return switchIcon();
+    if ([command isEqualToString:@"build"]) return build(gPristine) && say(@"staged patched Dia %@", versionOf(gStaged));
+    if ([command isEqualToString:@"update"]) return update();
+    if ([command isEqualToString:@"self-update"]) return stageTweaks();
+    if ([command isEqualToString:@"apply"]) return applyChosen([flags containsObject:@"--dia"], [flags containsObject:@"--tweaks"]);
+    return uninstall([flags containsObject:@"--purge"]);
+}
 
 int main(int argc, const char *argv[]) {
     @autoreleasepool {
@@ -945,6 +1005,7 @@ int main(int argc, const char *argv[]) {
         }
 
         NSString *command = argc > 1 ? @(argv[1]) : @"";
+        if ([command isEqualToString:@"local"]) return localCommand(argc, argv) ? 0 : 1;
         NSArray<NSString *> *allowed = @{
             @"install" : @[ @"--relaunch" ], @"build" : @[], @"set-icon" : @[], @"update" : @[], @"self-update" : @[], @"status" : @[ @"--json" ],
             @"apply" : @[ @"--wait", @"--relaunch", @"--dia", @"--tweaks" ], @"check" : @[ @"--json" ], @"uninstall" : @[ @"--wait", @"--relaunch", @"--purge" ],
@@ -969,21 +1030,19 @@ int main(int argc, const char *argv[]) {
         gCommand = argv[1];
         if (!makeDir(gHome)) return 1;
         gLog = fopen(inHome(@"diapatch.log").fileSystemRepresentation, "ae");
-        if (!gLog) return fail(@"cannot open %@: %s", inHome(@"diapatch.log"), strerror(errno)), 1;
+        if (!gLog) {
+            fail(@"cannot open %@: %s", inHome(@"diapatch.log"), strerror(errno));
+            return 1;
+        }
         setvbuf(gLog, NULL, _IOLBF, 0);
         if (pid) waitForQuit(pid);
         if (flock(fileno(gLog), LOCK_EX | LOCK_NB) != 0) {
             if (errno == EWOULDBLOCK) say(@"waiting for another diapatch run to finish");
             while (flock(fileno(gLog), LOCK_EX) != 0 && errno == EINTR) {}
         }
-        removeSetAside(), emptyTrash();
-        BOOL ok = [command isEqualToString:@"install"] ? install([flags containsObject:@"--relaunch"])
-            : [command isEqualToString:@"set-icon"]    ? switchIcon()
-            : [command isEqualToString:@"build"]       ? build(gPristine) && say(@"staged patched Dia %@", versionOf(gStaged))
-            : [command isEqualToString:@"update"]      ? update()
-            : [command isEqualToString:@"self-update"] ? stageTweaks()
-            : [command isEqualToString:@"apply"]       ? applyChosen([flags containsObject:@"--dia"], [flags containsObject:@"--tweaks"])
-                                                       : uninstall([flags containsObject:@"--purge"]);
+        removeSetAside();
+        emptyTrash();
+        BOOL ok = runCommand(command, flags);
         // open sometimes fails with -600 right after Dia quits itself.
         if ([flags containsObject:@"--relaunch"] && exists(gApp)) {
             NSString *relaunchOut = nil;

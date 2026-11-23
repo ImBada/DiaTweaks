@@ -77,7 +77,7 @@ static const CGFloat DPInset = 6, DPGap = 2, DPButton = 28, DPAddressHeight = 30
     self.watch = [NSTimer scheduledTimerWithTimeInterval:0.25 repeats:YES block:^(NSTimer *timer) {
         if (weak) [weak refresh]; else [timer invalidate];
     }];
-    // Dia's own toolbar under the card takes clicks by where they land, whatever is on top, so route them to this bar first.
+    // Dia's toolbar under the card takes clicks by where they land, whatever is on top, so route them to this bar first.
     self.clicks = [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskLeftMouseDown handler:^NSEvent *(NSEvent *event) {
         DPPeekToolbar *bar = weak;
         NSView *clip = bar.superview;

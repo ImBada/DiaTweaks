@@ -115,7 +115,6 @@ static void *fakeCDPThread(void *ctx) {
                     continue;
                 }
 
-                // Initial document request
                 NSDictionary *first = pauseRequest(url, @"Document", nil);
                 NSString *firstMethod = first[@"action"][@"method"];
                 if ([firstMethod isEqualToString:@"Fetch.fulfillRequest"]) {
@@ -135,7 +134,6 @@ static void *fakeCDPThread(void *ctx) {
                     continue;
                 }
 
-                // Simulate server response after Fetch.continueRequest
                 if (s.mode == FakeSiteBrokenTLS) {
                     serverSend(out, @{ @"id" : msgId, @"sessionId" : session, @"result" : @{ @"frameId" : @"F1", @"errorText" : @"net::ERR_CERT_AUTHORITY_INVALID" } });
                     continue;
@@ -241,12 +239,10 @@ static void testAllowSyntheticOriginPrefs(void) {
     NSFileManager *fm = NSFileManager.defaultManager;
     [fm createDirectoryAtPath:tmp withIntermediateDirectories:YES attributes:nil error:nil];
 
-    // Creates Default/Preferences when absent.
     allowSyntheticOrigin(tmp);
     NSDictionary *def = [NSJSONSerialization JSONObjectWithData:[NSData dataWithContentsOfFile:[tmp stringByAppendingPathComponent:@"Default/Preferences"]] options:0 error:nil];
     NSCAssert([def[@"webauthn"][@"allow_with_broken_certs"] isEqual:@YES], @"Default pref written");
 
-    // Preserves existing keys in Default and Profile 2, and leaves corrupt JSON untouched.
     NSString *p2 = [tmp stringByAppendingPathComponent:@"Profile 2"];
     NSString *p3 = [tmp stringByAppendingPathComponent:@"Profile 3"];
     [fm createDirectoryAtPath:p2 withIntermediateDirectories:YES attributes:nil error:nil];
@@ -273,14 +269,12 @@ int main(void) {
 
         BOOL landed = NO;
 
-        // 1. Normal site: /robots.txt succeeds immediately on try 1.
         FakeCDPState *s1 = runOpenOriginScenario(FakeSiteNormal, @"https://github.com", @"/login", &landed);
         NSCAssert(landed, @"normal site lands");
         NSCAssert([s1.navigatedURLs isEqual:@[ @"https://github.com/robots.txt" ]], @"stops after robots.txt: %@", s1.navigatedURLs);
         NSCAssert(s1.fulfilledURLs.count == 0, @"no synthetic fallback needed");
         NSCAssert(s1.wrotePromptPage && s1.bypassCSP && s1.scriptsDisabledDuringNav && !s1.scriptsDisabledAtEnd && !s1.fetchEnabledAtEnd, @"clean CDP teardown");
 
-        // 2. Duo Universal Prompt: /robots.txt redirects to duo.com (aborted!), /.well-known/webauthn lands at Duo origin with real TLS.
         FakeCDPState *s2 = runOpenOriginScenario(FakeSiteDuo, @"https://api-4b6bfd4c.duosecurity.com", @"/frame/v4/auth/prompt", &landed);
         NSArray *duoExpectedNav = @[ @"https://api-4b6bfd4c.duosecurity.com/robots.txt", @"https://api-4b6bfd4c.duosecurity.com/.well-known/webauthn" ];
         NSCAssert(landed, @"Duo lands at real origin");
@@ -291,13 +285,11 @@ int main(void) {
         NSCAssert(s2.fulfilledURLs.count == 0, @"Duo uses real TLS, no synthetic needed");
         NSCAssert(s2.wrotePromptPage && !s2.scriptsDisabledAtEnd && !s2.fetchEnabledAtEnd, @"Duo clean teardown");
 
-        // 3. Site that redirects /robots.txt, /.well-known/webauthn, and / cross-origin, only serving pagePath on origin.
         FakeCDPState *s3 = runOpenOriginScenario(FakeSitePagePathOnly, @"https://api-4b6bfd4c.duosecurity.com", @"/frame/v4/auth/prompt", &landed);
         NSCAssert(landed, @"pagePath fallback lands");
         NSCAssert([s3.navigatedURLs.lastObject isEqualToString:@"https://api-4b6bfd4c.duosecurity.com/frame/v4/auth/prompt"], @"reached pagePath");
         NSCAssert(s3.fulfilledURLs.count == 0, @"real TLS pagePath succeeded");
 
-        // 4. Site that redirects EVERY path cross-origin (e.g. cookie-gated SSO portal): synthetic Fetch.fulfillRequest succeeds after verified TLS redirect.
         FakeCDPState *s4 = runOpenOriginScenario(FakeSiteAllCrossOriginRedirect, @"https://portal.corp.example", @"/settings", &landed);
         NSCAssert(landed, @"all-redirect portal lands via synthetic origin");
         NSCAssert([s4.currentOrigin isEqualToString:@"https://portal.corp.example"], @"landed on portal origin");
@@ -305,25 +297,21 @@ int main(void) {
         NSCAssert([s4.fulfilledBody containsString:@"Use your passkey for portal.corp.example"], @"prompt body shows real host");
         NSCAssert(!s4.wrotePromptPage && !s4.scriptsDisabledAtEnd && !s4.fetchEnabledAtEnd, @"synthetic skips redundant document.write and tears down cleanly");
 
-        // 5. Prefix-spoofing redirect (duo.com -> duo.com.evil.example) is aborted as cross-origin.
         FakeCDPState *s5 = runOpenOriginScenario(FakeSitePrefixSpoofRedirect, @"https://duo.com", nil, &landed);
         NSCAssert(landed, @"prefix spoof does not fool origin check");
         NSCAssert([s5.abortedURLs containsObject:@"https://duo.com.evil.example/"], @"prefix-spoofed host aborted");
         NSCAssert([s5.currentOrigin isEqualToString:@"https://duo.com"], @"stays at duo.com");
 
-        // 6. Real broken TLS cert stops immediately and NEVER falls back to synthetic origin.
         FakeCDPState *s6 = runOpenOriginScenario(FakeSiteBrokenTLS, @"https://badssl.example", @"/login", &landed);
         NSCAssert(!landed, @"broken TLS fails");
         NSCAssert(s6.navigatedURLs.count == 1, @"stops on first TLS error");
         NSCAssert(s6.fulfilledURLs.count == 0, @"never synthesizes past broken TLS");
         NSCAssert(!s6.scriptsDisabledAtEnd && !s6.fetchEnabledAtEnd, @"broken TLS tears down cleanly");
 
-        // 7. Unreachable host fails cleanly without synthetic origin.
         FakeCDPState *s7 = runOpenOriginScenario(FakeSiteUnreachable, @"https://offline.example", @"/login", &landed);
         NSCAssert(!landed, @"unreachable fails");
         NSCAssert(s7.fulfilledURLs.count == 0, @"never synthesizes unreachable host");
 
-        // 8. Non-HTTP(S) origin rejected immediately.
         FakeCDPState *s8 = runOpenOriginScenario(FakeSiteNormal, @"chrome://settings", nil, &landed);
         NSCAssert(!landed && s8.navigatedURLs.count == 0, @"non-http(s) origin rejected");
 

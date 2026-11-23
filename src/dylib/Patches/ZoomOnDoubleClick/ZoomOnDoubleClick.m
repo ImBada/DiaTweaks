@@ -5,8 +5,7 @@ static const CGFloat DPBorderReach = 7;  // Dia keeps a 6 point border around th
 static const NSEventModifierFlags DPClickKeys = NSEventModifierFlagCommand | NSEventModifierFlagOption | NSEventModifierFlagControl | NSEventModifierFlagShift;
 static id DPMonitor;
 
-// The frame view's handler follows System Settings for a title bar double-click (fill, zoom, minimise or nothing).
-// _zoomWindowWithDoubleClick always zooms, so it isn't used.
+// The frame view's handler follows System Settings for a title bar double-click; _zoomWindowWithDoubleClick always zooms.
 static void DPActLikeTitleBar(NSWindow *window, NSView *frame, NSString *action) {
     SEL handler = NSSelectorFromString(@"_handlePossibleDoubleClickWithModifiers:");
     Method method = class_getInstanceMethod(object_getClass(frame), handler);
@@ -18,9 +17,8 @@ static void DPActLikeTitleBar(NSWindow *window, NSView *frame, NSString *action)
     else [window performZoom:nil];
 }
 
-// Controls, text and the page keep their clicks. In both Dia releases that covers tabs, the tab strip's + button, toolbar
-// buttons and the address field, which are all NSControls, plus the few Dia views below that aren't. The toolbar, sidebar
-// header and tab strip override mouseDown: too, but the resize border sits over them, so there the click is the window's.
+// Controls, text and the page keep their clicks, plus the few Dia views below that aren't NSControls. The toolbar, sidebar header and
+// tab strip override mouseDown: too, but the resize border sits over them, so there the click is the window's.
 static BOOL DPTakesClicks(NSView *hit, NSWindow *window) {
     static const char *const kept[] = {
         DPDiaTrafficLights, DPDiaPinnedExtension, DPDiaLibraryButton, DPDiaDownloadsButton, DPDiaPageIndicatorDot,
@@ -35,8 +33,7 @@ static BOOL DPTakesClicks(NSView *hit, NSWindow *window) {
     return NO;
 }
 
-// The first click of a double-click starts Dia's border resize and sits in its tracking loop, which never reaches a
-// title bar. A click monitor sees the second click anyway, so that one acts without letting a resize start.
+// The first click starts Dia's border resize and sits in its tracking loop; a click monitor still sees the second, which acts before a resize can start.
 static NSEvent *DPZoomMouse(NSEvent *event) {
     if (!DPZoomOnDoubleClick.on || event.type != NSEventTypeLeftMouseDown || event.clickCount != 2 || (event.modifierFlags & DPClickKeys)) return event;
     NSWindow *window = event.window;

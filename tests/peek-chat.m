@@ -8,6 +8,7 @@ static int gChatMenuTriggers, gNewChatTriggers, gExtMenuTriggers, gChatButtonCli
 @property (nonatomic, copy) NSString *tag;
 @property (nonatomic, strong) NSURL *url;
 @property (nonatomic, copy) NSString *title;
+@property (nonatomic, strong) id favicon;
 @property (nonatomic, copy) NSString *selectedText;
 @property (nonatomic, copy) NSString *inputEvent;
 @property (nonatomic, copy) NSString *contentsMimeType;
@@ -42,13 +43,25 @@ static int gChatMenuTriggers, gNewChatTriggers, gExtMenuTriggers, gChatButtonCli
 - (id)accessibilityTreeForTreeId:(NSString *)treeId { return [NSString stringWithFormat:@"%@:%@", self.tag, treeId]; }
 @end
 
+static ArcWebContents *gExtractProbe;
+static BOOL gExtractAsync;
+static NSString *gProbeTitle, *gProbeURL;
+static id gProbeFavicon;
+
 @interface ArcBrowserContextPageContentExtraction : NSObject
 - (void)getExtractedContentForWebContents:(ArcWebContents *)webContents completion:(void (^)(NSDictionary *content))completion;
 @end
 
 @implementation ArcBrowserContextPageContentExtraction
 - (void)getExtractedContentForWebContents:(ArcWebContents *)webContents completion:(void (^)(NSDictionary *))completion {
-    if (completion) completion(@{@"tag": webContents.tag ?: @"", @"url": webContents.url.absoluteString ?: @""});
+    if (gExtractProbe) {
+        gProbeTitle = gExtractProbe.title;
+        gProbeURL = gExtractProbe.url.absoluteString;
+        gProbeFavicon = gExtractProbe.favicon;
+    }
+    NSDictionary *content = @{@"tag": webContents.tag ?: @"", @"url": webContents.url.absoluteString ?: @""};
+    if (gExtractAsync) dispatch_async(dispatch_get_main_queue(), ^{ if (completion) completion(content); });
+    else if (completion) completion(content);
 }
 @end
 
@@ -182,6 +195,20 @@ static int gChatMenuTriggers, gNewChatTriggers, gExtMenuTriggers, gChatButtonCli
 }
 @end
 
+@interface DPTitleReader : NSObject
+@property (nonatomic) int titleHits, urlHits, faviconHits;
+@property (nonatomic, copy) NSString *seenTitle, *seenURL;
+@property (nonatomic, strong) id seenFavicon;
+@end
+@implementation DPTitleReader
+- (void)observeValueForKeyPath:(NSString *)keyPath ofObject:(id)object change:(NSDictionary *)change context:(void *)context {
+    ArcWebContents *page = object;
+    if ([keyPath isEqualToString:@"title"]) { self.titleHits++; self.seenTitle = page.title; }
+    else if ([keyPath isEqualToString:@"url"]) { self.urlHits++; self.seenURL = page.url.absoluteString; }
+    else if ([keyPath isEqualToString:@"favicon"]) { self.faviconHits++; self.seenFavicon = page.favicon; }
+}
+@end
+
 DPPatch DPPeek = { .on = YES }, DPPeekPinnedLinks = { .on = YES };
 
 static ArcBrowser *gBrowser;
@@ -228,6 +255,20 @@ BOOL DPPeekIsShortcut(NSEvent *event, NSMenuItem *item) {
 #import "Patches/Peek/Keys.m"
 #import "Patches/Peek/Visibility.m"
 #import "Patches/Peek/Chat.m"
+// Dia's composer chip is an AppKit AttachmentCellView whose title/subtitle/icon live in lazily
+// created subviews; the patch reaches them by ivar name, so the mock mirrors those names.
+@interface _TtC11Attachments18AttachmentCellView : NSView {
+@public
+    id viewModel;
+    NSImageView *$__lazy_storage_$_iconView;
+    NSTextField *$__lazy_storage_$_titleView;
+    NSTextField *$__lazy_storage_$_subtitleView;
+}
+@end
+@implementation _TtC11Attachments18AttachmentCellView
+- (void)prepareForReuse {}
+@end
+
 #import "Patches/Peek/ChatContext.m"
 #import "Patches/Peek/Card.m"
 #import "Patches/Peek/Pages.m"
@@ -283,7 +324,6 @@ int main(void) {
         [mainMenu addItem:extRoot];
         NSApp.mainMenu = mainMenu;
 
-        // Build Dia's real AssistantSidebarViewController hierarchy (Sidebar layout: 1200x800).
         DPChatTestWindow *window = [[DPChatTestWindow alloc] initWithContentRect:NSMakeRect(-30000, -30000, 1200, 800)
                                                                        styleMask:NSWindowStyleMaskTitled
                                                                          backing:NSBackingStoreBuffered defer:NO];
@@ -357,7 +397,6 @@ int main(void) {
         sidebarVC.view = sidebarRoot;
         _TtC6Window33AssistantSidebarLayoutCoordinator *layoutCoord = [_TtC6Window33AssistantSidebarLayoutCoordinator new];
 
-        // Open Peek over source WebContents.
         ArcWebContents *source = [ArcWebContents new];
         source.tag = @"parent";
         source.url = [NSURL URLWithString:@"https://parent.example/list"];
@@ -381,12 +420,10 @@ int main(void) {
         ArcWebContents *peekPage = (ArcWebContents *)peek.page;
         CHECK(peek != nil && peekPage != nil, "Peek card opened");
 
-        // 1. Holder placement: mounted inside pageContainer (below AssistantSidebar's divider & chat panels).
         CHECK(peek.superview == pageContainer, "DPPeekCard mounts inside AssistantSidebarContentContainerView's page container");
         CHECK(kvo.selectedHits == 1 && kvo.inputHits == 1, "attaching Peek notifies source selectedText and inputEvent KVO");
         CHECK([kvo.lastSeenSelected isEqualToString:@"peek-selection"], "source selectedText reads Peek selection on attach");
 
-        // 2. Hit-test pass-through for Toolbar Chat button & Pinned Extension button; backdrop still closes Peek.
         [peek layoutSubtreeIfNeeded];
         NSPoint chatBtnInWindow = [window.contentView convertPoint:NSMakePoint(NSMidX(chatBtn.bounds), NSMidY(chatBtn.bounds)) fromView:chatBtn];
         NSPoint extBtnInWindow = [window.contentView convertPoint:NSMakePoint(NSMidX(extBtn.bounds), NSMidY(extBtn.bounds)) fromView:extBtn];
@@ -398,13 +435,11 @@ int main(void) {
         CHECK(hitExt == extBtn || [hitExt isDescendantOf:extBtn], "clicking pinned extension button passes through Peek backdrop");
         CHECK(hitBackdrop == peek || [hitBackdrop isDescendantOf:peek], "clicking backdrop outside chat controls still hits Peek");
 
-        // Hidden Chat button (HideChatButton / TurnOffAI) must NOT pass through.
         chatBtn.hidden = YES;
         NSView *hitHiddenChat = [window.contentView hitTest:chatBtnInWindow];
         CHECK(hitHiddenChat == peek || [hitHiddenChat isDescendantOf:peek], "hidden Chat button does not pass through Peek backdrop");
         chatBtn.hidden = NO;
 
-        // 3. Controls avoid overlapping visible Chat button on medium/narrow panes.
         contentContainer.frame = NSMakeRect(0, 0, 820, 800);
         pageContainer.frame = contentContainer.bounds;
         splitHost.frame = pageContainer.bounds;
@@ -418,14 +453,12 @@ int main(void) {
         [peek layoutSubtreeIfNeeded];
 
         CHECK(NSEqualRects(peek.frame, NSMakeRect(0, 0, 820, 800)), "Peek card shrinks to page pane width when docked AI Side Chat opens");
-        // The Peek-to-tab handoff cover spans the Peek's page pane, so AI Side Chat beside it stays uncovered.
         NSRect coverInWindow = [peek convertRect:peek.bounds toView:nil];
         NSRect chatInWindow = [chatPanel convertRect:chatPanel.bounds toView:nil];
         CHECK(NSMaxX(coverInWindow) <= NSMinX(chatInWindow), "handoff cover bounds stop at the page pane and never cover AI Side Chat");
         NSRect chatInPeek = [peek convertRect:chatBtn.bounds fromView:chatBtn];
         CHECK(!NSIntersectsRect(peek.controls.frame, chatInPeek), "Peek controls shift clear of visible toolbar Chat button");
 
-        // Clicking inside docked AI Side Chat, divider, or floating chat hits those views, NOT Peek.
         NSPoint inDivider = [window.contentView convertPoint:NSMakePoint(4, 400) fromView:divider];
         NSPoint inChatPanel = [window.contentView convertPoint:NSMakePoint(100, 400) fromView:chatPanel];
         NSPoint inFloating = [window.contentView convertPoint:NSMakePoint(100, 100) fromView:floatingChat];
@@ -433,7 +466,6 @@ int main(void) {
         CHECK([[window.contentView hitTest:inChatPanel] isDescendantOf:chatPanel], "clicks inside docked AI Side Chat never hit Peek");
         CHECK([[window.contentView hitTest:inFloating] isDescendantOf:floatingChat], "clicks inside floating chat popover never hit Peek");
 
-        // Narrow pane resize (< 534pt): controls still fit strictly inside page pane without clipping into chat divider.
         contentContainer.frame = NSMakeRect(0, 0, 420, 800);
         pageContainer.frame = contentContainer.bounds;
         splitHost.frame = pageContainer.bounds;
@@ -447,7 +479,6 @@ int main(void) {
         CHECK(fabs(NSWidth(peek.frame) - 420) < 0.5, "Peek follows narrow pane resize via layout coordinator");
         CHECK(NSMaxX(peek.controls.frame) <= NSWidth(peek.bounds), "Peek controls stay inside narrow page pane beside wide chat");
 
-        // Top-Tab layout (pane offset down 44pt under top tab strip) & closing chat back to full width.
         contentContainer.frame = NSMakeRect(0, 0, 1200, 756);
         pageContainer.frame = contentContainer.bounds;
         splitHost.frame = pageContainer.bounds;
@@ -460,7 +491,6 @@ int main(void) {
         [peek layoutSubtreeIfNeeded];
         CHECK(NSEqualRects(peek.frame, NSMakeRect(0, 0, 1200, 756)), "Peek expands cleanly when chat closes in Top-Tab layout");
 
-        // 4. Shortcuts: Cmd+E, New Chat, Extensions shortcut work while Peek focused and keep Peek open; TurnOffAI hidden item blocked.
         window.mockResponder = peek.host;
         gChatMenuTriggers = gNewChatTriggers = gExtMenuTriggers = gChatButtonClicks = 0;
         NSEvent *cmdE = MakeKeyEvent(window, @"e", kVK_ANSI_E, NSEventModifierFlagCommand);
@@ -475,19 +505,16 @@ int main(void) {
         CHECK(DPPeekChatShortcut(peek, cmdOptP, NSEventModifierFlagCommand | NSEventModifierFlagOption), "Extensions menu shortcut handled");
         CHECK(gExtMenuTriggers == 1 && !peek.closing, "Extensions shortcut keeps Peek open");
 
-        // Hidden Chat menu item (TurnOffAI) must NOT fire menu or fall back to button.
         toggleChatItem.hidden = YES;
         CHECK(!DPPeekChatShortcut(peek, cmdE, NSEventModifierFlagCommand), "hidden Chat menu item (TurnOffAI) is not triggered");
         CHECK(gChatMenuTriggers == 1 && gChatButtonClicks == 0, "TurnOffAI hidden item does not bypass to Chat button");
         toggleChatItem.hidden = NO;
 
-        // Fallback to Chat button when menu item isn't registered for Cmd+E.
         toggleChatItem.keyEquivalent = @"";
         CHECK(DPPeekChatShortcut(peek, cmdE, NSEventModifierFlagCommand), "Cmd+E falls back to visible Chat button when menu has no binding");
         CHECK(gChatButtonClicks == 1 && !peek.closing, "fallback Chat button click fires and keeps Peek open");
         toggleChatItem.keyEquivalent = @"e";
 
-        // 5. Focus inside docked AI Side Chat, Floating Chat, or Extension Side Panel (both NSView and NSViewController nextResponder) passes through.
         _TtC18ExtensionSidePanel35ExtensionSidePanelSubViewController *extVC = [_TtC18ExtensionSidePanel35ExtensionSidePanelSubViewController new];
         NSView *extVCChild = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 100, 40)];
         [extVC.view addSubview:extVCChild];
@@ -499,7 +526,6 @@ int main(void) {
         CHECK(DPPeekResponderInChat(extVCChild), "Extension Side Panel NSViewController nextResponder detected as chat responder");
         [extVC.view removeFromSuperview];
 
-        // 5b. Regression: Command Bar overlay or external text focus prevents Peek from hijacking Cmd+W / Cmd+O / Escape.
         window.mockResponder = peek.host;
         NSEvent *cmdW = MakeKeyEvent(window, @"w", kVK_ANSI_W, NSEventModifierFlagCommand);
         NSEvent *esc = MakeKeyEvent(window, @"\x1b", kVK_Escape, 0);
@@ -516,7 +542,6 @@ int main(void) {
         [cmdOverlay removeFromSuperview];
         window.mockResponder = peek.host;
 
-        // 6. Page context routing while Peek is visible.
         ArcBrowserContextPageContentExtraction *extractor = [ArcBrowserContextPageContentExtraction new];
         __block NSDictionary *extracted = nil;
         [extractor getExtractedContentForWebContents:source completion:^(NSDictionary *c) { extracted = c; }];
@@ -540,20 +565,185 @@ int main(void) {
         CHECK([source.rootFrameAccessibilityTreeId isEqualToString:@"peek-root"], "rootFrameAccessibilityTreeId routes to Peek");
         CHECK([[source accessibilityTreeForTreeId:@"t1"] isEqualToString:@"peek:t1"], "accessibilityTreeForTreeId: routes to Peek");
 
-        // DPPeekFindingLink bypasses routing so link-rect lookup still hits parent.
         DPPeekFindingLink = YES;
         __block NSString *linkJS = nil;
         [source executeJavascript:@"link" completion:^(NSString *r, BOOL ok) { linkJS = r; }];
         DPPeekFindingLink = NO;
         CHECK([linkJS isEqualToString:@"parent:link"], "DPPeekFindingLink keeps link lookup on parent page");
 
-        // Other tabs are untouched.
         extracted = nil;
         [extractor getExtractedContentForWebContents:other completion:^(NSDictionary *c) { extracted = c; }];
         CHECK([extracted[@"tag"] isEqualToString:@"other"] && [other.selectedText isEqualToString:@"other-selection"],
               "other tabs remain completely untouched");
 
-        // Live KVO forwarding from peekPage -> source.
+        peekPage.favicon = @"peek-icon";
+        DPTitleReader *reader = [DPTitleReader new];
+        for (NSString *key in @[ @"title", @"url", @"favicon" ]) [source addObserver:reader forKeyPath:key options:0 context:NULL];
+        source.title = @"Parent Page";
+        source.url = [NSURL URLWithString:@"https://parent.example/list"];
+        source.favicon = @"parent-icon";
+        CHECK([reader.seenTitle isEqualToString:@"Parent Page"] && [reader.seenURL isEqualToString:@"https://parent.example/list"] &&
+              [reader.seenFavicon isEqual:@"parent-icon"], "KVO observers see the real parent tab title, URL and favicon");
+
+        CHECK([source.title isEqualToString:@"Parent Page"], "the tab row and address bar still read the parent tab title");
+        CHECK([source.url.absoluteString isEqualToString:@"https://parent.example/list"], "the tab row and address bar still read the parent tab URL");
+        CHECK([source.favicon isEqual:@"parent-icon"], "the tab row still reads the parent tab favicon");
+        CHECK(other.title == nil && other.favicon == nil, "other tabs keep their own title and favicon");
+
+        gExtractProbe = source;
+        [extractor getExtractedContentForWebContents:source completion:^(NSDictionary *c) {}];
+        CHECK([gProbeTitle isEqualToString:@"Peek Article"], "the assistant's capture reads the Peek title off the tab it holds");
+        CHECK([gProbeURL isEqualToString:@"https://peek.example/article"], "the assistant's capture reads the Peek URL off the tab it holds");
+        CHECK([gProbeFavicon isEqual:@"peek-icon"], "the assistant's capture reads the Peek favicon off the tab it holds");
+
+        __block NSString *inCompletion = nil;
+        gExtractAsync = YES;
+        [extractor getExtractedContentForWebContents:source completion:^(NSDictionary *c) { inCompletion = source.title; }];
+        gExtractAsync = NO;
+        [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.05]];
+        CHECK([inCompletion isEqualToString:@"Peek Article"], "the capture completion also reads the Peek page");
+        gExtractProbe = nil;
+
+        int titleHits = reader.titleHits, urlHits = reader.urlHits, iconHits = reader.faviconHits;
+        peekPage.title = @"Peek Article Two";
+        CHECK(reader.titleHits > titleHits && reader.urlHits > urlHits && reader.faviconHits > iconHits,
+              "a Peek title change re-notifies the tab's title, URL and favicon KVO");
+        titleHits = reader.titleHits; urlHits = reader.urlHits; iconHits = reader.faviconHits;
+        peekPage.favicon = @"peek-icon-two";
+        CHECK(reader.titleHits > titleHits && reader.urlHits > urlHits && reader.faviconHits > iconHits,
+              "a Peek favicon change re-notifies the tab's title, URL and favicon KVO");
+        titleHits = reader.titleHits; urlHits = reader.urlHits; iconHits = reader.faviconHits;
+        peekPage.url = [NSURL URLWithString:@"https://peek.example/second"];
+        CHECK(reader.titleHits > titleHits && reader.urlHits > urlHits && reader.faviconHits > iconHits,
+              "a Peek URL change re-notifies the tab's title, URL and favicon KVO");
+        CHECK([reader.seenTitle isEqualToString:@"Parent Page"], "KVO observers still see the real parent tab title");
+        CHECK([reader.seenURL isEqualToString:@"https://parent.example/list"], "KVO observers still see the real parent tab URL");
+        CHECK([reader.seenFavicon isEqual:@"parent-icon"], "KVO observers still see the real parent tab favicon");
+
+        Ivar storedTitle = class_getInstanceVariable(ArcWebContents.class, "_title");
+        Ivar storedURL = class_getInstanceVariable(ArcWebContents.class, "_url");
+        CHECK([object_getIvar(source, storedTitle) isEqualToString:@"Parent Page"], "the parent tab's stored title is never overwritten by Peek");
+        CHECK([[(NSURL *)object_getIvar(source, storedURL) absoluteString] isEqualToString:@"https://parent.example/list"],
+              "the parent tab's stored URL is never overwritten by Peek");
+
+        for (NSString *key in @[ @"title", @"url", @"favicon" ]) [source removeObserver:reader forKeyPath:key];
+
+        _TtC11Attachments18AttachmentCellView *chip = [[_TtC11Attachments18AttachmentCellView alloc] initWithFrame:NSMakeRect(0, 0, 184, 54)];
+        chip->$__lazy_storage_$_titleView = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 0, 120, 16)];
+        chip->$__lazy_storage_$_subtitleView = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 0, 120, 14)];
+        chip->$__lazy_storage_$_iconView = [[NSImageView alloc] initWithFrame:NSMakeRect(0, 0, 16, 16)];
+        for (NSView *part in @[ chip->$__lazy_storage_$_titleView, chip->$__lazy_storage_$_subtitleView, chip->$__lazy_storage_$_iconView ])
+            [chip addSubview:part];
+        chip->$__lazy_storage_$_titleView.stringValue = @"Parent Page";
+        chip->$__lazy_storage_$_subtitleView.stringValue = @"parent.example";
+        NSImage *parentIcon = [[NSImage alloc] initWithSize:NSMakeSize(16, 16)];
+        chip->$__lazy_storage_$_iconView.image = parentIcon;
+        [window.contentView addSubview:chip];
+
+        _TtC11Attachments18AttachmentCellView *otherChip = [[_TtC11Attachments18AttachmentCellView alloc] initWithFrame:NSMakeRect(0, 60, 184, 54)];
+        otherChip->$__lazy_storage_$_titleView = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 0, 120, 16)];
+        otherChip->$__lazy_storage_$_subtitleView = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 0, 120, 14)];
+        otherChip->$__lazy_storage_$_iconView = [[NSImageView alloc] initWithFrame:NSMakeRect(0, 0, 16, 16)];
+        for (NSView *part in @[ otherChip->$__lazy_storage_$_titleView, otherChip->$__lazy_storage_$_subtitleView, otherChip->$__lazy_storage_$_iconView ])
+            [otherChip addSubview:part];
+        otherChip->$__lazy_storage_$_titleView.stringValue = @"Other Page";
+        otherChip->$__lazy_storage_$_subtitleView.stringValue = @"other.example";
+        NSImage *otherIcon = [[NSImage alloc] initWithSize:NSMakeSize(16, 16)];
+        otherChip->$__lazy_storage_$_iconView.image = otherIcon;
+        [window.contentView addSubview:otherChip];
+
+        [chip layout];
+        [otherChip layout];
+        CHECK([chip->$__lazy_storage_$_titleView.stringValue isEqualToString:@"Peek Article Two"],
+              "the current-page chip takes the Peek page title");
+        CHECK([chip->$__lazy_storage_$_subtitleView.stringValue isEqualToString:@"peek.example"],
+              "the current-page chip takes the Peek page domain");
+        CHECK([otherChip->$__lazy_storage_$_titleView.stringValue isEqualToString:@"Other Page"] &&
+              [otherChip->$__lazy_storage_$_subtitleView.stringValue isEqualToString:@"other.example"],
+              "an @-mentioned tab chip keeps its own title and domain");
+        CHECK(otherChip->$__lazy_storage_$_iconView.image == otherIcon, "an @-mentioned tab chip keeps its own icon");
+
+        peekPage.title = @"IANA-managed Reserved Domains";
+        peekPage.url = [NSURL URLWithString:@"https://www.iana.org/domains/reserved"];
+        [chip layout];
+        CHECK([chip->$__lazy_storage_$_titleView.stringValue isEqualToString:@"IANA-managed Reserved Domains"],
+              "navigating inside Peek re-labels the chip title");
+        CHECK([chip->$__lazy_storage_$_subtitleView.stringValue isEqualToString:@"iana.org"],
+              "navigating inside Peek re-labels the chip domain without www.");
+
+        NSImage *peekIcon = [[NSImage alloc] initWithSize:NSMakeSize(16, 16)];
+        peekPage.favicon = peekIcon;
+        [chip layout];
+        CHECK(chip->$__lazy_storage_$_iconView.image == peekIcon, "the chip takes the Peek page favicon");
+        peekPage.favicon = @"not-an-image";
+        [chip layout];
+        CHECK(chip->$__lazy_storage_$_iconView.image == parentIcon, "a non-image favicon falls back to Dia's own icon");
+
+        peek.hidden = YES;
+        [chip layout];
+        CHECK([chip->$__lazy_storage_$_titleView.stringValue isEqualToString:@"Parent Page"] &&
+              [chip->$__lazy_storage_$_subtitleView.stringValue isEqualToString:@"parent.example"],
+              "hiding Peek restores the chip title and domain");
+        CHECK(chip->$__lazy_storage_$_iconView.image == parentIcon, "hiding Peek restores the chip icon");
+        peek.hidden = NO;
+        [chip layout];
+        CHECK([chip->$__lazy_storage_$_titleView.stringValue isEqualToString:@"IANA-managed Reserved Domains"],
+              "unhiding Peek puts the Peek page back in the chip");
+
+        DPPeek.on = NO;
+        [chip layout];
+        CHECK([chip->$__lazy_storage_$_titleView.stringValue isEqualToString:@"Parent Page"] &&
+              [chip->$__lazy_storage_$_subtitleView.stringValue isEqualToString:@"parent.example"] &&
+              chip->$__lazy_storage_$_iconView.image == parentIcon,
+              "turning Peek off restores the chip title, domain and icon");
+        DPPeek.on = YES;
+        [chip layout];
+        CHECK([chip->$__lazy_storage_$_titleView.stringValue isEqualToString:@"IANA-managed Reserved Domains"],
+              "turning Peek back on re-labels the chip");
+
+        chip->$__lazy_storage_$_titleView.stringValue = @"Parent Page Renamed";
+        [chip layout];
+        CHECK([chip->$__lazy_storage_$_titleView.stringValue isEqualToString:@"IANA-managed Reserved Domains"],
+              "a Dia re-render is overridden again on the next layout");
+        DPPeek.on = NO;
+        [chip layout];
+        CHECK([chip->$__lazy_storage_$_titleView.stringValue isEqualToString:@"Parent Page Renamed"],
+              "the re-rendered title is what gets restored when Peek is off");
+        DPPeek.on = YES;
+        [chip layout];
+
+        _TtC11Attachments18AttachmentCellView *reused = [[_TtC11Attachments18AttachmentCellView alloc] initWithFrame:NSMakeRect(0, 120, 184, 54)];
+        reused->$__lazy_storage_$_titleView = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 0, 120, 16)];
+        reused->$__lazy_storage_$_subtitleView = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 0, 120, 14)];
+        reused->$__lazy_storage_$_iconView = [[NSImageView alloc] initWithFrame:NSMakeRect(0, 0, 16, 16)];
+        for (NSView *part in @[ reused->$__lazy_storage_$_titleView, reused->$__lazy_storage_$_subtitleView, reused->$__lazy_storage_$_iconView ])
+            [reused addSubview:part];
+        reused->$__lazy_storage_$_titleView.stringValue = @"Parent Page";
+        reused->$__lazy_storage_$_subtitleView.stringValue = @"parent.example";
+        NSImage *reusedIcon = [[NSImage alloc] initWithSize:NSMakeSize(16, 16)];
+        reused->$__lazy_storage_$_iconView.image = reusedIcon;
+        [window.contentView addSubview:reused];
+        [reused layout];
+        CHECK([reused->$__lazy_storage_$_titleView.stringValue isEqualToString:@"IANA-managed Reserved Domains"],
+              "a same-domain chip is claimed for the Peek page before reuse");
+
+        [reused prepareForReuse];
+        CHECK([reused->$__lazy_storage_$_titleView.stringValue isEqualToString:@"Parent Page"] &&
+              [reused->$__lazy_storage_$_subtitleView.stringValue isEqualToString:@"parent.example"] &&
+              reused->$__lazy_storage_$_iconView.image == reusedIcon,
+              "prepareForReuse restores the chip's own title, domain and icon");
+
+        reused->$__lazy_storage_$_titleView.stringValue = @"Sibling Page";
+        reused->$__lazy_storage_$_subtitleView.stringValue = @"parent.example";
+        [reused layout];
+        CHECK([reused->$__lazy_storage_$_titleView.stringValue isEqualToString:@"Sibling Page"] &&
+              [reused->$__lazy_storage_$_subtitleView.stringValue isEqualToString:@"parent.example"],
+              "a reused same-domain chip is not claimed by Peek");
+        [reused removeFromSuperview];
+
+        [chip removeFromSuperview];
+        [otherChip removeFromSuperview];
+
         int selBefore = kvo.selectedHits, inBefore = kvo.inputHits;
         peekPage.selectedText = @"highlighted-in-peek";
         CHECK(kvo.selectedHits == selBefore + 1 && kvo.inputHits == inBefore + 1, "Peek selection change notifies source KVO");
@@ -567,13 +757,15 @@ int main(void) {
         peekPage.url = [NSURL URLWithString:@"https://peek.example/next"];
         CHECK(kvo.inputHits == inLoadingStart + 2, "navigating inside Peek invalidates source prefetch cache");
 
-        // 7. Hiding Peek (tab switch / #367 compatibility) immediately restores context to parent; unhiding restores Peek.
         int hideSel = kvo.selectedHits, hideIn = kvo.inputHits;
         NSRect frameBeforeHide = peek.frame;
         peek.hidden = YES;
         CHECK(DPPeekCardIn(window) == nil, "hidden (parked) Peek is excluded from DPPeekCardIn");
         CHECK(kvo.selectedHits == hideSel + 1 && kvo.inputHits == hideIn + 1, "hiding Peek invalidates source cache and selection");
         CHECK([kvo.lastSeenSelected isEqualToString:@"parent-selection"], "source selection restores immediately when Peek hides");
+        CHECK([source.title isEqualToString:@"Parent Page"], "hiding Peek restores the parent tab title in the chip");
+        CHECK([source.url.absoluteString isEqualToString:@"https://parent.example/list"], "hiding Peek restores the parent tab URL in the chip");
+        CHECK([source.favicon isEqual:@"parent-icon"], "hiding Peek restores the parent tab favicon in the chip");
         contentContainer.frame = NSMakeRect(0, 0, 700, 756);
         pageContainer.frame = contentContainer.bounds;
         splitHost.frame = pageContainer.bounds;
@@ -594,7 +786,6 @@ int main(void) {
         [extractor getExtractedContentForWebContents:source completion:^(NSDictionary *c) { extracted = c; }];
         CHECK([extracted[@"tag"] isEqualToString:@"peek"], "page extraction switches back to Peek when unhidden");
 
-        // 7b. Stale/replaced ContentPaneView after tab switch: followPane must rebind to the live pane and fit beside Side Chat.
         _TtC11ContentPane15ContentPaneView *pane2 = [[_TtC11ContentPane15ContentPaneView alloc] initWithFrame:NSMakeRect(0, 0, 660, 756)];
         pane.hidden = YES;
         [pane removeFromSuperview];
@@ -617,7 +808,6 @@ int main(void) {
         [splitHost addSubview:pane];
         [sidebarVC viewWillLayout];
 
-        // 8. Off-tweak invariant: DPPeek.on = NO disables all hooks immediately.
         DPPeek.on = NO;
         extracted = nil;
         [extractor getExtractedContentForWebContents:source completion:^(NSDictionary *c) { extracted = c; }];
@@ -625,9 +815,10 @@ int main(void) {
               "off-tweak invariant: extraction and selection untouched when DPPeek.on == NO");
         CHECK(!DPPeekAllowsPaneClick(peek, chatBtnInWindow), "off-tweak invariant: hit-test pass-through disabled when off");
         CHECK(!DPPeekChatShortcut(peek, cmdE, NSEventModifierFlagCommand), "off-tweak invariant: chat shortcut disabled when off");
+        CHECK([source.title isEqualToString:@"Parent Page"] && [source.favicon isEqual:@"parent-icon"],
+              "off-tweak invariant: chip title and favicon untouched when DPPeek.on == NO");
         DPPeek.on = YES;
 
-        // 9. Closing Peek detaches KVO cleanly and restores parent context.
         int closeSel = kvo.selectedHits, closeIn = kvo.inputHits;
         [peek handOverTo:nil attach:nil];
         CHECK(peek.chatBridge == nil, "closing Peek clears chatBridge");
@@ -636,8 +827,10 @@ int main(void) {
         extracted = nil;
         [extractor getExtractedContentForWebContents:source completion:^(NSDictionary *c) { extracted = c; }];
         CHECK([extracted[@"tag"] isEqualToString:@"parent"], "page extraction restores to parent after Peek closes");
+        CHECK([source.title isEqualToString:@"Parent Page"], "closing Peek restores the parent tab title in the chip");
+        CHECK([source.url.absoluteString isEqualToString:@"https://parent.example/list"], "closing Peek restores the parent tab URL in the chip");
+        CHECK([source.favicon isEqual:@"parent-icon"], "closing Peek restores the parent tab favicon in the chip");
 
-        // Mutating detached peekPage must NOT notify source or crash under ASan.
         int afterCloseSel = kvo.selectedHits, afterCloseIn = kvo.inputHits;
         peekPage.selectedText = @"after-close";
         peekPage.isLoading = NO;
@@ -645,9 +838,7 @@ int main(void) {
         CHECK(kvo.selectedHits == afterCloseSel && kvo.inputHits == afterCloseIn,
               "detached Peek page no longer forwards KVO to source");
 
-        // 10. KVO torture: double detach, background-thread KVO racing with detach, sudden DPPeekCard dealloc, and quiet detach on parked/source close.
         {
-            // 10a. Sudden DPPeekCard dealloc without close:/handOverTo: must cleanly remove all KVO observers from peekPage.
             ArcWebContents *orphanPeekPage = [ArcWebContents new];
             orphanPeekPage.tag = @"orphan";
             orphanPeekPage.selectedText = @"orphan-sel";
@@ -666,7 +857,6 @@ int main(void) {
             CHECK(kvo.selectedHits == orphanSelBefore && kvo.inputHits == orphanInBefore,
                   "sudden DPPeekCard dealloc detaches KVO cleanly without crashing or notifying source");
 
-            // 10b. Background-thread KVO mutation racing with main-thread DPPeekChatDetach (50 iterations under ASan).
             dispatch_queue_t bg = dispatch_queue_create("dp.peek.kvo.torture", DISPATCH_QUEUE_CONCURRENT);
             for (int iter = 0; iter < 50; iter++) {
                 ArcWebContents *racePage = [ArcWebContents new];
@@ -688,7 +878,6 @@ int main(void) {
             [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.05]];
             CHECK(YES, "50 iterations of background KVO vs main-thread detach completed without crash or exception");
 
-            // 10c. Quiet detach when closing a parked (hidden) Peek or closing via DPPeekCloseForSource emits zero extra KVO notifications.
             DPPeekOpenFrom(window, @"tab-1", [NSURL URLWithString:@"https://peek.example/parked"], NSMakeRect(100, 100, 40, 20), nil, source, nil, nil);
             DPPeekCard *parked = DPPeekCardIn(window);
             parked.hidden = YES;
@@ -698,20 +887,19 @@ int main(void) {
                   "DPPeekCloseForSource detaches parked Peek quietly without synthetic KVO on dying source");
         }
 
-        // 11. Multi-tab Side Chat isolation: Tab A (visible Peek A) -> Tab B (no Peek) -> Tab C (different Peek C).
         {
             ArcWebContents *srcA = [ArcWebContents new], *srcB = [ArcWebContents new], *srcC = [ArcWebContents new];
-            srcA.tag = @"tabA"; srcA.url = [NSURL URLWithString:@"https://tabA.example/"]; srcA.selectedText = @"sel-A";
-            srcB.tag = @"tabB"; srcB.url = [NSURL URLWithString:@"https://tabB.example/"]; srcB.selectedText = @"sel-B";
-            srcC.tag = @"tabC"; srcC.url = [NSURL URLWithString:@"https://tabC.example/"]; srcC.selectedText = @"sel-C";
+            srcA.tag = @"tabA"; srcA.title = @"tabA"; srcA.url = [NSURL URLWithString:@"https://tabA.example/"]; srcA.selectedText = @"sel-A";
+            srcB.tag = @"tabB"; srcB.title = @"tabB"; srcB.url = [NSURL URLWithString:@"https://tabB.example/"]; srcB.selectedText = @"sel-B";
+            srcC.tag = @"tabC"; srcC.title = @"tabC"; srcC.url = [NSURL URLWithString:@"https://tabC.example/"]; srcC.selectedText = @"sel-C";
 
             gActiveTabID = @"tab-A";
             DPPeekOpenFrom(window, @"tab-A", [NSURL URLWithString:@"https://peekA.example/"], NSMakeRect(100, 100, 40, 20), nil, srcA, nil, nil);
             DPPeekCard *peekA = DPPeekCardIn(window);
             ((ArcWebContents *)peekA.page).tag = @"peekA";
+            ((ArcWebContents *)peekA.page).title = @"peekA";
             ((ArcWebContents *)peekA.page).selectedText = @"peekA-sel";
 
-            // On Tab A: srcA routes to peekA; srcB and srcC stay on themselves.
             __block NSDictionary *exA = nil, *exB = nil, *exC = nil;
             [extractor getExtractedContentForWebContents:srcA completion:^(NSDictionary *c) { exA = c; }];
             [extractor getExtractedContentForWebContents:srcB completion:^(NSDictionary *c) { exB = c; }];
@@ -720,23 +908,24 @@ int main(void) {
             CHECK([exB[@"tag"] isEqualToString:@"tabB"] && [srcB.selectedText isEqualToString:@"sel-B"], "Tab B unaffected while Peek A active");
             CHECK([exC[@"tag"] isEqualToString:@"tabC"] && [srcC.selectedText isEqualToString:@"sel-C"], "Tab C unaffected while Peek A active");
 
-            // Switch to Tab B (no Peek): park Peek A -> all three resolve to their own tab pages.
             gActiveTabID = @"tab-B";
             peekA.hidden = YES;
             [extractor getExtractedContentForWebContents:srcA completion:^(NSDictionary *c) { exA = c; }];
             [extractor getExtractedContentForWebContents:srcB completion:^(NSDictionary *c) { exB = c; }];
             CHECK([exA[@"tag"] isEqualToString:@"tabA"] && [exB[@"tag"] isEqualToString:@"tabB"], "Tab B active -> zero stale Peek A context");
 
-            // Switch to Tab C and open Peek C while Peek A stays parked.
             gActiveTabID = @"tab-C";
             DPPeekOpenFrom(window, @"tab-C", [NSURL URLWithString:@"https://peekC.example/"], NSMakeRect(100, 100, 40, 20), nil, srcC, nil, nil);
             DPPeekCard *peekC = DPPeekCardIn(window);
             ((ArcWebContents *)peekC.page).tag = @"peekC";
+            ((ArcWebContents *)peekC.page).title = @"peekC";
             ((ArcWebContents *)peekC.page).selectedText = @"peekC-sel";
             [extractor getExtractedContentForWebContents:srcA completion:^(NSDictionary *c) { exA = c; }];
             [extractor getExtractedContentForWebContents:srcB completion:^(NSDictionary *c) { exB = c; }];
             [extractor getExtractedContentForWebContents:srcC completion:^(NSDictionary *c) { exC = c; }];
             CHECK([exC[@"tag"] isEqualToString:@"peekC"] && [srcC.selectedText isEqualToString:@"peekC-sel"], "Tab C active -> routes to Peek C");
+            CHECK([srcC.title isEqualToString:@"tabC"] && [srcA.title isEqualToString:@"tabA"],
+                  "each tab keeps its own title while another tab's Peek is open");
             CHECK([exA[@"tag"] isEqualToString:@"tabA"] && [exB[@"tag"] isEqualToString:@"tabB"], "parked Peek A and Tab B stay isolated on Tab C");
 
             [peekA handOverTo:nil attach:nil];

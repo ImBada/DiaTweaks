@@ -23,7 +23,7 @@ BOOL DPIsAITitle(NSString *title) {
 static BOOL DPIsAIView(NSView *view) {
     return DPIsChatButton(view) || DPIsKind(view, DPDiaLibraryButton) || DPIsKind(view, DPDiaLibraryCell)
         || DPIsKind(view, DPDiaSkillsSuggestions) || DPIsKind(view, DPDiaPersonalizeButton) || DPIsKind(view, DPDiaChatUsage)
-        || DPIsKind(view, DPDiaCapabilityButton);
+        || DPIsKind(view, DPDiaCapabilityButton) || DPIsKind(view, DPDiaTrialButton) || DPIsSingleAppUpsellBar(view);
 }
 
 static void DPHost_layout(NSView *self, SEL _cmd) {
@@ -110,10 +110,12 @@ static const NSEventModifierFlags DPModifiers = NSEventModifierFlagCommand | NSE
 static BOOL DPIsAIShortcut(NSEvent *event) {
     NSEventModifierFlags mods = event.modifierFlags & DPModifiers;
     NSString *key = event.charactersIgnoringModifiers.lowercaseString;
-    for (NSMenuItem *item in DPAIItems)
-        if (item.keyEquivalent.length && [item.keyEquivalent.lowercaseString isEqual:key] && (item.keyEquivalentModifierMask & DPModifiers) == mods) return YES;
-    BOOL inBar = [NSStringFromClass([event.window.firstResponder class]) hasPrefix:@"_TtCC15BoostCommandBar"];
-    return inBar && (event.keyCode == 36 || event.keyCode == 76) && mods == (NSEventModifierFlagCommand | NSEventModifierFlagControl);
+    for (NSMenuItem *item in DPAIItems) {
+        if (!item.keyEquivalent.length || (item.keyEquivalentModifierMask & DPModifiers) != mods) continue;
+        if ([item.keyEquivalent.lowercaseString isEqual:key]) return YES;
+    }
+    if ((event.keyCode != 36 && event.keyCode != 76) || mods != (NSEventModifierFlagCommand | NSEventModifierFlagControl)) return NO;
+    return [NSStringFromClass([event.window.firstResponder class]) hasPrefix:@"_TtCC15BoostCommandBar"];
 }
 
 static BOOL gCutOff;
@@ -175,7 +177,7 @@ DP_PATCH(DPTurnOffAI) {
     .order = 95,
     .section = @"AI",
     .title = @"Turn Off AI",
-    .detail = @"Turn off every AI feature in Dia: chat and its buttons, menus and shortcuts, Skills, Ask Dia, Morning Brief, and Settings' Apps and Skills. After a relaunch, Dia can't reach its AI servers either. To send questions to search, set Address Bar to Prefer Search Engine in Advanced.",
+    .detail = @"Turn off every AI feature in Dia: chat and its buttons, menus and shortcuts, Skills, Ask Dia, Morning Brief, and Settings’ Apps and Skills. After a relaunch, Dia can’t reach its AI servers either. To send questions to search, set Address Bar to Prefer Search Engine in Advanced.",
     .symbol = @"bubble.left.and.exclamationmark.bubble.right.fill bubble.left.fill",
     .tint = @"systemPurpleColor",
     .hides = DPIsAIView,

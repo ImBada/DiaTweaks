@@ -17,8 +17,6 @@ NSArray<NSView *> *DPFindViews(const char *name) {
 
 #import "Patches/PinnedSplitClose/PinnedSplitClose.m"
 
-// --- Dia's classes, as far as the tweak reads them ---
-
 @interface _TtC5TabUI33TabWebContentAttributesController : NSObject {
 @public
     BOOL isInFavoritesOrPinnedContainer;
@@ -128,8 +126,6 @@ static int closeClicks;
 - (void)closeFocusedContent:(id)sender { originalCalls++; }
 @end
 
-// --- the helpers the tweak shares with other patches ---
-
 id DPViewModelDelegate(NSView *view) {
     if ([view isKindOfClass:_TtC5TabUI7TabView.class]) return ((_TtC5TabUI7TabView *)view)->controller;
     if ([view isKindOfClass:_TtC5TabUI15TabDockItemView.class]) return ((_TtC5TabUI15TabDockItemView *)view)->controller;
@@ -151,8 +147,6 @@ void DPRelayoutTabContents(void) {
 }
 
 NSString *DPActiveTabID(NSWindow *window) { return activeTabID; }
-
-// --- fixtures ---
 
 static void DPSetUUID(uint8_t *bytes, uint8_t seed) {
     for (int i = 0; i < 16; i++) bytes[i] = (uint8_t)(seed + i);
@@ -220,7 +214,6 @@ int main(void) {
         _TtC6Window24PlatformWindowController *controller = [_TtC6Window24PlatformWindowController new];
         controller.window = window;
 
-        // A pinned Split View row, a plain pinned row, and an unpinned Split View row.
         _TtC5TabUI7TabView *pinnedSplit = NewRow(0x01);
         _TtC5TabUI14TabContentView *paneA = NewPane(pinnedSplit, YES, 0x10);
         _TtC5TabUI14TabContentView *paneB = NewPane(pinnedSplit, YES, 0x30);
@@ -233,7 +226,6 @@ int main(void) {
         [window.contentView addSubview:pinnedSingle];
         [window.contentView addSubview:looseSplit];
 
-        // A favorite tile holding a Split View and one holding a single tab.
         _TtC5TabUI15TabDockItemView *splitTile = NewTile(0xB0, 2);
         _TtC5TabUI15TabDockItemView *singleTile = NewTile(0xD0, 1);
         [window.contentView addSubview:splitTile];
@@ -247,36 +239,29 @@ int main(void) {
         DPHookClass(NSApp.class, @selector(keyWindow), (IMP)DPApp_keyWindow);
         gKeyWindow = window;
 
-        // Off-tweak: ⌘W is Dia's own.
         [controller closeFocusedContent:nil];
         CHECK(controller->originalCalls == 1 && closeClicks == 0, "off tweak leaves ⌘W alone");
 
-        // On: a pinned Split View unloads in place instead of losing a pane.
         DPPinnedSplitClose.on = YES;
         [controller closeFocusedContent:nil];
         CHECK(closeClicks == 1 && controller->originalCalls == 1, "pinned split row unloads in place");
 
-        // A pinned row that is not a split keeps Dia's close.
         activeTabID = DPUUIDText(0x50);
         [controller closeFocusedContent:nil];
         CHECK(closeClicks == 1 && controller->originalCalls == 2, "pinned single tab keeps ⌘W");
 
-        // An unpinned Split View keeps Dia's close, which closes the focused pane.
         activeTabID = DPUUIDText(0x70);
         [controller closeFocusedContent:nil];
         CHECK(closeClicks == 1 && controller->originalCalls == 3, "unpinned split keeps ⌘W");
 
-        // A favorite tile holding a Split View unloads in place.
         activeTabID = DPUUIDText(0xB0);
         [controller closeFocusedContent:nil];
         CHECK(closeClicks == 2 && controller->originalCalls == 3, "favorite split tile unloads in place");
 
-        // A favorite tile holding one tab keeps Dia's close.
         activeTabID = DPUUIDText(0xD0);
         [controller closeFocusedContent:nil];
         CHECK(closeClicks == 2 && controller->originalCalls == 4, "favorite single tile keeps ⌘W");
 
-        // A folder's tile holds several controllers but is not a Split View of tabs.
         _TtC5TabUI15TabDockItemView *groupTile = NewTile(0xB0, 3);
         ((_TtC5TabUI21TabDockItemController *)groupTile->controller)->group = YES;
         [window.contentView addSubview:groupTile];
@@ -287,14 +272,12 @@ int main(void) {
         [groupTile removeFromSuperview];
         visibleTiles = @[ splitTile, singleTile ];
 
-        // Dia not naming the tab in front still leaves one pinned split unambiguous.
         visibleTiles = @[];
         activeTabID = nil;
         [controller closeFocusedContent:nil];
         CHECK(closeClicks == 3 && controller->originalCalls == 5, "one pinned split unloads without an active tab");
         activeTabID = DPUUIDText(0x10);
 
-        // Two pinned splits and no active tab is ambiguous, so Dia keeps ⌘W.
         _TtC5TabUI7TabView *secondSplit = NewRow(0x04);
         _TtC5TabUI14TabContentView *paneH = NewPane(secondSplit, YES, 0xE0);
         _TtC5TabUI14TabContentView *paneI = NewPane(secondSplit, YES, 0xF0);
@@ -309,19 +292,16 @@ int main(void) {
         visibleContents = @[ paneA, paneB, paneC, paneD, paneE ];
         visibleTiles = @[ splitTile, singleTile ];
 
-        // Dia naming the split itself rather than a pane still finds it.
         activeTabID = DPUUIDText(0x01);
         [controller closeFocusedContent:nil];
         CHECK(closeClicks == 4 && controller->originalCalls == 6, "the split's own tab ID finds it");
         activeTabID = DPUUIDText(0x10);
 
-        // A pinned split behind another tab is not the one ⌘W means.
         activeTabID = DPUUIDText(0x50);
         [controller closeFocusedContent:nil];
         CHECK(closeClicks == 4 && controller->originalCalls == 7, "a pinned split behind another tab keeps ⌘W");
         activeTabID = DPUUIDText(0x10);
 
-        // A Peek card on top owns ⌘W.
         Class card = objc_allocateClassPair(NSView.class, "DPPeekCard", 0);
         objc_registerClassPair(card);
         NSView *peek = [[card alloc] initWithFrame:NSMakeRect(0, 0, 10, 10)];
@@ -330,7 +310,6 @@ int main(void) {
         CHECK(closeClicks == 4 && controller->originalCalls == 8, "an open Peek card keeps ⌘W");
         [peek removeFromSuperview];
 
-        // A sheet on top owns ⌘W.
         NSWindow *sheet = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 100, 100)
                                                       styleMask:NSWindowStyleMaskTitled
                                                         backing:NSBackingStoreBuffered
@@ -342,7 +321,6 @@ int main(void) {
         [window endSheet:sheet];
         [sheet close];
 
-        // A Command Bar overlay owns ⌘W.
         Class overlay = objc_allocateClassPair(NSView.class, "DPCommandBarOverlay", 0);
         objc_registerClassPair(overlay);
         NSView *bar = [[overlay alloc] initWithFrame:NSMakeRect(0, 0, 10, 10)];
@@ -351,7 +329,6 @@ int main(void) {
         CHECK(closeClicks == 4 && controller->originalCalls == 10, "a Command Bar overlay keeps ⌘W");
         [bar removeFromSuperview];
 
-        // Another window being key (Little Dia, Preferences) owns ⌘W.
         NSWindow *other = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 100, 100)
                                                       styleMask:NSWindowStyleMaskTitled
                                                         backing:NSBackingStoreBuffered
@@ -363,7 +340,6 @@ int main(void) {
         gKeyWindow = window;
         [other close];
 
-        // A pinned Split View whose menu offers no Close is left to Dia.
         [pinnedSplit removeFromSuperview];
         _TtC5TabUI7TabView *bareSplit = NewRow(0x05);
         bareSplit->noClose = YES;
@@ -379,7 +355,6 @@ int main(void) {
         visibleTabs = @[ pinnedSplit, pinnedSingle, looseSplit ];
         visibleContents = @[ paneA, paneB, paneC, paneD, paneE ];
 
-        // The split icon: only a pinned Split View pane with no icon of its own gets one.
         NSImageView *iconA = [NSImageView new];
         paneA->$__lazy_storage_$_standardIconView = iconA;
         NSImageView *iconD = [NSImageView new];
@@ -394,7 +369,6 @@ int main(void) {
         CHECK(iconD.image == favicon, "an unpinned split pane keeps its favicon");
         CHECK(DPVerifyPinnedSplitClose(&DPPinnedSplitClose) == nil, "verifies while on");
 
-        // Dia hiding the icon slot is undone, and put back on toggle-off.
         iconA.hidden = YES;
         [paneA layout];
         CHECK(!iconA.hidden, "a hidden pinned split icon slot is shown");
@@ -405,12 +379,10 @@ int main(void) {
         iconA.hidden = NO;
         [paneA layout];
 
-        // Dia drawing its own icon later wins.
         iconA.image = favicon;
         [paneA layout];
         CHECK(iconA.image == favicon, "Dia's own icon is left alone");
 
-        // Turning off restores exactly what the tweak changed.
         iconA.image = nil;
         [paneA layout];
         CHECK(iconA.image != nil, "the split icon comes back on the next layout");
@@ -422,7 +394,6 @@ int main(void) {
         CHECK(iconD.image == favicon, "turning off leaves a favicon alone");
         CHECK(DPVerifyPinnedSplitClose(&DPPinnedSplitClose) == nil, "verifies after off");
 
-        // Hooks stay inert after turning off.
         [controller closeFocusedContent:nil];
         CHECK(closeClicks == 4 && controller->originalCalls == 13, "hooks stay inert after off");
 
@@ -448,13 +419,11 @@ int main(void) {
         DPApplyPinnedSplitClose(&DPPinnedSplitClose);
         CHECK(directIcon.image == nil, "1.59 icon view restores");
 
-        // A pane with no icon view at all is skipped rather than crashed on.
         paneB->$__lazy_storage_$_iconView = nil;
         DPPinnedSplitClose.on = YES;
         [paneB layout];
         CHECK(DPVerifyPinnedSplitClose(&DPPinnedSplitClose) == nil, "a pane with no icon view verifies");
 
-        // Both Dia versions carry the classes and selectors the tweak needs.
         CHECK(objc_getClass(DPDiaWindowController) != Nil, "1.58/1.59 window controller");
         CHECK(objc_getClass(DPDiaTabView) != Nil && objc_getClass(DPDiaTabContentView) != Nil, "1.58/1.59 tab views");
         CHECK(objc_getClass(DPDiaPinnedTab) != Nil, "1.58/1.59 pinned tile");

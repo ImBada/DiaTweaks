@@ -96,17 +96,10 @@ static void DPFetchPreview(NSArray<NSString *> *names, void (^done)(NSURL *file,
     NSTimer *_flip;
 }
 
-+ (void)preload {
-    static NSMutableSet<NSString *> *started;
-    if (!started) started = [NSMutableSet new];
-    NSString *layout = DPTabLayout();
-    for (NSUInteger i = 0; i < DPPatchCount; i++) {
-        if (DPRequired(DPPatches[i])) continue;
-        NSArray<NSString *> *names = DPPreviewNames(DPPatches[i]->key, layout);
-        if ([started containsObject:names[0]]) continue;
-        [started addObject:names[0]];
-        DPFetchPreview(names, ^(NSURL *file, BOOL changed) {});
-    }
+static BOOL DPIsLocalKey(NSString *key) {
+    for (NSUInteger i = 0; i < DPPatchCount; i++)
+        if ([DPPatches[i]->key isEqual:key]) return DPIsLocalPatch(DPPatches[i]);
+    return NO;
 }
 
 - (instancetype)initWithKey:(NSString *)key {
@@ -122,13 +115,11 @@ static void DPFetchPreview(NSArray<NSString *> *names, void (^done)(NSURL *file,
     NSString *layout = DPTabLayout();
     if ([layout isEqual:_layout]) return;
     _layout = layout;
+    if (DPIsLocalKey(_key)) return;
     NSArray<NSString *> *names = _names = DPPreviewNames(_key, layout);
     for (NSString *name in names) {
         NSURL *cached = DPCachedPreview(name);
-        if ([cached checkResourceIsReachableAndReturnError:nil]) {
-            [self show:cached];
-            break;
-        }
+        if ([cached checkResourceIsReachableAndReturnError:nil]) return [self show:cached];
     }
     __weak DPPreviewView *weakSelf = self;
     DPFetchPreview(names, ^(NSURL *file, BOOL changed) {
@@ -201,27 +192,25 @@ static void DPFetchPreview(NSArray<NSString *> *names, void (^done)(NSURL *file,
     [self updatePlayback];
 }
 
-- (void)stopPlayback {
+- (void)stopTimers {
     [_link invalidate];
     _link = nil;
     [_flip invalidate];
     _flip = nil;
+}
+
+- (void)stopPlayback {
+    [self stopTimers];
     [_player pause];
 }
 
 - (void)showState {
     if (!_states.count) return;
-    [CATransaction begin];
-    [CATransaction setDisableActions:YES];
-    _media.contents = _states[((unsigned long long)floor(NSDate.date.timeIntervalSince1970)) & 1];
-    [CATransaction commit];
+    DPWithoutAnimation(^{ self->_media.contents = self->_states[((unsigned long long)floor(NSDate.date.timeIntervalSince1970)) & 1]; });
 }
 
 - (void)updatePlayback {
-    [_link invalidate];
-    _link = nil;
-    [_flip invalidate];
-    _flip = nil;
+    [self stopTimers];
     BOOL visible = (self.window.occlusionState & NSWindowOcclusionStateVisible) != 0;
     if (visible && _states) {
         [self showState];
@@ -251,10 +240,8 @@ static void DPFetchPreview(NSArray<NSString *> *names, void (^done)(NSURL *file,
     VTCreateCGImageFromCVPixelBuffer(buffer, NULL, &image);
     CVPixelBufferRelease(buffer);
     if (!image) return;
-    [CATransaction begin];
-    [CATransaction setDisableActions:YES];
-    _media.contents = (__bridge_transfer id)image;
-    [CATransaction commit];
+    id contents = (__bridge_transfer id)image;
+    DPWithoutAnimation(^{ self->_media.contents = contents; });
 }
 
 - (void)updateLayer {
@@ -265,10 +252,7 @@ static void DPFetchPreview(NSArray<NSString *> *names, void (^done)(NSURL *file,
 
 - (void)layout {
     [super layout];
-    [CATransaction begin];
-    [CATransaction setDisableActions:YES];
-    _media.frame = self.bounds;
-    [CATransaction commit];
+    DPWithoutAnimation(^{ self->_media.frame = self.bounds; });
 }
 - (void)dealloc {
     [NSNotificationCenter.defaultCenter removeObserver:self];

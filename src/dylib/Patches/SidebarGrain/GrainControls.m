@@ -11,6 +11,14 @@ static NSHashTable<NSView *> *DPGrainSliders;
 @property NSTextField *field;
 @end
 
+static double DPGrainArrowStep(SEL command) {
+    if (command == @selector(moveUp:)) return 1;
+    if (command == @selector(moveDown:)) return -1;
+    if (command == @selector(moveUpAndModifySelection:)) return 10;
+    if (command == @selector(moveDownAndModifySelection:)) return -10;
+    return 0;
+}
+
 @implementation DPGrainSliderRow
 
 - (void)sync {
@@ -30,9 +38,9 @@ static NSHashTable<NSView *> *DPGrainSliders;
 }
 
 - (BOOL)control:(NSControl *)control textView:(NSTextView *)textView doCommandBySelector:(SEL)command {
-    NSNumber *step = @{ @"moveUp:" : @1, @"moveDown:" : @-1, @"moveUpAndModifySelection:" : @10, @"moveDownAndModifySelection:" : @-10 }[NSStringFromSelector(command)];
+    double step = DPGrainArrowStep(command);
     if (!step) return NO;
-    self.field.doubleValue = textView.string.doubleValue + step.doubleValue;
+    self.field.doubleValue = textView.string.doubleValue + step;
     [self tune:self.field];
     [textView selectAll:nil];
     return YES;

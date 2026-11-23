@@ -18,23 +18,21 @@ static void DPStyleBackground(NSView *cell) {
         NSMutableArray *shadows = hidden ? hidden[1] : [NSMutableArray new];
         hidden = @[ hidden ? hidden[0] : @(layer.borderWidth), shadows, (__bridge id)layer.backgroundColor ];
         DPSet(layer, &DPHiddenKey, hidden);
-        [CATransaction begin];
-        [CATransaction setDisableActions:YES];
-        for (CALayer *shadow in layer.sublayers) {
-            if (shadow.hidden) continue;
-            shadow.hidden = YES;
-            [shadows addObject:shadow];
-        }
-        layer.backgroundColor = nil;
-        layer.borderWidth = 0;
-        [CATransaction commit];
+        DPWithoutAnimation(^{
+            for (CALayer *shadow in layer.sublayers) {
+                if (shadow.hidden) continue;
+                shadow.hidden = YES;
+                [shadows addObject:shadow];
+            }
+            layer.backgroundColor = nil;
+            layer.borderWidth = 0;
+        });
     } else if (hidden && (!DPHideTabGroupBackground.on || layer.backgroundColor)) {
-        [CATransaction begin];
-        [CATransaction setDisableActions:YES];
-        if (!layer.backgroundColor) layer.backgroundColor = (__bridge CGColorRef)hidden[2];
-        layer.borderWidth = [hidden[0] doubleValue];
-        for (CALayer *shadow in hidden[1]) shadow.hidden = NO;
-        [CATransaction commit];
+        DPWithoutAnimation(^{
+            if (!layer.backgroundColor) layer.backgroundColor = (__bridge CGColorRef)hidden[2];
+            layer.borderWidth = [hidden[0] doubleValue];
+            for (CALayer *shadow in hidden[1]) shadow.hidden = NO;
+        });
         DPSet(layer, &DPHiddenKey, nil);
     }
 }
@@ -77,7 +75,7 @@ DP_PATCH(DPHideTabGroupBackground) {
     .key = @"hideTabGroupBackground",
     .order = 81,
     .title = @"Hide Group Background",
-    .detail = @"Leave an open tab group without the grey behind it, unless you've picked a colour for the group.",
+    .detail = @"Leave an open tab group without the grey behind it, unless you’ve picked a colour for the group.",
     .symbol = @"square.stack.fill square.fill",
     .tint = @"systemTealColor",
     .section = @"Sidebar & Tab Bar",

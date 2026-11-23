@@ -76,12 +76,12 @@ static NSString *DPVerifySkipAccount(DPPatch *patch) {
 
 DP_PATCH(DPSkipAccount) {
     .key = @"skipAccount",
-    .order = 120,
+    .order = 99,
     .title = @"Skip Account",
     .detail = @"Use Dia without signing in. Relaunch to apply. Hides Sign In and the Account, Morning Brief and Sync settings. Only works on a Dia that has never signed in. Chat needs an account, so pair it with Turn Off AI. Experimental.",
     .symbol = @"person.crop.circle.badge.minus person.crop.circle",
-    .tint = @"systemBrownColor",
-    .section = @"Window",
+    .tint = @"systemYellowColor",
+    .section = @"App",
     .classes = DPClasses(DPDiaAppDelegate, DPDiaSettingsHeader),
     .relaunch = YES,
     .install = DPInstallSkipAccount,

@@ -34,7 +34,6 @@ void DPRunCLI(NSArray<NSString *> *args, void (^completion)(NSString *output)) {
 
 @implementation DPPreviewView
 - (instancetype)initWithKey:(NSString *)key { return [super initWithFrame:NSZeroRect]; }
-+ (void)preload {}
 @end
 
 @implementation DPSoftwareUpdateView
@@ -153,10 +152,15 @@ DP_PATCH(DPRelaunchStub) {
 
 #import "SafeMode/SafeMode.m"
 #import "StdPatch/Patch.m"
+#import "Local/Local.m"
+#import "Local/Build.m"
+#import "Local/Extract.m"
+#import "Local/State.m"
 #import "StdPatch/Shortcut.m"
 #import "Settings/Controls.m"
 #import "Settings/Items.m"
 #import "Settings/Overview.m"
+#import "Settings/Folder.m"
 #import "Settings/Home.m"
 #import "Settings/Page.m"
 
@@ -233,7 +237,6 @@ int main(void) {
         expect(gCustomRow && gCustomRow.enabled && !gCustomRow.childButton.enabled,
                @"DPSetRowControlsEnabled stops at custom row setEnabled: without clobbering disabled child controls");
 
-        // DPSetChoice syncs picker selection and DPApplySavedSettings re-applies external choice changes.
         DPSetChoice(&DPStub, @"two");
         [page sync];
         expect([picker.selectedItem.representedObject isEqual:@"two"], @"DPSetChoice updates picker selection on sync");
@@ -244,7 +247,6 @@ int main(void) {
         expect(applied == appliedChoiceBefore + 1 && [picker.selectedItem.representedObject isEqual:@"one"],
                @"DPApplySavedSettings re-applies externally changed choice while patch stays on");
 
-        // Sub-option choice picker disables when parent tweak is turned off.
         NSPopUpButton *subPicker = (NSPopUpButton *)DPFindView(page, ^BOOL(NSView *v) { return [v isKindOfClass:NSPopUpButton.class] && v != picker; });
         expect(subPicker && subPicker.enabled, @"sub-option picker starts enabled when parent is on");
         DPSetPatch(&DPStub, NO, NO);
@@ -294,7 +296,6 @@ int main(void) {
         [home refresh];
         expect([overviewPause.title isEqual:@"Resume and Relaunch"] && [homePause.title isEqual:@"Resume and Relaunch"], @"paused launch labels the button Resume and Relaunch");
 
-        // External CLI resume while launched paused switches button to Relaunch instead of Pause Tweaks.
         [NSFileManager.defaultManager removeItemAtPath:pause error:nil];
         DPApplySavedSettings();
         [overview syncWithQuery:@""];
@@ -332,7 +333,6 @@ int main(void) {
         DPLeaveSafeMode();
         expect(DPPauseSaved(), @"leaving safe mode leaves the pause alone");
 
-        // DPShortcutRow sets initial clash edgeInsets and stops recording on Backspace.
         static DPPatch DPClashStub = {
             .key = @"clashTest", .title = @"Clash Test", .detail = @"", .symbol = @"star.fill", .tint = @"systemBlueColor",
             .section = @"Test", .shortcut = @"clashTestShortcut", .defaultShortcut = DPStubShortcut,

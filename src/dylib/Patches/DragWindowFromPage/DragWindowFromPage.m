@@ -14,8 +14,9 @@ static NSView *DPPageTopUnder(NSEvent *event) {
     NSView *content = window.contentView;
     NSPoint hitPoint = content.superview ? [content.superview convertPoint:event.locationInWindow fromView:nil] : event.locationInWindow;
     NSView *hit = [content hitTest:hitPoint];
+    Class pageHost = objc_getClass("WebContentsHostView");
     return DPFindView(content, ^BOOL(NSView *view) {
-        if (!DPIsKind(view, "WebContentsHostView") || view.isHiddenOrHasHiddenAncestor) return NO;
+        if (![view isKindOfClass:pageHost] || view.isHiddenOrHasHiddenAncestor) return NO;
         for (NSView *up = view; up; up = up.superview) if ([up isKindOfClass:card]) return NO;
         NSPoint point = [view convertPoint:event.locationInWindow fromView:nil];
         CGFloat fromTop = view.isFlipped ? point.y : NSHeight(view.bounds) - point.y;

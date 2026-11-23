@@ -16,14 +16,26 @@ static NSArray<NSCollectionViewLayoutAttributes *> *DPKeptAttributes(NSCollectio
     return elements(layout, @selector(layoutAttributesForElementsInRect:), NSMakeRect(-1e5, -1e5, 2e5, 1e7));
 }
 
-static CGFloat DPRowHeight(NSArray<NSCollectionViewLayoutAttributes *> *all) {
-    NSCountedSet<NSNumber *> *heights = [NSCountedSet set];
-    for (NSCollectionViewLayoutAttributes *a in all)
-        if (a.representedElementCategory == NSCollectionElementCategoryItem) [heights addObject:@(round(NSHeight(a.frame) * 2) / 2)];
-    NSNumber *row = nil;
-    for (NSNumber *each in heights) if (!row || [heights countForObject:each] > [heights countForObject:row]) row = each;
-    return row.doubleValue;
+CGFloat DPModalItemHeight(NSArray<NSCollectionViewLayoutAttributes *> *attributes, CGFloat minimum) {
+    enum { DPKinds = 32 };
+    CGFloat heights[DPKinds];
+    NSUInteger counts[DPKinds], kinds = 0, best = 0;
+    for (NSCollectionViewLayoutAttributes *item in attributes) {
+        if (item.representedElementCategory != NSCollectionElementCategoryItem || NSHeight(item.frame) < minimum) continue;
+        CGFloat height = round(NSHeight(item.frame) * 2) / 2;
+        NSUInteger index = 0;
+        while (index < kinds && heights[index] != height) index++;
+        if (index == kinds) {
+            if (kinds == DPKinds) continue;
+            heights[kinds] = height;
+            counts[kinds++] = 0;
+        }
+        if (++counts[index] > counts[best]) best = index;
+    }
+    return kinds ? heights[best] : 0;
 }
+
+static CGFloat DPRowHeight(NSArray<NSCollectionViewLayoutAttributes *> *all) { return DPModalItemHeight(all, 0); }
 
 static char DPMovesKey;
 
@@ -217,6 +229,11 @@ static id DPIvarObject(id object, const char *name) {
     return slot ? (__bridge id)*slot : nil;
 }
 
+static CAShapeLayer *DPShapeLayerIvar(id object, const char *name) {
+    id layer = DPIvarObject(object, name);
+    return [layer isKindOfClass:CAShapeLayer.class] ? layer : nil;
+}
+
 static CGPathRef DPFitTabPath(CGPathRef source, CGRect box, CGFloat height) {
     CGFloat from = CGRectGetHeight(box), cut = from - height;
     if (height < from * 0.7) {
@@ -270,47 +287,44 @@ static void DPTabShape_layout(NSView *self, SEL _cmd) {
     if (!shape || *shape != 0) return;
     CGFloat height = NSHeight(self.bounds);
     if (height < 0.5) return;
-    CAShapeLayer *shapeLayer = DPIvarObject(self, "$__lazy_storage_$_shapeLayer");
-    if (![shapeLayer isKindOfClass:CAShapeLayer.class] || !shapeLayer.path || CGPathIsEmpty(shapeLayer.path)) return;
+    CAShapeLayer *shapeLayer = DPShapeLayerIvar(self, "$__lazy_storage_$_shapeLayer");
+    if (!shapeLayer.path || CGPathIsEmpty(shapeLayer.path)) return;
     CGRect box = CGPathGetPathBoundingBox(shapeLayer.path);
     if (CGRectGetHeight(box) <= height + 0.5) return;
     CGPathRef path = DPFitTabPath(shapeLayer.path, box, height);
     if (!path) return;
-    [CATransaction begin];
-    [CATransaction setDisableActions:YES];
-    shapeLayer.path = path;
-    CAShapeLayer *borderMask = DPIvarObject(self, "$__lazy_storage_$_gradientBorderMaskLayer");
-    if ([borderMask isKindOfClass:CAShapeLayer.class]) borderMask.path = path;
-    CALayer *shadow = DPIvarObject(self, "$__lazy_storage_$_shadowLayer");
-    if ([shadow isKindOfClass:CALayer.class]) {
-        NSEdgeInsets *outsets = DPIvar(self, "horizontalShadowOutsets");
-        CGAffineTransform shift = CGAffineTransformMakeTranslation(outsets ? outsets->left : 0, 0);
-        CGPathRef shifted = CGPathCreateCopyByTransformingPath(path, &shift);
-        shadow.shadowPath = shifted;
-        CGPathRelease(shifted);
-    }
-    CAShapeLayer *bottomMask = DPIvarObject(self, "bottomShadowMaskLayer");
-    if ([bottomMask isKindOfClass:CAShapeLayer.class]) {
-        CGMutablePathRef cutout = CGPathCreateMutable();
-        CGPathAddRect(cutout, NULL, bottomMask.bounds);
-        CGAffineTransform shift = CGAffineTransformMakeTranslation(20, 20);
-        CGPathAddPath(cutout, &shift, path);
-        bottomMask.path = cutout;
-        CGPathRelease(cutout);
-    }
-    NSView *rim = DPIvarObject(self, "rimHighlightView");
-    if (rim) {
-        void **slot = DPIvar(rim, "path");
-        if (slot) {
-            CGPathRef old = (CGPathRef)*slot;
-            *slot = (void *)CGPathRetain(path);
-            if (old) CGPathRelease(old);
+    DPWithoutAnimation(^{
+        shapeLayer.path = path;
+        DPShapeLayerIvar(self, "$__lazy_storage_$_gradientBorderMaskLayer").path = path;
+        CALayer *shadow = DPIvarObject(self, "$__lazy_storage_$_shadowLayer");
+        if ([shadow isKindOfClass:CALayer.class]) {
+            NSEdgeInsets *outsets = DPIvar(self, "horizontalShadowOutsets");
+            CGAffineTransform shift = CGAffineTransformMakeTranslation(outsets ? outsets->left : 0, 0);
+            CGPathRef shifted = CGPathCreateCopyByTransformingPath(path, &shift);
+            shadow.shadowPath = shifted;
+            CGPathRelease(shifted);
         }
-        CAShapeLayer *rimShape = DPIvarObject(rim, "$__lazy_storage_$_shapeLayer");
-        if ([rimShape isKindOfClass:CAShapeLayer.class]) rimShape.path = path;
-        rim.needsLayout = YES;
-    }
-    [CATransaction commit];
+        CAShapeLayer *bottomMask = DPShapeLayerIvar(self, "bottomShadowMaskLayer");
+        if (bottomMask) {
+            CGMutablePathRef cutout = CGPathCreateMutable();
+            CGPathAddRect(cutout, NULL, bottomMask.bounds);
+            CGAffineTransform shift = CGAffineTransformMakeTranslation(20, 20);
+            CGPathAddPath(cutout, &shift, path);
+            bottomMask.path = cutout;
+            CGPathRelease(cutout);
+        }
+        NSView *rim = DPIvarObject(self, "rimHighlightView");
+        if (rim) {
+            void **slot = DPIvar(rim, "path");
+            if (slot) {
+                CGPathRef old = (CGPathRef)*slot;
+                *slot = (void *)CGPathRetain(path);
+                if (old) CGPathRelease(old);
+            }
+            DPShapeLayerIvar(rim, "$__lazy_storage_$_shapeLayer").path = path;
+            rim.needsLayout = YES;
+        }
+    });
     CGPathRelease(path);
 }
 
@@ -361,9 +375,8 @@ static NSString *DPVerifyCompactTabRows(DPPatch *patch) {
             uint8_t *kind = DPIvar(shape, "shape");
             if (!kind || *kind != 0) continue;
             for (const char *const *name = layers; *name; name++) {
-                CAShapeLayer *layer = DPIvarObject(shape, *name);
-                if ([layer isKindOfClass:CAShapeLayer.class] && layer.path && !CGPathIsEmpty(layer.path) &&
-                    CGRectGetHeight(CGPathGetPathBoundingBox(layer.path)) > NSHeight(shape.bounds) + 0.5)
+                CAShapeLayer *layer = DPShapeLayerIvar(shape, *name);
+                if (layer.path && !CGPathIsEmpty(layer.path) && CGRectGetHeight(CGPathGetPathBoundingBox(layer.path)) > NSHeight(shape.bounds) + 0.5)
                     return @"a tab's shape is clipped by its row";
             }
         }
@@ -387,7 +400,7 @@ DP_PATCH(DPCompactTabRows) {
     .order = 77,
     .section = @"Sidebar & Tab Bar",
     .title = @"Compact Tab Rows",
-    .detail = @"Make the sidebar's tabs and folders as short as before Dia 1.57, so more fit. Choose Small for rows shorter still, with smaller titles.",
+    .detail = @"Make the sidebar’s tabs and folders as short as before Dia 1.57, so more fit. Choose Small for rows shorter still, with smaller titles.",
     .symbol = @"rectangle.compress.vertical",
     .tint = @"systemTealColor",
     .choice = @"compactTabRowsSize",

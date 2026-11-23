@@ -12,9 +12,7 @@ id DPScriptWindow(NSWindow *window) {
 
 id DPScriptTabIn(id scriptWindow, NSString *tabID) {
     if (!scriptWindow || !tabID) return nil;
-    id tabs = DPValueForKey(scriptWindow, @"appleScriptTabs");
-    if (![tabs isKindOfClass:NSArray.class]) return nil;
-    for (id tab in tabs)
+    for (id tab in DPScriptTabs(scriptWindow))
         if ([DPValueForKey(tab, @"tabId") isEqual:tabID]) return tab;
     return nil;
 }

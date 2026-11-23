@@ -23,18 +23,18 @@ static NSString *DPProxyPath(void) {
 static NSError *gWriteError;
 static NSString *gWritePath;
 
+static void DPRemoveOwnHostFiles(NSString *keptFolder) {
+    for (NSString *dir in DPHostFolders()) {
+        if ([dir isEqual:keptFolder]) continue;
+        NSString *path = [dir stringByAppendingPathComponent:kHostFile];
+        if ([DPHostAt(path)[@"description"] isEqual:kDescription]) [NSFileManager.defaultManager removeItemAtPath:path error:nil];
+    }
+}
+
 static void DPRegisterHost(BOOL on) {
-    NSFileManager *files = NSFileManager.defaultManager;
     gWriteError = nil;
     gWritePath = nil;
-    if (!on) {
-        for (NSString *dir in DPHostFolders()) {
-            NSString *path = [dir stringByAppendingPathComponent:kHostFile];
-            if ([files fileExistsAtPath:path] && [DPHostAt(path)[@"description"] isEqual:kDescription])
-                [files removeItemAtPath:path error:nil];
-        }
-        return;
-    }
+    if (!on) return DPRemoveOwnHostFiles(nil);
     NSString *proxy = DPProxyPath();
     if (!proxy) return;
     NSError *error = nil;
@@ -45,20 +45,14 @@ static void DPRegisterHost(BOOL on) {
         return;
     }
     NSString *path = [hostFolder stringByAppendingPathComponent:kHostFile];
-    BOOL ours = [DPHostAt(path)[@"description"] isEqual:kDescription];
-    if ([files fileExistsAtPath:path] && !ours) return;
+    if ([NSFileManager.defaultManager fileExistsAtPath:path] && ![DPHostAt(path)[@"description"] isEqual:kDescription]) return;
     NSDictionary *manifest = @{ @"name" : kHost, @"description" : kDescription, @"path" : proxy, @"type" : @"stdio", @"allowed_origins" : @[ kExtension ] };
     if (![[NSJSONSerialization dataWithJSONObject:manifest options:NSJSONWritingPrettyPrinted error:nil] writeToFile:path options:NSDataWritingAtomic error:&error]) {
         gWriteError = error;
         gWritePath = path;
         return;
     }
-    for (NSString *dir in DPHostFolders()) {
-        if ([dir isEqualToString:hostFolder]) continue;
-        NSString *stale = [dir stringByAppendingPathComponent:kHostFile];
-        if ([files fileExistsAtPath:stale] && [DPHostAt(stale)[@"description"] isEqual:kDescription])
-            [files removeItemAtPath:stale error:nil];
-    }
+    DPRemoveOwnHostFiles(hostFolder);
 }
 
 static NSString *DPBitwardenProblem(DPPatch *patch) {
@@ -84,6 +78,7 @@ DP_PATCH(DPBitwarden) {
     .symbol = @"shield.lefthalf.filled",
     .tint = @"systemGreenColor",
     .section = @"Passwords",
+    .group = @"passwordManagers",
     .install = DPInstallBitwarden,
     .apply = DPApplyBitwarden,
     .ready = DPBitwardenProblem,

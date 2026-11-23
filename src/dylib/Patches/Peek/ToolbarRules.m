@@ -78,7 +78,7 @@ static BOOL DPPeekCanReveal(DPPeekBarZone *zone) { return DPHideToolbar.on && DP
     BOOL editing = DPPeekEditing(self);
     if (editing && !pinned) self.revealed = YES;
     else if (self.revealed && !editing && (!canReveal || !self.hovering) && !self.hide) self.revealed = NO;
-    NSObject *page = (NSObject *)peek.page;
+    id page = peek.page;
     BOOL outOfSight = !pinned && self.reveal == 0 && DPHideToolbar.progress == 1;
     if (!DPShowLoadingProgress.on || !outOfSight || peek.closing || !page) DPRemoveProgressLine(peek.clip);
     else if ([DPValueForKey(page, @"isLoading") boolValue]) DPShowProgressLine(peek.clip, MAX(0.1, [DPValueForKey(page, @"loadProgress") doubleValue]));

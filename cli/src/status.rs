@@ -1,5 +1,3 @@
-use std::fmt::Write;
-
 use anyhow::Result;
 
 use crate::{
@@ -7,6 +5,7 @@ use crate::{
     env::Env,
     manifest::Manifest,
     prefs::Prefs,
+    tweaks::on_off,
     ui::{self, Spinner, Ui},
 };
 
@@ -27,7 +26,7 @@ pub fn show(env: &Env, ui: &Ui) -> Result<()> {
 }
 
 fn report(env: &Env, spinner: &Spinner) -> Result<Vec<String>> {
-    let manifest = Manifest::load(&env.manifest())?;
+    let manifest = Manifest::load_with_local(&env.manifest(), &env.local_state())?;
     let status = Diapatch::find(env)?.status(spinner)?;
     let none = || "none".to_string();
 
@@ -68,32 +67,12 @@ fn report(env: &Env, spinner: &Spinner) -> Result<Vec<String>> {
     });
 
     let state = manifest.state(&Prefs::new(&env.domain));
-    for (index, patch) in manifest.patches.iter().enumerate() {
-        let mut line = format!(
+    for (index, &on) in state.iter().enumerate() {
+        lines.push(format!(
             "  {:<4} {}",
-            if state[index] { "on" } else { "off" },
-            patch.title
-        );
-        if let Some(required) = manifest
-            .requirement(index)
-            .filter(|&required| state[index] && !state[required])
-        {
-            let _ = write!(
-                line,
-                " (does nothing while {} is off)",
-                manifest.title(required)
-            );
-        }
-        if let Some(cover) = manifest.covered_by(index, &state) {
-            let _ = write!(line, " ({} hides this too)", manifest.title(cover));
-        } else if let Some(disabler) = manifest.hidden_by(index, &state) {
-            let _ = write!(
-                line,
-                " (no difference while {} is on)",
-                manifest.title(disabler)
-            );
-        }
-        lines.push(line);
+            on_off(on),
+            manifest.label(index, &state)
+        ));
     }
     Ok(lines)
 }

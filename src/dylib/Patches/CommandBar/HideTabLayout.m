@@ -69,7 +69,6 @@ static NSArray *DPLayout_elements(NSCollectionViewLayout *self, SEL _cmd, NSRect
         return shown;
     }
     NSMutableArray *kept = [NSMutableArray array];
-    // Expand query rect to cover shifted frozen rows, and omit hidden rows so they can't intercept clicks.
     for (NSCollectionViewLayoutAttributes *each in DPCallOriginal(DPLayout_elements, self, NSInsetRect(rect, 0, -600))) {
         NSCollectionViewLayoutAttributes *frozen = DPFrozenAttributes(self, each);
         if (!frozen.hidden && NSIntersectsRect(frozen.frame, rect)) [kept addObject:frozen];

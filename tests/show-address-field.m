@@ -170,7 +170,6 @@ int main(void) {
         DPSetHover(field, YES);
         check("hover callback ran with incidental=false", gCallbackCalls > 0 && !gCallbackIncidental);
 
-        // Regression: invisible/minimized window restores hover state on apply-off and layout-off.
         DPTestWindow *hiddenWin = [[DPTestWindow alloc] initWithContentRect:NSMakeRect(0, 0, 400, 100)
                                                                   styleMask:NSWindowStyleMaskBorderless
                                                                     backing:NSBackingStoreBuffered
@@ -197,7 +196,6 @@ int main(void) {
         check("layout restores hover once when disabled and clears state",
               !hiddenDelayed->isHoverActive && !hiddenTracker->isHovered && DPGet(hiddenField, &DPForcedKey) == nil);
 
-        // Regression: missing ivars never crash.
         NSView *plainView = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 100, 30)];
         check("missing hoverTracker ivar does not crash", !DPShowsHover(plainView));
         DPSetHover(plainView, YES);

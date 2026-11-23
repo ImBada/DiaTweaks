@@ -181,20 +181,17 @@ int main(void) {
         FakeBrowser *browser = [[FakeBrowser alloc] initWithLabel:@"main" ready:YES enabled:YES];
         NSAppleEventDescriptor *nullReply = [NSAppleEventDescriptor nullDescriptor];
 
-        // 1. Standard external GURL event
         reset(browser);
         [manager handleEvent:makeGetURL(@"https://docs.ankiweb.net/intro.html", getpid() + 1, YES) withReplyEvent:nullReply];
         expect(browser.sentPayloads.count == 1 && gOriginalEvents.count == 0, @"external https GURL routes to Little Dia");
         expect([parseJSON(browser.sentPayloads[0])[@"url"] isEqual:@"https://docs.ankiweb.net/intro.html"], @"URL preserved");
 
-        // 2. Uppercase scheme, unencoded Unicode / spaces / brackets, surrounding whitespace
         reset(browser);
         [manager handleEvent:makeGetURL(@"  HTTPS://jisho.org/search/食べる [1] \n", getpid() + 1, YES) withReplyEvent:nullReply];
         expect(browser.sentPayloads.count == 1 && gOriginalEvents.count == 0, @"trimmed Unicode/spaced URL routes to Little Dia");
         NSString *encoded = parseJSON(browser.sentPayloads[0])[@"url"];
         expect([encoded hasPrefix:@"HTTPS://jisho.org/search/"] && [encoded containsString:@"%20"], @"invalid characters percent-encoded");
 
-        // 3. typeAEList with 1 and 2 URLs
         reset(browser);
         NSAppleEventDescriptor *list1 = [NSAppleEventDescriptor listDescriptor];
         [list1 insertDescriptor:[NSAppleEventDescriptor descriptorWithString:@"https://example.com/one"] atIndex:1];
@@ -208,14 +205,12 @@ int main(void) {
         [manager handleEvent:makeEvent(kInternetEventClass, kAEGetURL, list2, getpid() + 1, YES, nil) withReplyEvent:nullReply];
         expect(browser.sentPayloads.count == 2 && gOriginalEvents.count == 0, @"2-item typeAEList routes both URLs to Little Dia");
 
-        // 4. Non-web schemes and non-GURL events pass through
         reset(browser);
         [manager handleEvent:makeGetURL(@"file:///tmp/notes.html", getpid() + 1, YES) withReplyEvent:nullReply];
         [manager handleEvent:makeGetURL(@"mailto:test@example.com", getpid() + 1, YES) withReplyEvent:nullReply];
         [manager handleEvent:makeEvent(kCoreEventClass, kAEOpenDocuments, [NSAppleEventDescriptor descriptorWithString:@"https://example.com"], getpid() + 1, YES, nil) withReplyEvent:nullReply];
         expect(browser.sentPayloads.count == 0 && gOriginalEvents.count == 3, @"non-web schemes and non-GURL pass straight through");
 
-        // 5. Self-sent event via keySenderPIDAttr stays a tab; target keyAddressAttr == self without spid is still external
         reset(browser);
         [manager handleEvent:makeGetURL(@"https://example.com/self-spid", getpid(), YES) withReplyEvent:nullReply];
         expect(browser.sentPayloads.count == 0 && gOriginalEvents.count == 1, @"self-sent GURL via keySenderPIDAttr stays a tab");
@@ -226,13 +221,11 @@ int main(void) {
         [manager handleEvent:makeEvent(kInternetEventClass, kAEGetURL, [NSAppleEventDescriptor descriptorWithString:@"https://example.com/target-self"], 0, NO, targetSelf) withReplyEvent:nullReply];
         expect(browser.sentPayloads.count == 1 && gOriginalEvents.count == 0, @"incoming GURL targeted at self without spid still routes to Little Dia");
 
-        // 6. External event without keySenderPIDAttr and with bundle-ID address routes to Little Dia
         reset(browser);
         NSAppleEventDescriptor *bundleAddr = [NSAppleEventDescriptor descriptorWithDescriptorType:typeApplicationBundleID data:[@"net.ankiweb.dtop" dataUsingEncoding:NSUTF8StringEncoding]];
         [manager handleEvent:makeEvent(kInternetEventClass, kAEGetURL, [NSAppleEventDescriptor descriptorWithString:@"https://example.com/bundle-addr"], 0, NO, bundleAddr) withReplyEvent:nullReply];
         expect(browser.sentPayloads.count == 1 && gOriginalEvents.count == 0, @"external GURL with bundle-ID addr and no spid routes to Little Dia");
 
-        // 7. Off-tweak invariant and Follow Rules
         reset(browser);
         DPLittleDia.on = NO;
         [manager handleEvent:makeGetURL(@"https://example.com/off", getpid() + 1, YES) withReplyEvent:nullReply];
@@ -245,7 +238,6 @@ int main(void) {
         [delegate application:NSApp openURLs:@[ [NSURL URLWithString:@"https://example.com/rules-delegate"] ]];
         expect(browser.sentPayloads.count == 0 && gOriginalEvents.count == 1 && gOriginalOpenURLs.count == 1, @"Follow Rules passes both GURL and openURLs untouched");
 
-        // 8. AppDelegate application:openURLs: routing, mixed URLs, and fallback
         reset(browser);
         [delegate application:NSApp openURLs:@[ [NSURL URLWithString:@"https://example.com/direct"] ]];
         expect(browser.sentPayloads.count == 1 && gOriginalOpenURLs.count == 0, @"application:openURLs: routes external https URL to Little Dia");
@@ -264,7 +256,6 @@ int main(void) {
                @"application:openURLs: falls back to original when Little Dia is unavailable");
         browser.context.extensions.info.enabled = YES;
 
-        // 9. Fractional saved coordinates round to integer JSON values for chrome.windows.create
         reset(browser);
         DPLittleDiaRemember.on = YES;
         NSRect screenFrame = NSScreen.screens.firstObject ? NSScreen.screens.firstObject.frame : NSMakeRect(0, 0, 1440, 900);
@@ -278,7 +269,6 @@ int main(void) {
             expect([req[@"width"] integerValue] == 801 && [req[@"height"] integerValue] == 601, @"fractional dimensions rounded to integers");
         }
 
-        // 10. Hidden Dia + multiple windows/profiles: DPLinkArrived orders windows out before routing
         reset(browser);
         NSWindow *backWin = invisibleWindow(), *frontWin = invisibleWindow();
         FakeBrowser *frontBrowser = [[FakeBrowser alloc] initWithLabel:@"front" ready:YES enabled:YES];
@@ -298,7 +288,6 @@ int main(void) {
         [frontWin orderOut:nil];
         [backWin orderOut:nil];
 
-        // 11. Incognito/disabled front browser falls back to ready normal window's browser
         reset(browser);
         FakeBrowser *privateBrowser = [[FakeBrowser alloc] initWithLabel:@"private" ready:YES enabled:NO];
         NSWindow *normalWin = invisibleWindow();
@@ -311,7 +300,6 @@ int main(void) {
                @"front browser without extension falls back to ready normal browser");
         [normalWin orderOut:nil];
 
-        // 12. Disabled extension everywhere falls back cleanly and restores put-away windows
         reset(browser);
         FakeBrowser *disabledBrowser = [[FakeBrowser alloc] initWithLabel:@"disabled" ready:YES enabled:NO];
         NSWindow *veiledWin = invisibleWindow();

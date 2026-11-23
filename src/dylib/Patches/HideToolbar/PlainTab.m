@@ -91,10 +91,7 @@ static void DPApplyPlainSelectedTab(DPPatch *patch) {
             DPSet(fill, &DPPlainAppliedKey, nil);
             NSColor *dia = DPGet(fill, &DPFillKey);
             if (dia && fill.layer.backgroundColor) {
-                [CATransaction begin];
-                [CATransaction setDisableActions:YES];
-                fill.layer.backgroundColor = dia.CGColor;
-                [CATransaction commit];
+                DPWithoutAnimation(^{ fill.layer.backgroundColor = dia.CGColor; });
             }
         }
         fill.needsDisplay = YES;
@@ -115,11 +112,11 @@ DP_PATCH(DPPlainSelectedTab) {
     .key = @"plainSelectedTab",
     .order = 46,
     .title = @"Hide Site Color in Tab Bar",
-    .detail = @"While the toolbar is hidden, show the selected tab in the page color instead of the site's.",
+    .detail = @"While the toolbar is hidden, show the selected tab in the page color instead of the site’s.",
     .symbol = @"paintbrush.fill",
     .tint = @"systemIndigoColor",
     .requires = @"hideToolbar",
-    .section = @"While It's Hidden",
+    .section = @"While It’s Hidden",
     .classes = DPClasses(DPDiaColorView, DPDiaTabShape, DPDiaTabStrip),
     .install = DPInstallPlainSelectedTab,
     .apply = DPApplyPlainSelectedTab,

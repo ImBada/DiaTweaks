@@ -5,13 +5,15 @@ static const NSUInteger DPMaxReports = 12;
 static NSMapTable<NSView *, NSMutableDictionary<NSString *, NSNumber *> *> *DPCounts;
 static NSMutableSet<NSString *> *DPReported;
 static NSString *DPReportPath;
-static const NSUInteger DPRecentCount = 24;
-static NSMutableArray<NSString *> *DPRecent;
+
+typedef struct { const char *cls, *superCls; const void *view; NSRect from, to; } DPFrameChange;
+enum { DPRecentCount = 24 };
+static DPFrameChange DPRecent[DPRecentCount];
+static NSUInteger DPRecentTotal;
 
 static void DPRemember(NSView *view, NSRect from, NSRect to) {
     if (!NSThread.isMainThread || !view.window) return;
-    [DPRecent addObject:[NSString stringWithFormat:@"%s %p %@ -> %@ (in %s)", object_getClassName(view), view, NSStringFromRect(from), NSStringFromRect(to), object_getClassName(view.superview)]];
-    if (DPRecent.count > DPRecentCount) [DPRecent removeObjectAtIndex:0];
+    DPRecent[DPRecentTotal++ % DPRecentCount] = (DPFrameChange){object_getClassName(view), object_getClassName(view.superview), (__bridge const void *)view, from, to};
 }
 
 static void DPReport(NSView *view, NSString *kind) {
@@ -21,7 +23,10 @@ static void DPReport(NSView *view, NSString *kind) {
     NSMutableString *out = [NSMutableString stringWithFormat:@"== %@ %@ past %lu in one run loop turn\n", NSDate.date, key, (unsigned long)DPLoopLimit];
     for (NSView *up = view; up; up = up.superview) [out appendFormat:@"  in %s %@%@\n", object_getClassName(up), NSStringFromRect(up.frame), up.hidden ? @" hidden" : @""];
     [out appendString:@"  latest frame changes, oldest first:\n"];
-    for (NSString *change in DPRecent) [out appendFormat:@"    %@\n", change];
+    for (NSUInteger i = DPRecentTotal > DPRecentCount ? DPRecentTotal - DPRecentCount : 0; i < DPRecentTotal; i++) {
+        DPFrameChange change = DPRecent[i % DPRecentCount];
+        [out appendFormat:@"    %s %p %@ -> %@ (in %s)\n", change.cls, change.view, NSStringFromRect(change.from), NSStringFromRect(change.to), change.superCls];
+    }
     for (NSString *frame in NSThread.callStackSymbols) [out appendFormat:@"  %@\n", frame];
     NSFileHandle *file = [NSFileHandle fileHandleForWritingAtPath:DPReportPath];
     if (!file) {
@@ -74,7 +79,6 @@ void DPTraceLayoutLoops(void) {
     DPReportPath = DPBesideDylib(@"layout-loops.txt");
     DPCounts = [NSMapTable weakToStrongObjectsMapTable];
     DPReported = [NSMutableSet set];
-    DPRecent = [NSMutableArray array];
     DPHookClass(NSView.class, @selector(setNeedsLayout:), (IMP)DPView_setNeedsLayout);
     DPHookClass(NSView.class, @selector(setNeedsUpdateConstraints:), (IMP)DPView_setNeedsUpdateConstraints);
     DPHookClass(NSView.class, @selector(setFrameSize:), (IMP)DPView_setFrameSize);

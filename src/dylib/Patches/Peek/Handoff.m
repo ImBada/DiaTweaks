@@ -165,7 +165,6 @@ void DPPeekPrepareHandoff(DPPeekCard *peek, void (^complete)(void)) {
     NSWindow *window = peek.window;
     NSScreen *primary = NSScreen.screens.firstObject;
     DPPeekWindowCapture capture = DPPeekCaptureOwnWindow();
-    // An occluded window has nothing to bridge, and its image would be stale.
     if (!capture || !primary || !window.isVisible || !(window.occlusionState & NSWindowOcclusionStateVisible) ||
         peek.isHiddenOrHasHiddenAncestor || window.windowNumber <= 0 || window.sharingType == NSWindowSharingNone) return complete();
     NSRect frame = [window convertRectToScreen:[peek convertRect:peek.bounds toView:nil]];

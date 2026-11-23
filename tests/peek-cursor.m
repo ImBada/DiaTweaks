@@ -80,7 +80,6 @@ int main(void) {
         [peek addCursorRect:peek.bounds cursor:NSCursor.pointingHandCursor];
         NSCAssert(peek.rects.count == 1 && NSEqualRects(peek.rects[0].rectValue, peek.bounds), @"Peek keeps its renderer cursor rectangles");
 
-        // Hidden background Peek card (Tab A parked while Tab B is active) must NEVER steal cursor updates or register cursor rects!
         card.hidden = YES;
         [under.rects removeAllObjects];
         [peek.rects removeAllObjects];
@@ -92,7 +91,6 @@ int main(void) {
         [peek addCursorRect:peek.bounds cursor:NSCursor.pointingHandCursor];
         NSCAssert(peek.rects.count == 0, @"hidden Peek registers zero cursor rectangles");
 
-        // Tab B opens its own Peek P2 while Tab A's P1 remains hidden!
         DPPeekCard *card2 = [[DPPeekCard alloc] initWithFrame:NSMakeRect(100, 100, 600, 400)];
         [window.contentView addSubview:card2];
         RenderWidgetHostViewCocoa *peek2 = Page(card2, NSMakeRect(50, 50, 500, 300));

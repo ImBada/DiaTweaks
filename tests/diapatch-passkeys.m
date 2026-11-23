@@ -56,11 +56,9 @@ static void testApplicationsCopy(void) {
     NSString *clone = [copyFolder stringByAppendingPathComponent:@"Dia.app"];
     NSString *cloneExe = [clone stringByAppendingPathComponent:@"Contents/MacOS/Dia"];
 
-    // 1. Missing pristine returns nil and does not create clone or temp leftovers.
     NSCAssert(applicationsCopyIn(copyFolder, pristine) == nil, @"missing pristine must return nil");
     NSCAssert(![fm fileExistsAtPath:clone], @"clone must not exist when pristine is missing");
 
-    // 2. Initial clone succeeds, strips quarantine xattr, and leaves no temp bundles.
     writeBundle(pristine, @"v1-binary");
     const char *q = "0081;00000000;Test;";
     setxattr(pristine.fileSystemRepresentation, "com.apple.quarantine", q, strlen(q), 0, 0);
@@ -74,20 +72,17 @@ static void testApplicationsCopy(void) {
     NSCAssert(getxattr(clone.fileSystemRepresentation, "com.apple.quarantine", NULL, 0, 0, 0) < 0, @"quarantine stripped");
     assertNoTempBundles(copyFolder);
 
-    // 3. Failed refresh (pristine disappeared) does NOT destroy existing clone or leak temp bundles.
     [fm removeItemAtPath:pristine error:nil];
     NSCAssert(applicationsCopyIn(copyFolder, pristine) == nil, @"missing pristine returns nil");
     NSCAssert([[NSString stringWithContentsOfFile:cloneExe encoding:NSUTF8StringEncoding error:nil] isEqual:@"v1-binary"], @"existing clone preserved");
     assertNoTempBundles(copyFolder);
 
-    // 4. Atomic swap on pristine update replaces clone cleanly with no temp leftovers.
     writeBundle(pristine, @"v2-updated-binary");
     got = applicationsCopyIn(copyFolder, pristine);
     NSCAssert([got isEqualToString:clone], @"updated clone should succeed");
     NSCAssert([[NSString stringWithContentsOfFile:cloneExe encoding:NSUTF8StringEncoding error:nil] isEqual:@"v2-updated-binary"], @"clone has v2");
     assertNoTempBundles(copyFolder);
 
-    // 5. Concurrent multi-process clones serialize via flock with zero race failures or temp leaks.
     writeBundle(pristine, @"v3-concurrent-test-binary");
     pid_t children[6];
     const char *argv[] = { gSelfExe, "--child-copy", copyFolder.fileSystemRepresentation, pristine.fileSystemRepresentation, NULL };
@@ -102,7 +97,6 @@ static void testApplicationsCopy(void) {
     NSCAssert([[NSString stringWithContentsOfFile:cloneExe encoding:NSUTF8StringEncoding error:nil] isEqual:@"v3-concurrent-test-binary"], @"clone has v3");
     assertNoTempBundles(copyFolder);
 
-    // 6. Unwritable copyFolder fails cleanly without leaving temp bundles or crashing.
     NSString *roFolder = [root stringByAppendingPathComponent:@"readonly"];
     [fm createDirectoryAtPath:roFolder withIntermediateDirectories:YES attributes:nil error:nil];
     chmod(roFolder.fileSystemRepresentation, 0555);
@@ -125,19 +119,16 @@ static NSDictionary *decodeFramed(uint32_t header, const void *body, size_t body
 }
 
 static void testPasskeyMessageValidation(void) {
-    // 1. Zero length, huge 32-bit length (4 GiB), and > 1 MiB cap all rejected without large allocation.
     NSCAssert(decodeFramed(0, "", 0) == nil, @"zero-length header rejected");
     NSCAssert(decodeFramed(0xffffffffU, "{}", 2) == nil, @"4 GiB header rejected");
     NSCAssert(decodeFramed(kMaxMessageLength + 1, "{}", 2) == nil, @"over-1-MiB header rejected");
 
-    // 2. Truncated, malformed, and non-dictionary JSON all rejected.
     NSCAssert(decodeFramed(100, "{}", 2) == nil, @"truncated body rejected");
     NSCAssert(decodeFramed(3, "{no", 3) == nil, @"invalid JSON rejected");
     NSCAssert(decodeFramed(5, "[1,2]", 5) == nil, @"array JSON rejected");
     NSCAssert(decodeFramed(4, "null", 4) == nil, @"null JSON rejected");
     NSCAssert(decodeFramed(4, "\"hi\"", 4) == nil, @"string JSON rejected");
 
-    // 3. Valid framed dictionary (including exact 1 MiB boundary).
     const char *ok = "{\"kind\":\"get\",\"origin\":\"https://example.com\",\"options\":{}}";
     NSDictionary *parsed = decodeFramed((uint32_t)strlen(ok), ok, strlen(ok));
     NSCAssert(validRequest(parsed), @"valid framed request accepted");
@@ -148,7 +139,6 @@ static void testPasskeyMessageValidation(void) {
     NSDictionary *maxParsed = decodeFramed(kMaxMessageLength, maxMsg.bytes, maxMsg.length);
     NSCAssert([maxParsed[@"a"] isEqual:@1], @"exact 1 MiB message accepted");
 
-    // 4. validRequest rejects missing/wrong-type fields; runInHelper guards nil fields without throwing.
     NSCAssert(!validRequest(nil), @"nil request rejected");
     NSCAssert(!validRequest(@{}), @"empty dict rejected");
     NSCAssert(!validRequest(@{ @"kind" : @"get", @"origin" : @"https://example.com" }), @"missing options rejected");
@@ -216,32 +206,27 @@ static void testPasskeyHostErrorPathsAndFDCleanup(void) {
     NSString *root = makeTempDir();
     NSData *validReq = frameJSON(@{ @"kind" : @"get", @"origin" : @"https://example.com", @"options" : @{} });
 
-    // 1. Oversized header exits cleanly with code 1 and zero leaked fds.
     uint32_t huge = 0xffffffffU;
     int code = 0;
     BOOL leaked = YES;
     NSDictionary *reply = runHostChild(root, [NSData dataWithBytes:&huge length:4], YES, &code, &leaked);
     NSCAssert(code == 1 && !leaked && reply == nil, @"oversized header must fail cleanly (code=%d leaked=%d)", code, leaked);
 
-    // 2. Request missing options field exits cleanly with code 1 and zero leaked fds.
     reply = runHostChild(root, frameJSON(@{ @"kind" : @"get", @"origin" : @"https://example.com" }), YES, &code, &leaked);
     NSCAssert(code == 1 && !leaked && reply == nil, @"missing options must fail cleanly (code=%d leaked=%d)", code, leaked);
 
-    // 3. Lock open() failure (home is a regular file) returns error JSON with zero leaked fds.
     NSString *fileHome = [root stringByAppendingPathComponent:@"not-a-dir"];
     [@"x" writeToFile:fileHome atomically:YES encoding:NSUTF8StringEncoding error:nil];
     reply = runHostChild(fileHome, validReq, NO, &code, &leaked);
     NSCAssert(code == 1 && !leaked && [reply[@"error"][@"name"] isEqual:@"NotAllowedError"],
               @"open() failure must return error JSON without fd leak (code=%d leaked=%d reply=%@)", code, leaked, reply);
 
-    // 4. launchHelper() failure after pipe() succeeds (pristine Dia missing) cleans up all 4 pipe fds + lock.
     NSString *emptyHome = [root stringByAppendingPathComponent:@"empty-home"];
     [fm createDirectoryAtPath:emptyHome withIntermediateDirectories:YES attributes:nil error:nil];
     reply = runHostChild(emptyHome, validReq, NO, &code, &leaked);
     NSCAssert(code == 1 && !leaked && [reply[@"error"][@"name"] isEqual:@"NotAllowedError"],
               @"launchHelper failure must close all pipes and lock (code=%d leaked=%d reply=%@)", code, leaked, reply);
 
-    // 5. Lock held by another fd + EOF cancellation closes lock cleanly with zero leaked fds.
     int held = openPasskeyLock(emptyHome);
     NSCAssert(held >= 0 && flock(held, LOCK_EX | LOCK_NB) == 0, @"parent lock failed");
     reply = runHostChild(emptyHome, validReq, YES, &code, &leaked);
@@ -296,6 +281,85 @@ static int runTool(NSArray<NSString *> *argv) {
     return task.terminationStatus;
 }
 
+static void testHeadlessApp(void) {
+    NSFileManager *fm = NSFileManager.defaultManager;
+    NSString *root = makeTempDir();
+    NSString *app = [root stringByAppendingPathComponent:@"copy/Dia.app"];
+    NSString *exe = [app stringByAppendingPathComponent:@"Contents/MacOS/Dia"];
+    NSString *frameworks = [app stringByAppendingPathComponent:@"Contents/Frameworks"];
+    NSString *resources = [app stringByAppendingPathComponent:@"Contents/Resources"];
+    writeBundle(app, @"genuine-binary");
+    writeInfoPlist(app, @"1.59.0", @"91402");
+    [fm createDirectoryAtPath:frameworks withIntermediateDirectories:YES attributes:nil error:nil];
+    [fm createDirectoryAtPath:resources withIntermediateDirectories:YES attributes:nil error:nil];
+
+    NSDictionary *original = [NSDictionary dictionaryWithContentsOfFile:[app stringByAppendingPathComponent:@"Contents/Info.plist"]];
+    NSCAssert(original[@"LSUIElement"] == nil, @"fixture must not already be a UIElement");
+
+    NSString *wrapper = headlessApp(app);
+    NSCAssert([wrapper isEqualToString:[root stringByAppendingPathComponent:@"copy/Headless.app"]], @"wrapper sits beside the app, got %@", wrapper);
+    NSDictionary *headless = [NSDictionary dictionaryWithContentsOfFile:[wrapper stringByAppendingPathComponent:@"Contents/Info.plist"]];
+    NSCAssert([headless[@"LSUIElement"] boolValue], @"wrapper Info.plist sets LSUIElement");
+    NSCAssert([headless[@"CFBundleIdentifier"] isEqual:@"company.thebrowser.dia"], @"wrapper keeps the bundle ID 1Password matches");
+    NSCAssert([headless[@"CFBundleVersion"] isEqual:@"91402"], @"wrapper keeps the build Dia reads");
+
+    NSString *link = [wrapper stringByAppendingPathComponent:@"Contents/MacOS/Dia"];
+    NSString *target = [fm destinationOfSymbolicLinkAtPath:link error:nil];
+    NSCAssert([target hasPrefix:@"../"], @"executable link is relative so the folder can move, got %@", target);
+    NSCAssert([[link stringByResolvingSymlinksInPath] isEqual:[exe stringByResolvingSymlinksInPath]], @"executable link resolves to the genuine binary");
+    NSCAssert([[NSString stringWithContentsOfFile:link encoding:NSUTF8StringEncoding error:nil] isEqual:@"genuine-binary"], @"executable link reads through to the genuine binary");
+    NSCAssert([[frameworks stringByResolvingSymlinksInPath] isEqual:[[wrapper stringByAppendingPathComponent:@"Contents/Frameworks"] stringByResolvingSymlinksInPath]],
+              @"Frameworks link resolves to the app's frameworks");
+    NSCAssert([[resources stringByResolvingSymlinksInPath] isEqual:[[wrapper stringByAppendingPathComponent:@"Contents/Resources"] stringByResolvingSymlinksInPath]],
+              @"Resources link resolves to the app's resources");
+
+    NSCAssert([headlessApp(app) isEqualToString:wrapper], @"second call returns the same wrapper");
+    writeInfoPlist(app, @"1.60.0", @"92000");
+    NSCAssert([headlessApp(app) isEqualToString:wrapper], @"wrapper survives an app update");
+    headless = [NSDictionary dictionaryWithContentsOfFile:[wrapper stringByAppendingPathComponent:@"Contents/Info.plist"]];
+    NSCAssert([headless[@"CFBundleVersion"] isEqual:@"92000"] && [headless[@"LSUIElement"] boolValue], @"wrapper follows the app's new Info.plist");
+
+    NSString *bare = [root stringByAppendingPathComponent:@"bare/Dia.app"];
+    writeBundle(bare, @"bare-binary");
+    NSCAssert(headlessApp(bare) == nil, @"missing Info.plist returns nil");
+    NSCAssert(![fm fileExistsAtPath:[root stringByAppendingPathComponent:@"bare/Headless.app"]], @"no wrapper is left behind");
+
+    NSString *readonly = [root stringByAppendingPathComponent:@"readonly"];
+    [fm createDirectoryAtPath:readonly withIntermediateDirectories:YES attributes:nil error:nil];
+    chmod(readonly.fileSystemRepresentation, 0555);
+    NSCAssert(headlessApp([readonly stringByAppendingPathComponent:@"Dia.app"]) == nil, @"unwritable folder returns nil");
+    chmod(readonly.fileSystemRepresentation, 0755);
+
+    NSString *raceWrapper = [root stringByAppendingPathComponent:@"copy/Headless.app"];
+    NSString *raceLink = [raceWrapper stringByAppendingPathComponent:@"Contents/MacOS/Dia"];
+    enum { kWorkers = 8, kRounds = 10 };
+    const char *raceArgv[] = { gSelfExe, "--child-headless", app.fileSystemRepresentation, NULL };
+    for (int round = 0; round < kRounds; round++) {
+        if (round % 2 == 0) [fm removeItemAtPath:raceWrapper error:nil];
+        else writeInfoPlist(app, round % 4 == 1 ? @"1.60.0" : @"1.59.0", round % 4 == 1 ? @"92000" : @"91402");
+        pid_t children[kWorkers];
+        for (int i = 0; i < kWorkers; i++)
+            NSCAssert(posix_spawn(&children[i], gSelfExe, NULL, NULL, (char *const *)raceArgv, environ) == 0, @"posix_spawn failed");
+        int statuses[kWorkers] = { 0 }, reaped = 0, visible = 0, vanished = 0;
+        while (reaped < kWorkers) {
+            struct stat info;
+            if (stat(raceLink.fileSystemRepresentation, &info) == 0) visible = 1;
+            else if (visible && errno == ENOENT) vanished++;
+            for (int i = 0; i < kWorkers; i++) {
+                if (children[i] > 0 && waitpid(children[i], &statuses[i], WNOHANG) == children[i]) {
+                    children[i] = 0;
+                    reaped++;
+                }
+            }
+        }
+        for (int i = 0; i < kWorkers; i++)
+            NSCAssert(WIFEXITED(statuses[i]) && WEXITSTATUS(statuses[i]) == 0, @"concurrent headlessApp worker %d failed (status %d)", i, statuses[i]);
+        NSCAssert(vanished == 0, @"the executable link went missing %d times while other launches were spawning", vanished);
+    }
+
+    [fm removeItemAtPath:root error:nil];
+}
+
 static void testApplicationsCopyUpgradeInvalidation(void) {
     NSFileManager *fm = NSFileManager.defaultManager;
     NSString *root = makeTempDir();
@@ -305,12 +369,11 @@ static void testApplicationsCopyUpgradeInvalidation(void) {
     NSString *pristineExe = [pristine stringByAppendingPathComponent:@"Contents/MacOS/Dia"];
     NSString *cloneExe = [clone stringByAppendingPathComponent:@"Contents/MacOS/Dia"];
 
-    // 1. Hotfix build update: SAME executable size + SAME exact mtime + SAME short version, DIFFERENT CFBundleVersion.
+    // Hotfix build update: SAME executable size + SAME exact mtime + SAME short version, DIFFERENT CFBundleVersion.
     [fm createDirectoryAtPath:pristineExe.stringByDeletingLastPathComponent withIntermediateDirectories:YES attributes:nil error:nil];
     NSCAssert([makeMachOWithUUID(0x11) writeToFile:pristineExe atomically:YES], @"write uuid 0x11");
     setExactMtime(pristineExe, 1700000000, 123456000);
     writeInfoPlist(pristine, @"1.58.0", @"91177");
-    // Pre-existing orphaned temp bundle from a killed prior copy must be swept.
     NSString *orphan = [copyFolder stringByAppendingPathComponent:@"Dia.app.999999"];
     writeBundle(orphan, @"orphan");
     NSCAssert([applicationsCopyIn(copyFolder, pristine) isEqualToString:clone], @"initial clone with Info.plist");
@@ -321,19 +384,16 @@ static void testApplicationsCopyUpgradeInvalidation(void) {
     NSDictionary *cloneInfo = [NSDictionary dictionaryWithContentsOfFile:[clone stringByAppendingPathComponent:@"Contents/Info.plist"]];
     NSCAssert([cloneInfo[@"CFBundleVersion"] isEqual:@"91178"], @"clone updated to hotfix build 91178, got %@", cloneInfo[@"CFBundleVersion"]);
 
-    // 2. Short version update (1.58.0 -> 1.59.0) with same build/size/mtime refreshes clone.
     writeInfoPlist(pristine, @"1.59.0", @"91178");
     NSCAssert([applicationsCopyIn(copyFolder, pristine) isEqualToString:clone], @"short version change refreshes clone");
     cloneInfo = [NSDictionary dictionaryWithContentsOfFile:[clone stringByAppendingPathComponent:@"Contents/Info.plist"]];
     NSCAssert([cloneInfo[@"CFBundleShortVersionString"] isEqual:@"1.59.0"], @"clone updated to 1.59.0");
 
-    // 3. Mach-O LC_UUID change with identical size, mtime, and Info.plist refreshes clone.
     NSCAssert([makeMachOWithUUID(0x22) writeToFile:pristineExe atomically:YES], @"write uuid 0x22");
     setExactMtime(pristineExe, 1700000000, 123456000);
     NSCAssert([applicationsCopyIn(copyFolder, pristine) isEqualToString:clone], @"LC_UUID change refreshes clone");
     NSCAssert([machOUUID(cloneExe) isEqualToData:machOUUID(pristineExe)], @"clone LC_UUID matches updated pristine");
 
-    // 4. Signed bundle: tampering with clone's code signature (restoring exact size & mtime) invalidates cache.
     NSString *src = [root stringByAppendingPathComponent:@"stub.c"];
     NSCAssert([@"int main(void){return 0;}\n" writeToFile:src atomically:YES encoding:NSUTF8StringEncoding error:nil], @"write stub.c");
     NSCAssert(runTool(@[ @"/usr/bin/clang", @"-arch", @"arm64", src, @"-o", pristineExe ]) == 0, @"compile arm64 stub");
@@ -351,7 +411,6 @@ static void testApplicationsCopyUpgradeInvalidation(void) {
     NSCAssert([applicationsCopyIn(copyFolder, pristine) isEqualToString:clone], @"repairs damaged signed clone");
     NSCAssert([fm fileExistsAtPath:cloneRes] && [origHash isEqualToData:codeHashOnDisk(clone)], @"repaired signed clone is valid");
 
-    // 5. Broken symlink at destination clone path is replaced cleanly.
     [fm removeItemAtPath:clone error:nil];
     NSCAssert([fm createSymbolicLinkAtPath:clone withDestinationPath:@"/nonexistent/broken" error:nil], @"create broken symlink");
     NSCAssert([applicationsCopyIn(copyFolder, pristine) isEqualToString:clone], @"replaces broken symlink with fresh clone");
@@ -419,6 +478,19 @@ int main(int argc, char *argv[]) {
             NSString *clone = [copyFolder stringByAppendingPathComponent:@"Dia.app"];
             return [applicationsCopyIn(copyFolder, pristine) isEqualToString:clone] ? 0 : 1;
         }
+        if (argc == 3 && !strcmp(argv[1], "--child-headless")) {
+            NSString *app = @(argv[2]);
+            NSString *link = [[app.stringByDeletingLastPathComponent stringByAppendingPathComponent:@"Headless.app"] stringByAppendingPathComponent:@"Contents/MacOS/Dia"];
+            if (!headlessApp(app)) return 1;
+            struct timeval start, now;
+            gettimeofday(&start, NULL);
+            do {
+                struct stat info;
+                if (stat(link.fileSystemRepresentation, &info) != 0) return 2;
+                gettimeofday(&now, NULL);
+            } while ((now.tv_sec - start.tv_sec) * 1000000 + (now.tv_usec - start.tv_usec) < 50000);
+            return 0;
+        }
         if (argc == 3 && !strcmp(argv[1], "--child-handoff")) {
             setenv(DPHandoffVariable, argv[2], 1);
             return DPRunPasswordsHandoff();
@@ -430,6 +502,7 @@ int main(int argc, char *argv[]) {
             return after != before ? 99 : rc;
         }
         testApplicationsCopy();
+        testHeadlessApp();
         testApplicationsCopyUpgradeInvalidation();
         testPasswordsHandoffWithClosedStdin();
         testPasskeyMessageValidation();

@@ -21,21 +21,21 @@ NSView *DPPeekChatHolder(NSWindow *window, NSView *pane) {
     return nil;
 }
 
+static id DPPeekObserveFrame(DPPeekCard *peek, NSView *view) {
+    __weak DPPeekCard *weak = peek;
+    view.postsFrameChangedNotifications = YES;
+    return [NSNotificationCenter.defaultCenter addObserverForName:NSViewFrameDidChangeNotification object:view queue:nil
+                                                       usingBlock:^(NSNotification *note) { [weak followPane]; }];
+}
+
 NSArray *DPPeekWatchPaneAncestors(DPPeekCard *peek, NSView *pane, NSView *holder) {
     NSMutableArray *tokens = [NSMutableArray array];
-    __weak DPPeekCard *weak = peek;
     BOOL sawHolder = NO;
     for (NSView *view = pane; view; view = view.superview) {
-        view.postsFrameChangedNotifications = YES;
-        [tokens addObject:[NSNotificationCenter.defaultCenter addObserverForName:NSViewFrameDidChangeNotification object:view queue:nil
-                                                                      usingBlock:^(NSNotification *note) { [weak followPane]; }]];
+        [tokens addObject:DPPeekObserveFrame(peek, view)];
         if (view == holder) { sawHolder = YES; break; }
     }
-    if (holder && !sawHolder) {
-        holder.postsFrameChangedNotifications = YES;
-        [tokens addObject:[NSNotificationCenter.defaultCenter addObserverForName:NSViewFrameDidChangeNotification object:holder queue:nil
-                                                                      usingBlock:^(NSNotification *note) { [weak followPane]; }]];
-    }
+    if (holder && !sawHolder) [tokens addObject:DPPeekObserveFrame(peek, holder)];
     return tokens;
 }
 

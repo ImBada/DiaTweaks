@@ -97,11 +97,28 @@ fn is_true_string(text: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use core_foundation_sys::preferences::CFPreferencesSetAppValue;
+
+    fn clear(prefs: &Prefs, keys: &[&str]) {
+        for key in keys {
+            let key = CFString::new(key);
+            unsafe {
+                CFPreferencesSetAppValue(
+                    key.as_concrete_TypeRef(),
+                    std::ptr::null(),
+                    prefs.domain.as_concrete_TypeRef(),
+                );
+            }
+        }
+        unsafe {
+            CFPreferencesAppSynchronize(prefs.domain.as_concrete_TypeRef());
+        }
+    }
 
     #[test]
     fn string_bool_matches_foundation() {
-        for truthy in ["YES", "yes", "true", "T", "1", " 1", "+1", "-1", "001", "+001", "-001", "2"] {
+        for truthy in [
+            "YES", "yes", "true", "T", "1", " 1", "+1", "-1", "001", "+001", "-001", "2",
+        ] {
             assert!(is_true_string(truthy), "expected true for {truthy:?}");
         }
         for falsy in [
@@ -124,19 +141,7 @@ mod tests {
         assert_eq!(reloaded.get("flagOff"), Some(false));
         assert_eq!(reloaded.get("missing"), None);
 
-        for key in ["flagOn", "flagOff"] {
-            let k = CFString::new(key);
-            unsafe {
-                CFPreferencesSetAppValue(
-                    k.as_concrete_TypeRef(),
-                    std::ptr::null(),
-                    reloaded.domain.as_concrete_TypeRef(),
-                );
-            }
-        }
-        unsafe {
-            CFPreferencesAppSynchronize(reloaded.domain.as_concrete_TypeRef());
-        }
+        clear(&reloaded, &["flagOn", "flagOff"]);
     }
 
     #[test]
@@ -172,11 +177,9 @@ mod tests {
         let reloaded = Prefs::new(&domain);
         assert_eq!(reloaded.get("profileColorPicker"), Some(true));
         assert_eq!(reloaded.get("launchFlags"), Some(true));
-        // Non-boolean container values must return None cleanly instead of panicking.
         assert_eq!(reloaded.get("profileColors"), None);
         assert_eq!(reloaded.get("launchFlagsArgs"), None);
 
-        // Verify sibling container values survive toggling booleans intact.
         let raw_dict = unsafe {
             CFPreferencesCopyAppValue(
                 dict_key.as_concrete_TypeRef(),
@@ -197,23 +200,14 @@ mod tests {
         let raw_array = unsafe { CFType::wrap_under_create_rule(raw_array) };
         assert!(raw_array.downcast::<CFArray>().is_some());
 
-        for key in [
-            "profileColorPicker",
-            "launchFlags",
-            "profileColors",
-            "launchFlagsArgs",
-        ] {
-            let k = CFString::new(key);
-            unsafe {
-                CFPreferencesSetAppValue(
-                    k.as_concrete_TypeRef(),
-                    std::ptr::null(),
-                    reloaded.domain.as_concrete_TypeRef(),
-                );
-            }
-        }
-        unsafe {
-            CFPreferencesAppSynchronize(reloaded.domain.as_concrete_TypeRef());
-        }
+        clear(
+            &reloaded,
+            &[
+                "profileColorPicker",
+                "launchFlags",
+                "profileColors",
+                "launchFlagsArgs",
+            ],
+        );
     }
 }

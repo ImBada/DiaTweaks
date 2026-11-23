@@ -20,8 +20,9 @@ static BOOL DPWeb_shouldChangeCurrentCursor(NSView *self, SEL _cmd) {
 }
 
 static void DPWeb_addCursorRect(NSView *self, SEL _cmd, NSRect rect, NSCursor *cursor) {
-    if (DPPeek.on && DPPeekHiddenAncestor(self)) return;
-    DPPeekCard *peek = DPPeek.on ? DPPeekCardIn(self.window) : nil;
+    if (!DPPeek.on) return (void)DPCallOriginal(DPWeb_addCursorRect, self, rect, cursor);
+    if (DPPeekHiddenAncestor(self)) return;
+    DPPeekCard *peek = DPPeekCardIn(self.window);
     if (!peek || [self isDescendantOf:peek]) return (void)DPCallOriginal(DPWeb_addCursorRect, self, rect, cursor);
     // Cursor rectangles, like Chromium's immediate cursor updates, ignore overlapping siblings.
     NSRect covered = NSIntersectionRect(rect, [self convertRect:peek.bounds fromView:peek]);

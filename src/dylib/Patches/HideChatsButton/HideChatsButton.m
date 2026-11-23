@@ -10,6 +10,7 @@ DP_PATCH(DPHideChatsButton) {
     .symbol = @"doc.plaintext.fill",
     .tint = @"systemPurpleColor",
     .section = @"AI",
+    .group = @"aiPrompts",
     .classes = DPClasses(DPDiaLibraryButton, DPDiaLibraryCell),
     .hides = DPIsChatsButton,
     .coveredBy = @"turnOffAI",

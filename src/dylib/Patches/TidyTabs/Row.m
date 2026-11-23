@@ -22,10 +22,7 @@ static const CGFloat DPLineInset = 11;
 
 - (void)updateLayer {
     [self.effectiveAppearance performAsCurrentDrawingAppearance:^{
-        [CATransaction begin];
-        [CATransaction setDisableActions:YES];
-        self->_line.backgroundColor = [NSColor.labelColor colorWithAlphaComponent:0.1].CGColor;
-        [CATransaction commit];
+        DPWithoutAnimation(^{ self->_line.backgroundColor = [NSColor.labelColor colorWithAlphaComponent:0.1].CGColor; });
     }];
 }
 
@@ -34,10 +31,7 @@ static const CGFloat DPLineInset = 11;
     NSRect bounds = self.bounds;
     CGFloat mid = round(NSMidY(bounds));
     _brush.frame = NSMakeRect(NSMaxX(bounds) - DPLineInset - DPTidyBrushSize + 4, mid - DPTidyBrushSize / 2, DPTidyBrushSize, DPTidyBrushSize);
-    [CATransaction begin];
-    [CATransaction setDisableActions:YES];
-    _line.frame = NSMakeRect(DPLineInset, mid, MAX(0, NSMinX(_brush.frame) - DPTidyLineGap - DPLineInset), 1);
-    [CATransaction commit];
+    DPWithoutAnimation(^{ self->_line.frame = NSMakeRect(DPLineInset, mid, MAX(0, NSMinX(self->_brush.frame) - DPTidyLineGap - DPLineInset), 1); });
     DPTidyWave(self.layer, _line, _line.backgroundColor, DPTidyIsBusy());
 }
 

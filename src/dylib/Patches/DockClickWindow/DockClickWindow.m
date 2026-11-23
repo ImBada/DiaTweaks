@@ -34,8 +34,8 @@ DP_PATCH(DPDockClickWindow) {
     .title = @"Dock Click Shows Existing Window",
     .detail = @"Clicking Dia’s Dock icon from another Desktop takes you to the window Dia already has, instead of opening a new one. Needs “When switching to an application, switch to a Space with open windows” in Desktop & Dock.",
     .symbol = @"dock.rectangle",
-    .tint = @"systemBrownColor",
-    .section = @"Window",
+    .tint = @"systemYellowColor",
+    .section = @"App",
     .classes = DPClasses(DPDiaAppDelegate),
     .install = DPInstallDockClickWindow,
 };

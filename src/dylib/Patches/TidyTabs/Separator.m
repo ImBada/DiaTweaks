@@ -106,10 +106,7 @@ void DPPlaceSeparatorBrush(NSView *separator) {
         DPSet(line, &DPLineFrameKey, nil);
     }
     if (!NSEqualRects(line.frame, frame)) {
-        [CATransaction begin];
-        [CATransaction setDisableActions:YES];
-        line.frame = frame;
-        [CATransaction commit];
+        DPWithoutAnimation(^{ line.frame = frame; });
     }
     DPTidyWave(separator.layer, line, line.backgroundColor, DPTidyTabs.on && DPTidyIsBusy());
 }
@@ -126,11 +123,10 @@ static void DPSeparator_updateLayer(NSView *self, SEL _cmd) {
 }
 
 static NSView *DPCollection_hitTest(NSView *self, SEL _cmd, NSPoint point) {
-    if (DPTidyTabs.on) {
-        for (DPTidyBrush *brush in DPTidyBrushes()) {
-            if (brush.hiddenOrHasHiddenAncestor || ![brush isDescendantOf:self]) continue;
-            if (NSPointInRect([brush convertPoint:point fromView:self.superview], brush.bounds)) return brush;
-        }
+    if (!DPTidyTabs.on) return DPCallOriginal(DPCollection_hitTest, self, point);
+    for (DPTidyBrush *brush in DPTidyBrushes()) {
+        if (brush.hiddenOrHasHiddenAncestor || ![brush isDescendantOf:self]) continue;
+        if (NSPointInRect([brush convertPoint:point fromView:self.superview], brush.bounds)) return brush;
     }
     return DPCallOriginal(DPCollection_hitTest, self, point);
 }

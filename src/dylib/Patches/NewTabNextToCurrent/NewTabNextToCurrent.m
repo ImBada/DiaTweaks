@@ -220,18 +220,18 @@ static void DPNote(NSWindow *window) {
     state.lastFrontID = active;
 }
 
+static void DPNoteWindowOf(NSView *view) {
+    if (DPNewTabNextToCurrent.on && view.window) DPNote(view.window);
+}
+
 static void DPContentPane_viewDidMoveToWindow(NSView *self, SEL _cmd) {
     DPCallOriginal(DPContentPane_viewDidMoveToWindow, self);
-    if (!DPNewTabNextToCurrent.on) return;
-    NSWindow *window = self.window;
-    if (window) DPNote(window);
+    DPNoteWindowOf(self);
 }
 
 static void DPNewTabPage_viewDidMoveToWindow(NSView *self, SEL _cmd) {
     DPCallOriginal(DPNewTabPage_viewDidMoveToWindow, self);
-    if (!DPNewTabNextToCurrent.on) return;
-    NSWindow *window = self.window;
-    if (window) DPNote(window);
+    DPNoteWindowOf(self);
 }
 
 static void DPInstallNewTabNextToCurrent(void) {

@@ -13,6 +13,11 @@ static BOOL DPStandingInHere(NSView *background) {
     return DPStandingIn(background.window) && DPListsTab(background, DPGet(background.window, &DPTabKey));
 }
 
+static void DPRedraw(NSView *background) {
+    DPTabShapeView(background).needsLayout = YES;
+    background.needsLayout = background.needsDisplay = YES;
+}
+
 static void DPSelectButton(NSView *background, BOOL selected) {
     uintptr_t *style = DPSelectionStyle(background);
     uint8_t *shape = DPTabShape(background);
@@ -29,15 +34,13 @@ static void DPSelectButton(NSView *background, BOOL selected) {
         DPSet(background, &DPSavedKey, @[ @(original), @(was), @(*style), @(*shape), look[0] ]);
     } else {
         DPSet(background, &DPSavedKey, nil);
-        // Release only if Dia hasn't overwritten the style with one it owns.
-        if (*style == [saved[2] unsignedLongValue]) {
-            if (*style >= DPFirstFill) CFRelease((CFTypeRef)(void *)*style);
-            *style = [saved[0] unsignedLongValue];
-        }
+        // CFBridgingRetain gave us the only +1 on this colour, so release it even if Dia has since replaced the style.
+        uintptr_t ours = [saved[2] unsignedLongValue];
+        if (ours >= DPFirstFill) CFRelease((CFTypeRef)(void *)ours);
+        if (*style == ours) *style = [saved[0] unsignedLongValue];
         if (*shape == [saved[3] unsignedCharValue]) *shape = [saved[1] unsignedCharValue];
     }
-    DPTabShapeView(background).needsLayout = YES;
-    background.needsLayout = background.needsDisplay = YES;
+    DPRedraw(background);
 }
 
 static void DPSelectButtons(NSWindow *window) {
@@ -67,8 +70,7 @@ static void DPRefresh(NSWindow *window) {
         if (!DPStandingInHere(background)) DPGiveBackSelection(background);
         else if (DPDrawnSelected(background)) {
             DPHideFrontTab(background);
-            DPTabShapeView(background).needsLayout = YES;
-            background.needsLayout = background.needsDisplay = YES;
+            DPRedraw(background);
         }
     }
 }

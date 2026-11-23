@@ -49,8 +49,7 @@ static simd_float3 DPRGB(NSColor *color) {
 }
 
 static NSData *DPDiaColorsIn(NSView *pane) {
-    NSView *bar = DPSubview(pane, DPDiaToolbar);
-    NSView *indicator = bar ? DPFindView(bar, ^BOOL(NSView *view) { return DPIsKind(view, DPDiaLoadingIndicator); }) : nil;
+    NSView *indicator = DPFindView(DPSubview(pane, DPDiaToolbar), ^BOOL(NSView *view) { return DPIsKind(view, DPDiaLoadingIndicator); });
     __block NSData *colors = DPGet(indicator, &DPDiaColorsKey);
     if (!colors && indicator) DPFindView(indicator, ^BOOL(NSView *view) { return (colors = DPGet(view, &DPDiaColorsKey)) != nil; });
     return colors ?: DPLastDiaColors;

@@ -1,8 +1,7 @@
 #import "Patches/CommandBar/AutoPip.h"
+#import "Patches/CommandBar/CommandBarOverlay.h"
 
-extern DPPatch DPCommandBar;
-
-// Defer PiP requests during bar-triggered tab round-trips so exitPictureInPicture cancels them while real switches still fire.
+// A bar's tab round-trip would trigger PiP, so requests wait here and exitPictureInPicture cancels them; real switches still fire.
 static const double DPHoldSeconds = 0.6;
 static int DPHolds;
 static NSHashTable *DPHeld;
@@ -35,14 +34,6 @@ void DPHoldAutoPip(void) {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(DPHoldSeconds * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         if (--DPHolds == 0) DPReleaseHeld();
     });
-}
-
-static BOOL DPOverPinnedHeader(NSView *tabList, id gesture) {
-    Class headerCls = NSClassFromString(@"DPPinnedHeader");
-    if (!headerCls || ![gesture respondsToSelector:@selector(locationInView:)]) return NO;
-    NSView *header = DPFindView(tabList, ^BOOL(NSView *view) { return [view isKindOfClass:headerCls]; });
-    if (!header || header.isHiddenOrHasHiddenAncestor || !header.superview) return NO;
-    return NSPointInRect([gesture locationInView:header.superview], header.frame);
 }
 
 static void DPTabList_backgroundDoubleClick(NSView *self, SEL _cmd, id gesture) {

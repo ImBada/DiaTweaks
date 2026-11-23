@@ -3,3 +3,5 @@
 extern DPPatch DPHideConnectAppPrompts;
 
 void DPDismissConnectAppPrompts(void);
+
+BOOL DPIsSingleAppUpsellBar(NSView *view);

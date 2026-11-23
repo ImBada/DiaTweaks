@@ -141,7 +141,30 @@ NSStackView *DPColumn(NSArray<NSView *> *views, CGFloat spacing) {
     return stack;
 }
 
+NSStackView *DPHeading(NSString *symbol, NSString *tint, NSArray<NSView *> *lines) {
+    NSStackView *heading = [NSStackView stackViewWithViews:@[ DPIconTile(symbol, DPTintColor(tint)), DPColumn(lines, 2) ]];
+    heading.spacing = 10;
+    return heading;
+}
+
+NSStackView *DPDisclosure(NSView *leading) {
+    NSStackView *trailing = [NSStackView stackViewWithViews:@[ leading, DPSymbol(@"chevron.right", 11, NSColor.tertiaryLabelColor) ]];
+    trailing.spacing = 10;
+    return trailing;
+}
+
+NSTextField *DPHiddenNote(void) {
+    NSTextField *note = DPLabel(@"", 11, NSFontWeightRegular, NSColor.secondaryLabelColor);
+    note.hidden = YES;
+    return note;
+}
+
 NSTextField *DPHeader(NSString *text) { return DPLabel(text, 12, NSFontWeightSemibold, NSColor.secondaryLabelColor); }
+
+NSColor *DPTintColor(NSString *tint) {
+    SEL sel = tint.length ? NSSelectorFromString(tint) : NULL;
+    return sel && [NSColor respondsToSelector:sel] ? [NSColor valueForKey:tint] : NSColor.systemGrayColor;
+}
 
 NSTextField *DPLabel(NSString *text, CGFloat size, NSFontWeight weight, NSColor *color) {
     NSTextField *label = [NSTextField wrappingLabelWithString:text];

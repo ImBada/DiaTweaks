@@ -1,13 +1,13 @@
 #import "StdPatch/StdPatch.h"
 #include <simd/simd.h>
 
-extern DPPatch DPHideToolbar, DPRevealToolbarOnHover, DPShowToolbarWithSidebar, DPShowToolbarOnNewTab, DPShowToolbarWithTopTabs, DPPlainSelectedTab;
+extern DPPatch DPHideToolbar, DPRevealToolbarOnHover, DPShowToolbarWithSidebar, DPShowToolbarOnNewTab, DPShowToolbarWithTopTabs, DPPlainSelectedTab, DPKeepBookmarksBar;
 extern DPPatch DPShowLoadingProgress;
 extern NSHashTable<NSView *> *DPPanes;
 
 @interface DPToolbarHover : NSObject
 @property (nonatomic, weak) NSView *pane, *bar, *bookmarks;
-@property (nonatomic, strong) NSTrackingArea *tracking;
+@property (nonatomic, strong) NSTrackingArea *tracking, *paneTracking;
 @property (nonatomic, strong) NSTimer *animation, *hideTimer, *inPlaceAnimation;
 @property (nonatomic, strong) NSHashTable<NSPopover *> *permissionPopovers;
 @property (nonatomic) BOOL revealed, inPlace, touched, barsLowered;
@@ -15,6 +15,7 @@ extern NSHashTable<NSView *> *DPPanes;
 + (DPToolbarHover *)forPane:(NSView *)pane;
 + (DPToolbarHover *)attachToPane:(NSView *)pane;
 - (void)updateForBar:(NSView *)bar bookmarks:(NSView *)bookmarks;
+- (BOOL)pointerAbovePage;
 - (void)stopInPlace;
 - (void)detach;
 @end

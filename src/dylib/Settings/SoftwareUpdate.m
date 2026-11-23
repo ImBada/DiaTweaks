@@ -54,7 +54,8 @@ static NSButton *DPButton(NSString *title, id target, SEL action, NSString *part
 
 - (NSString *)stateOf:(NSString *)part {
     DPUpdates *updates = DPUpdates.shared;
-    return [updates downloading:part] ? @"downloading" : [updates staged:part] ? @"staged" : @"available";
+    if ([updates downloading:part]) return @"downloading";
+    return [updates staged:part] ? @"staged" : @"available";
 }
 
 - (void)sync {
@@ -127,7 +128,8 @@ static NSButton *DPButton(NSString *title, id target, SEL action, NSString *part
     NSMutableArray<NSView *> *installed = [NSMutableArray new];
     for (NSString *part in @[DPDia, DPTweaks]) {
         id version = DPUpdates.shared.found[part][@"installed"];
-        NSString *text = [version isKindOfClass:NSString.class] ? version : [part isEqual:DPDia] ? @"—" : @"Development build";
+        NSString *text = [version isKindOfClass:NSString.class] ? version : nil;
+        if (!text) text = [part isEqual:DPDia] ? @"—" : @"Development build";
         [installed addObject:DPRow(DPLine(DPPartName(part), 13, NSColor.labelColor), DPLine(text, 13, NSColor.secondaryLabelColor))];
     }
     return DPGroup(installed);
@@ -163,9 +165,10 @@ static NSButton *DPButton(NSString *title, id target, SEL action, NSString *part
     NSString *size = [NSByteCountFormatter stringFromByteCount:[rawSize isKindOfClass:NSNumber.class] ? [rawSize longLongValue] : 0
                                                     countStyle:NSByteCountFormatterCountStyleFile];
     BOOL failed = [updates failed:part];
-    NSTextField *detail = DPLine(staged ? (installsOnQuit ? @"Installs when you quit" : @"Ready to install")
-                                 : failed ? ([updates failure:part] ?: @"Download failed") : size,
-                                 11, failed ? NSColor.systemRedColor : NSColor.secondaryLabelColor);
+    NSString *detailText = size;
+    if (staged) detailText = installsOnQuit ? @"Installs when you quit" : @"Ready to install";
+    else if (failed) detailText = [updates failure:part] ?: @"Download failed";
+    NSTextField *detail = DPLine(detailText, 11, failed ? NSColor.systemRedColor : NSColor.secondaryLabelColor);
     if (failed) detail.toolTip = detail.stringValue;
     id rawVersion = found[staged ? @"staged" : @"latest"];
     NSString *title = [rawVersion isKindOfClass:NSString.class] ? [NSString stringWithFormat:@"%@ %@", DPPartName(part), rawVersion] : DPPartName(part);

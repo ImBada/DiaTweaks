@@ -12,6 +12,7 @@ void DPInstallHides(void) {}
 NSInteger DPSafeMode;
 BOOL DPPaused, DPPausedAtLaunch;
 BOOL DPPauseSaved(void) { return NO; }
+BOOL DPLocalSafeModeOff(void) { return NO; }
 
 static NSView *gPane;
 static BOOL gStalledAtTheEnd, gStalledFading;

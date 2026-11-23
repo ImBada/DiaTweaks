@@ -136,7 +136,6 @@ int main(void) {
         check("protect test page RX", kr == KERN_SUCCESS);
         sys_icache_invalidate(code, vm_page_size);
 
-        // 1. Signature search checks (unique hit, untouched MouseListener, ambiguity & short-buffer rejection).
         uint32_t *found = DPFindSiteIn(code, mlOffset + 4);
         check("DPFindSiteIn finds exact hidden-edge check site", found == code + sigStart + DPSiteIndex);
         check("DPFindSiteIn rejects short buffer", DPFindSiteIn(code, DPSignatureCount - 1) == NULL);
@@ -154,7 +153,6 @@ int main(void) {
         DPHoverDecisionFn decide = (DPHoverDecisionFn)(void *)code;
         uint8_t info[7];
 
-        // 2. Baseline OFF / unpatched behavior: .inside (1) keeps sidebar & top tab bar hidden; .hasLingered (2) opens.
         DPSite = NULL;
         DPSearched = NO;
         DPOpenSidebarInstantly.on = NO;
@@ -170,7 +168,6 @@ int main(void) {
         check("off: top tab bar hidden + innerTop inside(1) -> stays hidden", decide(makeInfo(info, 0, 0, 0, 1, 0, 0, 1), 1, 0) == 1);
         check("off: top tab bar hidden + outerTop inside(1) -> stays hidden", decide(makeInfo(info, 0, 0, 0, 0, 1, 0, 0), 1, 0) == 1);
 
-        // 3. Turn ON: hidden sidebar and hidden top tab bar open instantly on .inside (1) with zero event monitors.
         DPSite = found;
         DPSearched = YES;
         DPOpenSidebarInstantly.on = YES;
@@ -188,14 +185,12 @@ int main(void) {
         check("on: top tab bar hidden + innerTop inside(1) -> opens instantly", decide(makeInfo(info, 0, 0, 0, 1, 0, 0, 1), 1, 0) == 2);
         check("on: top tab bar hidden + outerTop inside(1) -> opens instantly", decide(makeInfo(info, 0, 0, 0, 0, 1, 0, 0), 1, 0) == 2);
 
-        // 4. Issue #541: pinned-tab hover cards and collapsed tab-group popovers keep Dia's normal hover delay.
         check("on: ARCUI.MouseListener 0.08 s delay instruction untouched", code[mlOffset] == DPMouseListenerLoadDelay);
         check("on: sweeping pinned tabs does not open hover card immediately", !DPSweepOpensImmediately(code[mlOffset], 0.016, 0.35));
         check("on: sweeping collapsed tab groups does not open folder popover immediately", !DPSweepOpensImmediately(code[mlOffset], 0.016, 0.35));
         // Contrast: the old MouseListener patch (0.0 s) WOULD have opened both mid-sweep.
         check("control: zeroing MouseListener caused #541 mid-sweep opens", DPSweepOpensImmediately(DPMouseListenerNoDelay, 0.016, 0.35));
 
-        // 5. Issue #495: moving from the revealed sidebar into an open hover card or folder popover stays open.
         check("on: crossing gap into open card/popover does not trigger premature dismiss", !DPCrossingDismissesCard(code[mlOffset], 0.016));
         check("control: zeroing MouseListener caused #495 mid-crossing dismiss", DPCrossingDismissesCard(DPMouseListenerNoDelay, 0.016));
         check("on: revealed sidebar stays open while pointer inside sidebar(1)", decide(makeInfo(info, 0, 0, 1, 0, 0, 0, 1), 2, 1) == 2);
@@ -204,11 +199,9 @@ int main(void) {
         check("on: revealed top tab bar stays open while pointer inside tabStrip(1)", decide(makeInfo(info, 0, 0, 0, 0, 0, 1, 1), 2, 0) == 2);
         check("on: revealed top tab bar closes once pointer leaves tabStrip and edges", decide(makeInfo(info, 0, 0, 0, 0, 0, 0, 1), 2, 0) == 1);
 
-        // 6. Idempotent re-apply and off / DPPaused() restoration.
         DPApplyOpenSidebarInstantly(&DPOpenSidebarInstantly);
         check("on: repeated apply is idempotent", DPVerifyOpenSidebarInstantly(&DPOpenSidebarInstantly) == nil && found[0] == DPInstantInner && found[1] == DPInstantOuter);
 
-        // Simulate Pause Tweaks turning patch off, then unpausing, then turning permanently off.
         DPOpenSidebarInstantly.on = NO;
         DPApplyOpenSidebarInstantly(&DPOpenSidebarInstantly);
         check("paused/off: restores original instructions", found[0] == DPWaitInner && found[1] == DPWaitOuter);
@@ -224,7 +217,7 @@ int main(void) {
         DPOpenSidebarInstantly.on = NO;
         DPApplyOpenSidebarInstantly(&DPOpenSidebarInstantly);
 
-        // 7. Page-boundary rewrite safety: place DPSite at the last 4 bytes of page 0 so DPSite[1] is on page 1.
+        // Page-boundary rewrite safety: place DPSite at the last 4 bytes of page 0 so DPSite[1] is on page 1.
         mach_vm_address_t twoPages = 0;
         kr = mach_vm_allocate(mach_task_self(), &twoPages, 2 * vm_page_size, VM_FLAGS_ANYWHERE);
         check("allocate 2-page boundary buffer", kr == KERN_SUCCESS);
@@ -242,7 +235,6 @@ int main(void) {
         check("cross-page restore restores both words", boundarySite[0] == DPWaitInner && boundarySite[1] == DPWaitOuter && !DPVerifyOpenSidebarInstantly(&DPOpenSidebarInstantly));
         mach_vm_deallocate(mach_task_self(), twoPages, 2 * vm_page_size);
 
-        // 8. Unavailable fallback when Dia binary doesn't match signature.
         DPSite = NULL;
         DPSearched = YES;
         DPOpenSidebarInstantly.unavailable = NO;

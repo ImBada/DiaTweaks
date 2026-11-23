@@ -9,10 +9,14 @@ static const CGFloat DPRowHeight = 37, DPHeaderHeight = 28, DPRowInset = 15, DPT
 static NSUserDefaults *DPCollapseDefaults;
 static char DPHeaderKey, DPShiftedKey, DPLastShiftKey;
 
+static NSView *DPTabListAbove(NSView *view) {
+    Class tabList = objc_getClass(DPDiaTabList);
+    while (view && ![view isKindOfClass:tabList]) view = view.superview;
+    return view;
+}
+
 static NSString *DPSpaceOf(NSView *list) {
-    NSView *tabList = list;
-    while (tabList && !DPIsKind(tabList, DPDiaTabList)) tabList = tabList.superview;
-    return [DPSwiftValue(DPSwiftValue(DPSwiftValue(tabList, @"viewModel"), @"delegate"), @"spaceID") description];
+    return [DPSwiftValue(DPSwiftValue(DPSwiftValue(DPTabListAbove(list), @"viewModel"), @"delegate"), @"spaceID") description];
 }
 
 static BOOL DPIsCollapsed(NSString *space) { return space && [[DPCollapseDefaults arrayForKey:DPCollapsedKey] containsObject:space]; }
@@ -63,10 +67,7 @@ static void DPFold(NSString *space, BOOL collapsed);
         NSColor *ink = self.hovered ? NSColor.secondaryLabelColor : NSColor.tertiaryLabelColor;
         self.pin.contentTintColor = self.chevron.contentTintColor = ink;
         self.title.textColor = ink;
-        [CATransaction begin];
-        [CATransaction setDisableActions:YES];
-        self.line.backgroundColor = NSColor.separatorColor.CGColor;
-        [CATransaction commit];
+        DPWithoutAnimation(^{ self.line.backgroundColor = NSColor.separatorColor.CGColor; });
     }];
     self.accessibilityValue = self.collapsed ? @0 : @1;
 }
@@ -80,10 +81,7 @@ static void DPFold(NSString *space, BOOL collapsed);
     self.title.frame = NSMakeRect(DPTitleInset - 2, middle - round(NSHeight(self.title.frame) / 2), NSWidth(self.title.frame), NSHeight(self.title.frame));
     self.chevron.frame = NSMakeRect(NSMaxX(bounds) - DPChevronInset - 12, middle - 6, 12, 12);
     CGFloat left = NSMaxX(self.title.frame) + DPGap, right = NSMinX(self.chevron.frame) - DPGap;
-    [CATransaction begin];
-    [CATransaction setDisableActions:YES];
-    self.line.frame = NSMakeRect(left, middle - 0.5, MAX(0, right - left), 1);
-    [CATransaction commit];
+    DPWithoutAnimation(^{ self.line.frame = NSMakeRect(left, middle - 0.5, MAX(0, right - left), 1); });
     [self restyle];
 }
 
@@ -91,10 +89,7 @@ static void DPFold(NSString *space, BOOL collapsed);
     if (_collapsed == collapsed && self.chevron.image) return;
     _collapsed = collapsed;
     self.chevron.image = DPSmallSymbol(collapsed ? @"chevron.right" : @"chevron.down");
-    [CATransaction begin];
-    [CATransaction setDisableActions:YES];
-    self.line.opacity = collapsed ? 0 : 1;
-    [CATransaction commit];
+    DPWithoutAnimation(^{ self.line.opacity = collapsed ? 0 : 1; });
     [self restyle];
 }
 
@@ -108,12 +103,22 @@ static void DPFold(NSString *space, BOOL collapsed);
 - (void)viewDidChangeEffectiveAppearance { [super viewDidChangeEffectiveAppearance]; [self restyle]; }
 @end
 
+static void DPHideHeader(DPPinnedHeader *header) {
+    header.shown = NO;
+    header.hidden = YES;
+}
+
+typedef NSCollectionViewLayoutAttributes *(*DPItemIMP)(id, SEL, NSIndexPath *);
+
+static DPItemIMP DPDiaItemIMP(void) {
+    return (DPItemIMP)DPDiaIMP(objc_getClass(DPDiaTabListLayout), @selector(layoutAttributesForItemAtIndexPath:));
+}
+
 static void DPMeasure(NSCollectionViewLayout *layout) {
     NSCollectionView *list = layout.collectionView;
     DPPinnedHeader *header = DPGet(list, &DPHeaderKey);
     if (!DPCollapsePinned.on) {
-        header.shown = NO;
-        header.hidden = YES;
+        DPHideHeader(header);
         header.springSince = nil;
         return;
     }
@@ -123,26 +128,17 @@ static void DPMeasure(NSCollectionViewLayout *layout) {
     NSRect first = NSZeroRect, line = NSZeroRect;
     CGFloat row = DPRowHeight;
     if (shown) {
-        // Dia's own IMPs, whatever hooks sit around ours, so frozen or parked rows never feed shifted frames back into header.top.
+        // Dia's own IMPs, so frozen or parked rows never feed shifted frames back into header.top.
         SEL itemSel = @selector(layoutAttributesForItemAtIndexPath:), elementsSel = @selector(layoutAttributesForElementsInRect:);
-        Class layoutClass = objc_getClass(DPDiaTabListLayout);
-        NSCollectionViewLayoutAttributes *(*rawItem)(id, SEL, NSIndexPath *) = (void *)DPDiaIMP(layoutClass, itemSel);
-        NSArray *(*rawElements)(id, SEL, NSRect) = (void *)DPDiaIMP(layoutClass, elementsSel);
+        DPItemIMP rawItem = DPDiaItemIMP();
+        NSArray *(*rawElements)(id, SEL, NSRect) = (void *)DPDiaIMP(objc_getClass(DPDiaTabListLayout), elementsSel);
         first = rawItem ? rawItem(layout, itemSel, [NSIndexPath indexPathForItem:0 inSection:0]).frame : NSZeroRect;
         line = rawItem ? rawItem(layout, itemSel, [NSIndexPath indexPathForItem:rows inSection:0]).frame : NSZeroRect;
-        NSCountedSet<NSNumber *> *heights = [NSCountedSet set];
-        for (NSCollectionViewLayoutAttributes *a in (rawElements ? rawElements(layout, elementsSel, NSMakeRect(-1e5, -1e5, 2e5, 1e7)) : nil))
-            if (a.representedElementCategory == NSCollectionElementCategoryItem && NSHeight(a.frame) >= 20) [heights addObject:@(round(NSHeight(a.frame) * 2) / 2)];
-        NSNumber *common = nil;
-        for (NSNumber *each in heights) if (!common || [heights countForObject:each] > [heights countForObject:common]) common = each;
-        if (common) row = common.doubleValue;
+        CGFloat common = rawElements ? DPModalItemHeight(rawElements(layout, elementsSel, NSMakeRect(-1e5, -1e5, 2e5, 1e7)), 20) : 0;
+        if (common) row = common;
         shown = NSHeight(line) > 0 && NSHeight(line) < 20;
     }
-    if (!shown) {
-        header.shown = NO;
-        header.hidden = YES;
-        return;
-    }
+    if (!shown) return DPHideHeader(header);
     if (!header) {
         header = [DPPinnedHeader new];
         DPSet(list, &DPHeaderKey, header);
@@ -173,36 +169,34 @@ static CGFloat DPShift(DPPinnedHeader *header, BOOL pinned) {
 }
 
 static NSCollectionViewLayoutAttributes *DPDiaItem(NSCollectionViewLayout *layout, NSIndexPath *path) {
-    SEL itemSel = @selector(layoutAttributesForItemAtIndexPath:);
-    NSCollectionViewLayoutAttributes *(*item)(id, SEL, NSIndexPath *) = (void *)DPDiaIMP(objc_getClass(DPDiaTabListLayout), itemSel);
-    return item ? item(layout, itemSel, path) : nil;
+    DPItemIMP item = DPDiaItemIMP();
+    return item ? item(layout, @selector(layoutAttributesForItemAtIndexPath:), path) : nil;
 }
 
-// Dia can rebuild its cache without our hooks, so a cached row carries a mark once its frame has our shift.
+// Dia can rebuild its cache without our hooks, so a shifted row carries a mark.
 static BOOL DPIsShifted(NSCollectionViewLayoutAttributes *attributes) { return DPGet(attributes, &DPShiftedKey) != nil; }
 
 static BOOL DPIsAligned(NSCollectionViewLayout *layout) { return DPIsShifted(DPDiaItem(layout, [NSIndexPath indexPathForItem:0 inSection:0])); }
 
 static void DPNudgeOverflow(NSCollectionView *list) {
-    NSView *tabList = list;
-    while (tabList && !DPIsKind(tabList, DPDiaTabList)) tabList = tabList.superview;
+    NSView *tabList = DPTabListAbove(list);
     SEL scrolled = NSSelectorFromString(@"scrollViewDidScroll");
     if (!tabList || ![tabList respondsToSelector:scrolled]) return;
     __weak NSView *weak = tabList;
     dispatch_async(dispatch_get_main_queue(), ^{ if (weak) ((void (*)(id, SEL))objc_msgSend)(weak, scrolled); });
 }
 
-// Dia reads its cached rows directly, not through our hooks (the pill that scrolls to the active tab, that scroll, the New Tab footer),
-// so the cache moves with the list, as Compact Tab Rows does.
+// Dia reads its cached rows directly rather than through our hooks, so the cache moves with the list, as Compact Tab Rows does.
 static NSNumber *DPAlign(NSCollectionViewLayout *layout) {
     DPPinnedHeader *header = DPShownHeader(layout);
     double *height = DPIvar(layout, "contentHeight");
     if (!header || !height) return nil;
     NSCollectionView *list = layout.collectionView;
     if (!DPIsAligned(layout)) {
+        DPItemIMP item = DPDiaItemIMP();
         for (NSInteger section = 0; section < list.numberOfSections; section++)
-            for (NSInteger row = 0; row < [list numberOfItemsInSection:section]; row++) {
-                NSCollectionViewLayoutAttributes *attributes = DPDiaItem(layout, [NSIndexPath indexPathForItem:row inSection:section]);
+            for (NSInteger row = 0, count = [list numberOfItemsInSection:section]; row < count; row++) {
+                NSCollectionViewLayoutAttributes *attributes = item ? item(layout, @selector(layoutAttributesForItemAtIndexPath:), [NSIndexPath indexPathForItem:row inSection:section]) : nil;
                 if (!attributes) continue;
                 attributes.frame = NSOffsetRect(attributes.frame, 0, DPShift(header, section == 0 && row < header.rows));
                 DPSet(attributes, &DPShiftedKey, @YES);
@@ -234,7 +228,7 @@ static void DPLayout_prepare(NSCollectionViewLayout *self, SEL _cmd) {
     NSNumber *was = DPGet(self, &DPLastShiftKey), *now = DPAlign(self);
     DPSet(self, &DPLastShiftKey, now);
     // Dia judged the active tab against the rows before the shift, and judges again only when something moves.
-    if (was ? !now || ![was isEqualToNumber:now] : now != nil) DPNudgeOverflow(self.collectionView);
+    if ((was || now) && ![was isEqual:now]) DPNudgeOverflow(self.collectionView);
 }
 
 static NSCollectionViewLayoutAttributes *DPLayout_item(NSCollectionViewLayout *self, SEL _cmd, NSIndexPath *path) {
@@ -426,8 +420,7 @@ static void DPApplyCollapsePinned(DPPatch *patch) {
         [list.collectionViewLayout invalidateLayout];
         if (!patch->on) {
             DPPinnedHeader *header = DPGet(list, &DPHeaderKey);
-            header.shown = NO;
-            header.hidden = YES;
+            DPHideHeader(header);
             header.springSince = nil;
         }
     }
@@ -475,6 +468,7 @@ DP_PATCH(DPCollapsePinned) {
     .symbol = @"pin.fill",
     .tint = @"systemTealColor",
     .section = @"Sidebar & Tab Bar",
+    .group = @"pinnedTabs",
     .classes = DPClasses(DPDiaTabListCollection, DPDiaTabListLayout),
     .install = DPInstallCollapsePinned,
     .apply = DPApplyCollapsePinned,

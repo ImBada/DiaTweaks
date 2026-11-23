@@ -9,6 +9,12 @@ static _Atomic size_t DPHookCount;
 static os_unfair_lock DPHookLock = OS_UNFAIR_LOCK_INIT;
 static _Thread_local DPHookFrame *DPActiveFrame;
 
+static BOOL DPInherits(Class cls, Class ancestor) {
+    for (Class c = cls; c; c = class_getSuperclass(c))
+        if (c == ancestor) return YES;
+    return NO;
+}
+
 void DPHookClass(Class cls, SEL sel, IMP replacement) {
     if (!cls || !sel || !replacement) return;
     os_unfair_lock_lock(&DPHookLock);
@@ -18,11 +24,8 @@ void DPHookClass(Class cls, SEL sel, IMP replacement) {
     if (original == replacement) return os_unfair_lock_unlock(&DPHookLock);
     size_t count = atomic_load_explicit(&DPHookCount, memory_order_relaxed);
     // Already hooked here or in a superclass: a second copy would double-run or recurse.
-    for (size_t i = 0; i < count; i++) {
-        if (DPHooks[i].sel != sel || DPHooks[i].replacement != replacement) continue;
-        for (Class c = cls; c; c = class_getSuperclass(c))
-            if (c == DPHooks[i].cls) return os_unfair_lock_unlock(&DPHookLock);
-    }
+    for (size_t i = 0; i < count; i++)
+        if (DPHooks[i].sel == sel && DPHooks[i].replacement == replacement && DPInherits(cls, DPHooks[i].cls)) return os_unfair_lock_unlock(&DPHookLock);
     if (count == sizeof DPHooks / sizeof *DPHooks) {
         os_unfair_lock_unlock(&DPHookLock);
         return NSLog(@"DiaPatches: hook table is full; not hooking -[%s %@]", class_getName(cls), NSStringFromSelector(sel));
@@ -37,24 +40,12 @@ void DPHookClass(Class cls, SEL sel, IMP replacement) {
     // Re-chain any subclass that copied cls's inherited IMP earlier so it still calls through this hook,
     // unless that subclass (or an intermediate below cls) already hooks the same replacement.
     for (size_t i = 0; i < count; i++) {
-        if (DPHooks[i].sel != sel || DPHooks[i].replacement == replacement) continue;
+        Class sub = DPHooks[i].cls;
+        if (DPHooks[i].sel != sel || DPHooks[i].replacement == replacement || sub == cls || !DPInherits(sub, cls)) continue;
         if (atomic_load_explicit(&DPHooks[i].original, memory_order_relaxed) != original) continue;
-        BOOL isSubclass = NO;
-        for (Class c = class_getSuperclass(DPHooks[i].cls); c; c = class_getSuperclass(c))
-            if (c == cls) {
-                isSubclass = YES;
-                break;
-            }
-        if (!isSubclass) continue;
         BOOL hasReplacement = NO;
-        for (size_t j = 0; j < count && !hasReplacement; j++) {
-            if (DPHooks[j].sel != sel || DPHooks[j].replacement != replacement) continue;
-            for (Class c = DPHooks[i].cls; c && c != cls; c = class_getSuperclass(c))
-                if (c == DPHooks[j].cls) {
-                    hasReplacement = YES;
-                    break;
-                }
-        }
+        for (size_t j = 0; j < count && !hasReplacement; j++)
+            hasReplacement = DPHooks[j].sel == sel && DPHooks[j].replacement == replacement && DPInherits(sub, DPHooks[j].cls);
         if (!hasReplacement) atomic_store_explicit(&DPHooks[i].original, replacement, memory_order_release);
     }
     os_unfair_lock_unlock(&DPHookLock);
@@ -153,15 +144,9 @@ IMP DPDiaIMP(Class cls, SEL sel) {
     if (!imp) return class_getMethodImplementation(cls, sel);
     for (size_t hops = 0; hops < count; hops++) {
         IMP next = NULL;
-        for (size_t i = 0; i < count; i++) {
-            if (DPHooks[i].sel != sel || DPHooks[i].replacement != imp) continue;
-            for (Class c = cls; c; c = class_getSuperclass(c))
-                if (c == DPHooks[i].cls) {
-                    next = atomic_load_explicit(&DPHooks[i].original, memory_order_acquire);
-                    break;
-                }
-            if (next) break;
-        }
+        for (size_t i = 0; i < count && !next; i++)
+            if (DPHooks[i].sel == sel && DPHooks[i].replacement == imp && DPInherits(cls, DPHooks[i].cls))
+                next = atomic_load_explicit(&DPHooks[i].original, memory_order_acquire);
         if (!next) break;
         imp = next;
     }

@@ -40,6 +40,11 @@ static int moveAboveStdio(int fd) {
     return fd;
 }
 
+static int leave(int host, int status) {
+    close(host);
+    return status;
+}
+
 int DPRunPasswordsHandoff(void) {
     const char *path = getenv(DPHandoffVariable);
     if (!path || !*path) return 0;
@@ -59,15 +64,15 @@ int DPRunPasswordsHandoff(void) {
     do {
         received = recvmsg(host, &message, MSG_WAITALL);
     } while (received < 0 && errno == EINTR);
-    if (received != sizeof length) return close(host), 0;
+    if (received != sizeof length) return leave(host, 0);
     struct cmsghdr *header = CMSG_FIRSTHDR(&message);
-    if (!header || header->cmsg_type != SCM_RIGHTS || header->cmsg_len != CMSG_LEN(sizeof fds)) return close(host), 0;
+    if (!header || header->cmsg_type != SCM_RIGHTS || header->cmsg_len != CMSG_LEN(sizeof fds)) return leave(host, 0);
     memcpy(fds, CMSG_DATA(header), sizeof fds);
     NSDictionary *launch = readLaunch(host, length);
     NSString *helper = launch[@"helper"];
     if (![helper isKindOfClass:NSString.class]) {
         for (int i = 0; i < 3; i++) close(fds[i]);
-        return close(host), 0;
+        return leave(host, 0);
     }
 
     // Chromium may start this without some of 0-2 open, so what came over the socket can sit where it goes.
@@ -78,10 +83,13 @@ int DPRunPasswordsHandoff(void) {
         if (moved[i] < 0) {
             for (int j = 0; j < i; j++) close(moved[j]);
             for (int j = i + 1; j < 3; j++) close(fds[j]);
-            return close(host), 1;
+            return leave(host, 1);
         }
     }
-    for (int i = 0; i < 3; i++) dup2(moved[i], i), close(moved[i]);
+    for (int i = 0; i < 3; i++) {
+        dup2(moved[i], i);
+        close(moved[i]);
+    }
     execve(helper.fileSystemRepresentation, cStrings([@[ helper ] arrayByAddingObjectsFromArray:launch[@"arguments"]]), cStrings(launch[@"environment"]));
     return 1;
 }

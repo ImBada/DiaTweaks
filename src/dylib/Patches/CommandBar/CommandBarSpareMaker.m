@@ -17,15 +17,7 @@ void DPDropUnwantedSpares(void) {
         if (DPSpareIn(window) && (!DPSparesOn() || DPHasStrip(window))) DPDropSpare(window);
 }
 
-static NSView *DPVisiblePeekIn(NSWindow *window) {
-    Class card = NSClassFromString(@"DPPeekCard");
-    if (!card) return nil;
-    return DPFindView(window.contentView, ^BOOL(NSView *view) {
-        return [view isKindOfClass:card] && !view.isHiddenOrHasHiddenAncestor;
-    });
-}
-
-// Create a hidden spare only when frontmost, idle, and not full screen (switching tabs exits full screen).
+// Only when frontmost, idle and not full screen, since switching tabs exits full screen.
 static void DPMakeSpare(void) {
     DPDropUnwantedSpares();
     if (!DPSparesOn()) return DPUpdateSpareTimer();
@@ -44,7 +36,7 @@ static void DPMakeSpare(void) {
         if (DPSpareIn(other)) { anySpare = YES; break; }
     if (!DPWanted && !anySpare && CACurrentMediaTime() >= DPSpareUntil) DPWanted = YES;
     if (!DPWanted) return;
-    if (DPSpareIn(window) || DPGet(window, &DPOverlayKey) || DPHidingATab(window) || DPHasStrip(window) || DPVisiblePeekIn(window)) return;
+    if (DPSpareIn(window) || DPGet(window, &DPOverlayKey) || DPHidingATab(window) || DPHasStrip(window) || DPVisiblePeek(window)) return;
     id scriptWindow = DPScriptWindow(window);
     if (!scriptWindow) return;
     for (NSWindow *child in window.childWindows) if (child.visible) return;
@@ -71,7 +63,7 @@ static void DPMakeSpare(void) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, ms * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
             NSView *view = (NSView *)typing, *now = (NSView *)window.firstResponder;
             BOOL typingElsewhere = [now isKindOfClass:NSTextView.class] && !now.isHiddenOrHasHiddenAncestor;
-            if (view.window == window && now != view && !typingElsewhere && !DPGet(window, &DPOverlayKey) && !DPVisiblePeekIn(window)) [window makeFirstResponder:view];
+            if (view.window == window && now != view && !typingElsewhere && !DPGet(window, &DPOverlayKey) && !DPVisiblePeek(window)) [window makeFirstResponder:view];
         });
 }
 
@@ -95,22 +87,20 @@ void DPUpdateSpareTimer(void) {
     }
 }
 
-static void DPInstallSpares(void) {
-    [NSNotificationCenter.defaultCenter addObserverForName:DPPatchesDidChangeNotification object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *note) {
-        DPDropUnwantedSpares();
-        DPUpdateSpareTimer();
-    }];
-    DPOnLaunch(^{ DPUpdateSpareTimer(); });
-    // Retry at 3 s and 12 s in case session restore is slow; drop unfound IDs on the second pass.
-    NSArray *left = [DPSettings() arrayForKey:@"commandBarSpares"];
-    for (int delay = 3; left.count && delay <= 12; delay += 9)
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, delay * NSEC_PER_SEC), dispatch_get_main_queue(), ^{ DPCloseLeftSpares(left, delay > 3); });
-}
-
-static void DPApplySpares(DPPatch *patch) {
+static void DPRefreshSpares(void) {
     DPDropUnwantedSpares();
     DPUpdateSpareTimer();
 }
+
+static void DPInstallSpares(void) {
+    [NSNotificationCenter.defaultCenter addObserverForName:DPPatchesDidChangeNotification object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *note) { DPRefreshSpares(); }];
+    DPOnLaunch(^{
+        DPUpdateSpareTimer();
+        DPCloseLeftBarTabs();
+    });
+}
+
+static void DPApplySpares(DPPatch *patch) { DPRefreshSpares(); }
 
 static NSString *DPVerifySpares(DPPatch *patch) {
     for (NSWindow *window in NSApp.windows)
@@ -120,13 +110,13 @@ static NSString *DPVerifySpares(DPPatch *patch) {
 
 DP_PATCH(DPCommandBarSpare) {
     .key = @"commandBarSpare",
-    .order = 95,
+    .order = 89,
     .title = @"Open the Bar Instantly",
-    .detail = @"Keep a new tab ready, hidden, so the command bar opens at once instead of waiting for Dia to make one. Needs Hide New Tab Until Opened and tabs in the sidebar, and isn't used with Open New Tabs Next to Current. Experimental.",
+    .detail = @"Keep a new tab ready, hidden, so the command bar opens at once instead of waiting for Dia to make one. Needs tabs in the sidebar, and isn’t used with Open New Tabs Next to Current. Experimental.",
     .symbol = @"bolt.fill",
     .tint = @"systemOrangeColor",
-    .requires = @"commandBar",
-    .section = @"Tabs",
+    .requires = @"commandBarHideTab",
+    .section = @"Behavior",
     .classes = DPClasses(DPDiaNewTabPage, DPDiaTabListCollection, DPDiaTabListLayout),
     .install = DPInstallSpares,
     .apply = DPApplySpares,

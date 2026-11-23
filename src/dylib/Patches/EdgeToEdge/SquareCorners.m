@@ -92,17 +92,22 @@ static CGPathRef DPReshapePath(id owner, char *key, CGPathRef current, NSView *c
 }
 
 static void DPSetPath(CALayer *layer, NSString *key, CGPathRef path) {
-    [CATransaction begin];
-    [CATransaction setDisableActions:YES];
-    [layer setValue:(__bridge id)path forKey:key];
-    [CATransaction commit];
+    DPWithoutAnimation(^{ [layer setValue:(__bridge id)path forKey:key]; });
+}
+
+static CAShapeLayer *DPShapeOf(CALayer *sublayer) {
+    if ([sublayer isKindOfClass:CAShapeLayer.class]) return (CAShapeLayer *)sublayer;
+    return [sublayer.mask isKindOfClass:CAShapeLayer.class] ? (CAShapeLayer *)sublayer.mask : nil;
+}
+
+static NSView *DPToolbarIn(NSView *root) {
+    return DPFindView(root, ^BOOL(NSView *view) { return DPIsKind(view, DPDiaToolbar); });
 }
 
 static void DPReshapePaths(NSView *container, CGFloat base, CGFloat grow, CGFloat left, CGFloat right) {
     for (NSView *sub in container.subviews)
         for (CALayer *sublayer in sub.layer.sublayers) {
-            CAShapeLayer *shape = [sublayer isKindOfClass:CAShapeLayer.class] ? (CAShapeLayer *)sublayer
-                                : [sublayer.mask isKindOfClass:CAShapeLayer.class] ? (CAShapeLayer *)sublayer.mask : nil;
+            CAShapeLayer *shape = DPShapeOf(sublayer);
             CGPathRef path = DPReshapePath(shape, &DPPathKey, shape.path, container, base, grow, left, right);
             if (path) DPSetPath(shape, @"path", path);
             CGPathRef shadow = DPReshapePath(sublayer, &DPShadowPathKey, sublayer.shadowPath, container, base, grow, left, right);
@@ -163,39 +168,36 @@ static void DPRestoreCornerCurve(CALayer *layer) {
 
 static void DPRestoreSquareCorners(NSView *container, CALayer *layer) {
     DPSet(container, &DPCornersTouchedKey, nil);
-    [CATransaction begin];
-    [CATransaction setDisableActions:YES];
-    DPRestoreCornerCurve(layer);
-    CALayer *card = DPChatCard(container).layer;
-    if (card) DPRestoreCornerCurve(card);
-    DPClearCornerRadii(layer);
-    if (layer.mask) layer.mask = nil;
-    if (layer.maskedCorners != (DPLeftCorners | DPRightCorners)) layer.maskedCorners = DPLeftCorners | DPRightCorners;
-    for (NSView *sub in container.subviews)
-        for (CALayer *sublayer in sub.layer.sublayers) {
-            CAShapeLayer *shape = [sublayer isKindOfClass:CAShapeLayer.class] ? (CAShapeLayer *)sublayer
-                                : [sublayer.mask isKindOfClass:CAShapeLayer.class] ? (CAShapeLayer *)sublayer.mask : nil;
-            DPRestorePath(shape, &DPPathKey, @"path");
-            DPRestorePath(sublayer, &DPShadowPathKey, @"shadowPath");
+    DPWithoutAnimation(^{
+        DPRestoreCornerCurve(layer);
+        CALayer *card = DPChatCard(container).layer;
+        if (card) DPRestoreCornerCurve(card);
+        DPClearCornerRadii(layer);
+        if (layer.mask) layer.mask = nil;
+        if (layer.maskedCorners != (DPLeftCorners | DPRightCorners)) layer.maskedCorners = DPLeftCorners | DPRightCorners;
+        for (NSView *sub in container.subviews)
+            for (CALayer *sublayer in sub.layer.sublayers) {
+                DPRestorePath(DPShapeOf(sublayer), &DPPathKey, @"path");
+                DPRestorePath(sublayer, &DPShadowPathKey, @"shadowPath");
+            }
+        NSView *content = DPRoundedContent(container);
+        NSView *bar = DPToolbarIn(content);
+        if (bar && [content.layer respondsToSelector:@selector(setCornerRadii:)]) {
+            DPFindView(bar, ^BOOL(NSView *view) {
+                CALayer *ctrl = view.layer;
+                if (!DPGet(ctrl, &DPControlCornerKey)) return NO;
+                DPSet(ctrl, &DPControlCornerKey, nil);
+                DPClearCornerRadii(ctrl);
+                return NO;
+            });
         }
-    NSView *content = DPRoundedContent(container);
-    NSView *bar = DPFindView(content, ^BOOL(NSView *view) { return DPIsKind(view, DPDiaToolbar); });
-    if (bar && [content.layer respondsToSelector:@selector(setCornerRadii:)]) {
-        DPFindView(bar, ^BOOL(NSView *view) {
-            CALayer *ctrl = view.layer;
-            if (!DPGet(ctrl, &DPControlCornerKey)) return NO;
-            DPSet(ctrl, &DPControlCornerKey, nil);
-            DPClearCornerRadii(ctrl);
-            return NO;
-        });
-    }
-    [CATransaction commit];
+    });
 }
 
 void DPRoundCornerControls(NSView *container) {
-    if (!DPEdgeToEdge.on && DPEdgeToEdge.progress <= 0 && !DPWindowCorners.on) return;
+    if (!DPEdgeToEdgeActive()) return;
     NSView *content = DPRoundedContent(container);
-    NSView *bar = DPFindView(content, ^BOOL(NSView *view) { return DPIsKind(view, DPDiaToolbar); });
+    NSView *bar = DPToolbarIn(content);
     if (!bar || ![content.layer respondsToSelector:@selector(cornerRadii)]) return;
     CACornerRadii page = content.layer.cornerRadii;
     CGFloat width = NSWidth(content.bounds);
@@ -216,30 +218,27 @@ void DPRoundCornerControls(NSView *container) {
     });
 }
 
+static void DPUseContinuousCurve(CALayer *layer) {
+    if (!layer || layer.cornerCurve == kCACornerCurveContinuous) return;
+    if (!DPGet(layer, &DPCornerCurveKey)) DPSet(layer, &DPCornerCurveKey, layer.cornerCurve ?: kCACornerCurveCircular);
+    layer.cornerCurve = kCACornerCurveContinuous;
+}
+
 void DPApplySquareCorners(NSView *container) {
     CGFloat base, grow, left, right;
     CALayer *layer = DPCornerShape(container, &base, &grow, &left, &right);
     if (!layer) return;
-    BOOL active = DPEdgeToEdge.on || DPEdgeToEdge.progress > 0 || DPWindowCorners.on;
-    if (!active) {
+    if (!DPEdgeToEdgeActive()) {
         if (DPGet(container, &DPCornersTouchedKey)) DPRestoreSquareCorners(container, layer);
         return;
     }
     DPSet(container, &DPCornersTouchedKey, @YES);
-    [CATransaction begin];
-    [CATransaction setDisableActions:YES];
-    if (layer.cornerCurve != kCACornerCurveContinuous) {
-        if (!DPGet(layer, &DPCornerCurveKey)) DPSet(layer, &DPCornerCurveKey, layer.cornerCurve ?: kCACornerCurveCircular);
-        layer.cornerCurve = kCACornerCurveContinuous;
-    }
-    CALayer *card = DPChatCard(container).layer;
-    if (card && card.cornerCurve != kCACornerCurveContinuous) {
-        if (!DPGet(card, &DPCornerCurveKey)) DPSet(card, &DPCornerCurveKey, card.cornerCurve ?: kCACornerCurveCircular);
-        card.cornerCurve = kCACornerCurveContinuous;
-    }
-    DPMaskCorners(container, layer, left, right);
-    DPReshapePaths(container, base, grow, left, right);
-    [CATransaction commit];
+    DPWithoutAnimation(^{
+        DPUseContinuousCurve(layer);
+        DPUseContinuousCurve(DPChatCard(container).layer);
+        DPMaskCorners(container, layer, left, right);
+        DPReshapePaths(container, base, grow, left, right);
+    });
     DPRoundCornerControls(container);
 }
 
@@ -289,5 +288,6 @@ DP_PATCH(DPSquareSidebarCorners) {
     .symbol = @"square.fill",
     .tint = @"systemBlueColor",
     .requires = @"edgeToEdge",
+    .relayout = DPRelayoutContainers,
     .verify = DPVerifySquareCorners,
 };

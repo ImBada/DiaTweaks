@@ -7,6 +7,15 @@ static NSString *const DPIconAlias = @"DiaChosenIcon", *const DPDefaultChoice = 
 
 static NSString *DPInfoPath(NSString *app) { return [app stringByAppendingPathComponent:@"Contents/Info.plist"]; }
 
+static NSString *DPCatalogPath(NSString *app) { return [app stringByAppendingPathComponent:@"Contents/Resources/Assets.car"]; }
+
+static NSString *DPBuildOf(NSString *app) { return [NSDictionary dictionaryWithContentsOfFile:DPInfoPath(app)][@"CFBundleVersion"]; }
+
+static NSString *DPRemoving(NSString *path, NSString *problem) {
+    [NSFileManager.defaultManager removeItemAtPath:path error:NULL];
+    return problem;
+}
+
 static NSString *DPDomainName(void) { return @(getenv("DIATWEAKS_DOMAIN") ?: "com.diapatches"); }
 
 static BOOL DPIsSymlink(NSString *path) {
@@ -31,7 +40,7 @@ static NSString *DPOwnIcon(NSString *app) {
 }
 
 static NSString *DPIconsFolder(NSString *app, NSString *home) {
-    NSString *build = [NSDictionary dictionaryWithContentsOfFile:DPInfoPath(app)][@"CFBundleVersion"];
+    NSString *build = DPBuildOf(app);
     return build ? [home stringByAppendingPathComponent:[@"icons/builds" stringByAppendingPathComponent:build]] : nil;
 }
 
@@ -92,10 +101,9 @@ static NSString *DPWriteBase(NSString *catalog, NSString *folder, NSString *home
     if (![files copyItemAtPath:catalog toPath:incoming error:NULL]) return @"couldn't copy Dia's catalog";
     for (NSString *icon in DPMissingIcons(incoming, home)) {
         NSString *problem = DPMergeCatalog(icon, incoming);
-        if (problem) return [files removeItemAtPath:incoming error:NULL], [NSString stringWithFormat:@"%@: %@", icon.lastPathComponent, problem];
+        if (problem) return DPRemoving(incoming, [NSString stringWithFormat:@"%@: %@", icon.lastPathComponent, problem]);
     }
-    if (rename(incoming.fileSystemRepresentation, base.fileSystemRepresentation) != 0)
-        return [files removeItemAtPath:incoming error:NULL], @"couldn't save the catalog";
+    if (rename(incoming.fileSystemRepresentation, base.fileSystemRepresentation) != 0) return DPRemoving(incoming, @"couldn't save the catalog");
     return nil;
 }
 
@@ -109,13 +117,12 @@ static void DPPruneBuilds(NSString *keep, NSString *alsoKeep) {
 }
 
 static NSString *DPCatalogSource(NSString *app, NSString *folder, NSString *home) {
-    NSString *catalog = [app stringByAppendingPathComponent:@"Contents/Resources/Assets.car"];
+    NSString *catalog = DPCatalogPath(app);
     if (!DPIsSymlink(catalog)) return [NSFileManager.defaultManager fileExistsAtPath:catalog] ? catalog : nil;
     NSString *pristine = [home stringByAppendingPathComponent:@"pristine/Dia.app"];
-    NSString *build = [NSDictionary dictionaryWithContentsOfFile:DPInfoPath(app)][@"CFBundleVersion"];
-    NSString *pristineBuild = [NSDictionary dictionaryWithContentsOfFile:DPInfoPath(pristine)][@"CFBundleVersion"];
-    NSString *pristineCatalog = [pristine stringByAppendingPathComponent:@"Contents/Resources/Assets.car"];
-    if (build && [build isEqual:pristineBuild] && !DPIsSymlink(pristineCatalog)
+    NSString *build = DPBuildOf(app);
+    NSString *pristineCatalog = DPCatalogPath(pristine);
+    if (build && [build isEqual:DPBuildOf(pristine)] && !DPIsSymlink(pristineCatalog)
         && [NSFileManager.defaultManager fileExistsAtPath:pristineCatalog]) return pristineCatalog;
     NSString *base = [folder stringByAppendingPathComponent:@"base.car"];
     if (folder && !DPIsSymlink(base) && [NSFileManager.defaultManager fileExistsAtPath:base]) return base;
@@ -124,7 +131,7 @@ static NSString *DPCatalogSource(NSString *app, NSString *folder, NSString *home
 }
 
 static NSString *DPRestoreCatalog(NSString *app, NSString *folder, NSString *home) {
-    NSString *catalog = [app stringByAppendingPathComponent:@"Contents/Resources/Assets.car"];
+    NSString *catalog = DPCatalogPath(app);
     if (DPIsSymlink(catalog)) {
         NSString *source = DPCatalogSource(app, folder, home);
         if (!source) return @"kept Dia's icons: couldn't find the original catalog";
@@ -133,7 +140,7 @@ static NSString *DPRestoreCatalog(NSString *app, NSString *folder, NSString *hom
         [files removeItemAtPath:incoming error:NULL];
         if (![files copyItemAtPath:source toPath:incoming error:NULL]
             || rename(incoming.fileSystemRepresentation, catalog.fileSystemRepresentation) != 0)
-            return [files removeItemAtPath:incoming error:NULL], @"kept Dia's icons: couldn't restore the catalog";
+            return DPRemoving(incoming, @"kept Dia's icons: couldn't restore the catalog");
     }
     NSURL *url = [NSURL fileURLWithPath:DPInfoPath(app)];
     NSMutableDictionary *info = [[NSMutableDictionary alloc] initWithContentsOfURL:url error:NULL];
@@ -148,7 +155,7 @@ static NSString *DPRestoreCatalog(NSString *app, NSString *folder, NSString *hom
 // Symlinking Assets.car outside the bundle fails codesign --strict (-67003), so only link while App Icon is on.
 NSString *DPPrepareIcons(NSString *app, NSString *installed, NSString *home) {
     NSString *folder = DPIconsFolder(app, home);
-    NSString *catalog = [app stringByAppendingPathComponent:@"Contents/Resources/Assets.car"];
+    NSString *catalog = DPCatalogPath(app);
     if (!DPIconEnabled(home)) {
         NSDictionary *info = [NSDictionary dictionaryWithContentsOfFile:DPInfoPath(app)];
         if (!DPIsSymlink(catalog) && ![info[@"CFBundleIconName"] isEqual:DPIconAlias] && !info[DPOwnIconKey]) return nil;
@@ -164,7 +171,7 @@ NSString *DPPrepareIcons(NSString *app, NSString *installed, NSString *home) {
     [files removeItemAtPath:link error:NULL];
     NSString *current = [folder stringByAppendingPathComponent:@"current.car"];
     if (![files createSymbolicLinkAtPath:link withDestinationPath:current error:NULL] || rename(link.fileSystemRepresentation, catalog.fileSystemRepresentation) != 0)
-        return [files removeItemAtPath:link error:NULL], @"kept Dia's icons: couldn't link the catalog";
+        return DPRemoving(link, @"kept Dia's icons: couldn't link the catalog");
     NSURL *url = [NSURL fileURLWithPath:DPInfoPath(app)];
     NSMutableDictionary *info = [[NSMutableDictionary alloc] initWithContentsOfURL:url error:NULL];
     info[DPOwnIconKey] = DPOwnIcon(app);
@@ -175,7 +182,7 @@ NSString *DPPrepareIcons(NSString *app, NSString *installed, NSString *home) {
 }
 
 NSString *DPSwitchIcon(NSString *app, NSString *home) {
-    NSString *catalog = [app stringByAppendingPathComponent:@"Contents/Resources/Assets.car"];
+    NSString *catalog = DPCatalogPath(app);
     NSString *folder = DPIconsFolder(app, home), *base = [folder stringByAppendingPathComponent:@"base.car"];
     if (!folder || !DPIsSymlink(catalog) || ![NSFileManager.defaultManager fileExistsAtPath:base])
         return @"this Dia wasn't built for icon switching; run `diapatch install`";

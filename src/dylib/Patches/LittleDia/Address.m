@@ -73,10 +73,7 @@
 - (void)refresh {
     BOOL open = self.hovered || self.field;
     [self.effectiveAppearance performAsCurrentDrawingAppearance:^{
-        [CATransaction begin];
-        [CATransaction setDisableActions:YES];
-        self.layer.backgroundColor = open ? [NSColor.labelColor colorWithAlphaComponent:0.07].CGColor : nil;
-        [CATransaction commit];
+        DPWithoutAnimation(^{ self.layer.backgroundColor = open ? [NSColor.labelColor colorWithAlphaComponent:0.07].CGColor : nil; });
     }];
     if (self.field) return;
     NSURL *url = self.url;
@@ -86,7 +83,8 @@
         NSTextView *shown = (NSTextView *)DPFindView(self.title, ^BOOL(NSView *view) { return [view isKindOfClass:NSTextView.class]; });
         host = shown.string ?: @"";
     } else if (self.hovered) {
-        NSString *path = [url.path isEqual:@"/"] ? @"" : url.path ?: @"";
+        NSString *path = url.path ?: @"";
+        if ([path isEqual:@"/"]) path = @"";
         rest = url.query.length ? [NSString stringWithFormat:@"%@?%@", path, url.query] : path;
     } else {
         NSString *pageTitle = self.pageTitle;

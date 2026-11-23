@@ -1,6 +1,7 @@
 mod child;
 mod dia;
 mod env;
+mod local;
 mod lock;
 mod manifest;
 mod menu;
@@ -14,7 +15,7 @@ mod ui;
 mod update;
 mod update_dia;
 
-use std::{io, process::ExitCode};
+use std::{io, path::PathBuf, process::ExitCode};
 
 use anyhow::{bail, Result};
 use clap::{CommandFactory, Parser, Subcommand};
@@ -65,6 +66,41 @@ enum Command {
         #[arg(long)]
         purge: bool,
     },
+    /// Add, build and list tweaks you keep in your own folder
+    Local {
+        #[command(subcommand)]
+        command: Option<LocalCommand>,
+    },
+}
+
+#[derive(Subcommand)]
+enum LocalCommand {
+    /// List the local tweaks and whether each built
+    List,
+    /// Copy a .m file, tweak folder, PR .patch, .zip or .dylib into the local folder
+    Add {
+        #[arg(value_name = "PATH")]
+        path: PathBuf,
+    },
+    /// Compile the local tweaks now
+    Build {
+        #[arg(value_name = "NAME")]
+        names: Vec<String>,
+    },
+    /// Move a local tweak to the Trash
+    Remove {
+        #[arg(value_name = "NAME")]
+        name: String,
+    },
+    /// Show the local folder in Finder
+    Open,
+    /// Zip a local tweak so you can share it
+    Export {
+        #[arg(value_name = "NAME")]
+        name: String,
+    },
+    /// Check the compiler, the SDK and every local tweak
+    Doctor,
 }
 
 fn main() -> ExitCode {
@@ -112,5 +148,14 @@ fn run(command: Option<Command>, ui: &Ui) -> Result<()> {
         Command::Update => update::run(&env, ui),
         Command::UpdateDia => update_dia::run(&env, ui),
         Command::Restore { purge } => restore::run(&env, ui, purge),
+        Command::Local { command } => match command.unwrap_or(LocalCommand::List) {
+            LocalCommand::List => local::list(&env),
+            LocalCommand::Add { path } => local::add(&env, ui, &path),
+            LocalCommand::Build { names } => local::build(&env, ui, &names),
+            LocalCommand::Remove { name } => local::remove(&env, ui, &name),
+            LocalCommand::Open => local::open(&env),
+            LocalCommand::Export { name } => local::export(&env, ui, &name),
+            LocalCommand::Doctor => local::doctor(&env, ui),
+        },
     }
 }

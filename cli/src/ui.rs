@@ -9,7 +9,6 @@ use cliclack::{Theme, ThemeState};
 
 use crate::signals::{self, Cancelled};
 
-// Ignore output errors so a closed pipe never aborts a step mid-way.
 pub struct Ui {
     pub interactive: bool,
     pub yes: bool,
@@ -165,6 +164,7 @@ pub fn prompt<T>(result: io::Result<T>) -> Result<T> {
     Ok(result?)
 }
 
+// Output errors are ignored so a closed pipe never aborts a step mid-way.
 pub fn say(message: impl Display) {
     let _ = writeln!(io::stdout().lock(), "{message}");
 }

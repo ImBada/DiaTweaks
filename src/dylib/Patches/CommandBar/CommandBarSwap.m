@@ -18,16 +18,13 @@ DPCommandBarOverlay *DPTakeHandOver(NSWindow *window) {
 void DPHandOver(DPCommandBarOverlay *overlay) {
     NSWindow *window = overlay.host;
     DPFinishHandOver(window);
-    [overlay.watch invalidate];
-    if (overlay.keyMonitor) [NSEvent removeMonitor:overlay.keyMonitor];
-    overlay.keyMonitor = nil;
+    DPStopWatching(overlay);
     DPSet(window, &DPOverlayKey, nil);
     DPSet(window, &DPHandingOverKey, overlay);
     __weak NSWindow *weak = window;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 600 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{ DPFinishHandOver(weak); });
 }
 
-// Coalesce ⌘T/⌘L presses while Dia is still opening the requested bar so rapid presses swap instead of stacking.
 static char DPCatchingUpKey, DPWantKey, DPPressedKey, DPNewTabPressKey, DPAddressPressKey;
 
 typedef NS_ENUM(NSInteger, DPBar) { DPNoBar, DPNewTabBar, DPAddressBar };

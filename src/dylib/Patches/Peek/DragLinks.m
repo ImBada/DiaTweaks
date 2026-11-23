@@ -28,11 +28,10 @@ static void DPZoneSpring(CALayer *layer, NSString *keyPath, id to, CFTimeInterva
     CASpringAnimation *spring = DPPeekSpring(keyPath, response, damping);
     spring.fromValue = [(layer.presentationLayer ?: layer) valueForKeyPath:keyPath];
     spring.toValue = to;
-    [CATransaction begin];
-    [CATransaction setDisableActions:YES];
-    [layer setValue:to forKeyPath:keyPath];
-    [layer addAnimation:spring forKey:keyPath];
-    [CATransaction commit];
+    DPWithoutAnimation(^{
+        [layer setValue:to forKeyPath:keyPath];
+        [layer addAnimation:spring forKey:keyPath];
+    });
 }
 
 @implementation DPPeekZone
@@ -96,11 +95,10 @@ static void DPZoneSpring(CALayer *layer, NSString *keyPath, id to, CFTimeInterva
 
 - (void)appear:(BOOL)shown {
     if (shown) {
-        [CATransaction begin];
-        [CATransaction setDisableActions:YES];
-        self.card.opacity = 0;
-        [self.card setValue:@0.65 forKeyPath:@"transform.scale"];
-        [CATransaction commit];
+        DPWithoutAnimation(^{
+            self.card.opacity = 0;
+            [self.card setValue:@0.65 forKeyPath:@"transform.scale"];
+        });
     }
     DPZoneSpring(self.card, @"transform.scale", shown ? @1 : @0.65, 0.21, 0.66);
     DPZoneSpring(self.card, @"opacity", shown ? @1 : @0, shown ? 0.21 : 0.15, shown ? 0.66 : 1);
@@ -113,11 +111,10 @@ static void DPZoneSpring(CALayer *layer, NSString *keyPath, id to, CFTimeInterva
     spring.additive = YES;
     spring.fromValue = [NSValue valueWithPoint:NSMakePoint(from.x - to.x, from.y - to.y)];
     spring.toValue = [NSValue valueWithPoint:NSZeroPoint];
-    [CATransaction begin];
-    [CATransaction setDisableActions:YES];
-    self.card.position = to;
-    [self.card addAnimation:spring forKey:nil];
-    [CATransaction commit];
+    DPWithoutAnimation(^{
+        self.card.position = to;
+        [self.card addAnimation:spring forKey:nil];
+    });
 }
 
 - (void)setHovered:(BOOL)hovered {
@@ -164,7 +161,7 @@ static void DPZoneSpring(CALayer *layer, NSString *keyPath, id to, CFTimeInterva
 
 @end
 
-static void DPHideZone(void) {
+void DPPeekHideDragZone(void) {
     NSPanel *panel = DPZonePanel;
     if (!panel) return;
     DPZonePanel = nil;
@@ -177,11 +174,9 @@ static void DPHideZone(void) {
     });
 }
 
-void DPPeekHideDragZone(void) { DPHideZone(); }
-
 static void DPShowZone(NSWindow *window, NSPoint pointer) {
     if (!window) return;
-    DPHideZone();
+    DPPeekHideDragZone();
     CGFloat above = pointer.y + DPZoneGap + DPZoneCard.height / 2, below = pointer.y - DPZoneGap - DPZoneCard.height / 2;
     CGFloat y = above + DPZoneCard.height / 2 < NSMaxY([window convertRectToScreen:window.contentLayoutRect]) ? above : below;
     NSSize size = NSMakeSize(DPZoneCard.width + 2 * DPZoneRoom, DPZoneCard.height + 2 * DPZoneRoom);
@@ -202,7 +197,7 @@ static void DPShowZone(NSWindow *window, NSPoint pointer) {
     DPZonePanel = panel;
     // A drop elsewhere ends the session only after the drag image slides home, so hide on release.
     DPZoneRelease = [NSTimer timerWithTimeInterval:1.0 / 60 repeats:YES block:^(NSTimer *timer) {
-        if (!(NSEvent.pressedMouseButtons & 1)) DPHideZone();
+        if (!(NSEvent.pressedMouseButtons & 1)) DPPeekHideDragZone();
     }];
     [NSRunLoop.mainRunLoop addTimer:DPZoneRelease forMode:NSRunLoopCommonModes];
 }
@@ -217,7 +212,7 @@ static NSDraggingSession *DPPage_beginDrag(NSView *self, SEL _cmd, NSArray<NSDra
 
 static void DPPage_dragEnded(NSView *self, SEL _cmd, NSDraggingSession *session, NSPoint point, NSDragOperation operation) {
     DPCallOriginal(DPPage_dragEnded, self, session, point, operation);
-    DPHideZone();
+    DPPeekHideDragZone();
 }
 
 static void DPInstallPeekDragLinks(void) {
@@ -226,7 +221,7 @@ static void DPInstallPeekDragLinks(void) {
 }
 
 static void DPApplyPeekDragLinks(DPPatch *patch) {
-    if (!patch->on) DPHideZone();
+    if (!patch->on) DPPeekHideDragZone();
 }
 
 DP_PATCH(DPPeekDragLinks) {

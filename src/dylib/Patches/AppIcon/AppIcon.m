@@ -65,7 +65,7 @@ static void DPApplyAppIcon(DPPatch *patch) {
     if (DPTesting) return;
     BOOL linked = DPCatalogLinked(), saved = DPSavedOn(patch);
     if (!linked) {
-        // Paused turns patches off without saving: keep the bundle as built instead of rebuilding.
+        // Pause turns patches off without saving: keep the bundle as built.
         if (patch->on != saved) return;
         if (saved || DPBuilt || DPBuilding) DPRebuildCatalog();
         return;
@@ -87,7 +87,6 @@ static BOOL DPWorkspace_setIcon(NSWorkspace *self, SEL _cmd, NSImage *image, NSS
 static void DPInstallAppIcon(void) {
     DPHook("NSWorkspace", @selector(setIcon:forFile:options:), (IMP)DPWorkspace_setIcon);
     DPInstallDockTile();
-    // The Dock shows its cached icon after a relaunch, so draw the chosen one again.
     DPOnLaunch(^{ if ((DPAppIcon.on || DPOwnTileInDock()) && DPCatalogLinked()) DPDrawOwnTile(); });
 }
 
@@ -118,12 +117,12 @@ static NSMenu *DPAppIconChoices(void) {
 
 DP_PATCH(DPAppIcon) {
     .key = @"appIcon",
-    .order = 115,
+    .order = 99,
     .title = @"App Icon",
     .detail = @"Choose a different icon for Dia. It follows the icon style you choose in System Settings.",
     .symbol = @"app.badge.fill app.badge",
-    .tint = @"systemBrownColor",
-    .section = @"Window",
+    .tint = @"systemYellowColor",
+    .section = @"App",
     .choice = @"appIconChoice",
     .defaultChoice = @"AppIcon",
     .choices = DPAppIconChoices,

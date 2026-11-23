@@ -75,7 +75,7 @@ DP_PATCH(DPPinnedTabMinusButton) {
     .title = @"Minus Button on Open Pinned Tabs",
     .detail = @"Show a minus button instead on pinned tabs with a page open, in or out of a folder, as in Arc. It closes the page and keeps the tab pinned.",
     .symbol = @"minus.circle.fill",
-    .tint = @"systemPinkColor",
+    .tint = @"systemTealColor",
     .requires = @"pinnedTabCloseButton",
     .classes = DPClasses(DPDiaTabView, DPDiaTabContentView, DPDiaTabPageAttributes),
     .install = DPInstallPinnedTabMinusButton,

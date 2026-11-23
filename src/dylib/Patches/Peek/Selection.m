@@ -7,22 +7,22 @@ static char DPPeekLastActiveKey;
 static BOOL DPPeekSyncing;
 static NSTimer *DPPeekSyncTimer;
 
+static void DPPeekAddTabIDs(NSMutableSet<NSString *> *ids, id owner) {
+    NSArray *tabs = DPValueForKey(owner, @"appleScriptTabs");
+    if (![tabs isKindOfClass:NSArray.class]) return;
+    for (id tab in tabs) {
+        NSString *tabID = DPTabID(tab);
+        if (tabID) [ids addObject:tabID];
+    }
+}
+
 static NSSet<NSString *> *DPPeekOpenTabIDs(id scriptWindow, NSString *active) {
     if (!scriptWindow || !active) return nil;
     NSMutableSet<NSString *> *openIDs = [NSMutableSet set];
-    NSArray *tabs = DPValueForKey(scriptWindow, @"appleScriptTabs");
-    for (id tab in [tabs isKindOfClass:NSArray.class] ? tabs : @[]) {
-        NSString *tabID = DPTabID(tab);
-        if (tabID) [openIDs addObject:tabID];
-    }
+    DPPeekAddTabIDs(openIDs, scriptWindow);
     NSArray *profiles = DPValueForKey(scriptWindow, @"appleScriptProfiles");
-    for (id profile in [profiles isKindOfClass:NSArray.class] ? profiles : @[]) {
-        NSArray *ptabs = DPValueForKey(profile, @"appleScriptTabs");
-        for (id tab in [ptabs isKindOfClass:NSArray.class] ? ptabs : @[]) {
-            NSString *tabID = DPTabID(tab);
-            if (tabID) [openIDs addObject:tabID];
-        }
-    }
+    if ([profiles isKindOfClass:NSArray.class])
+        for (id profile in profiles) DPPeekAddTabIDs(openIDs, profile);
     return [openIDs containsObject:active] ? openIDs : nil;
 }
 
@@ -126,14 +126,18 @@ static void DPPeekHookIfPresent(const char *className, SEL sel, IMP imp) {
     if (cls && class_getInstanceMethod(cls, sel)) DPHookClass(cls, sel, imp);
 }
 
+static void DPPeekSyncWindowOf(NSView *view) {
+    if (DPPeek.on && view.window && DPPeekHasCards()) DPPeekSyncTabs(view.window);
+}
+
 static void DPPeekPane_viewDidMoveToWindow(NSView *self, SEL _cmd) {
     DPCallOriginal(DPPeekPane_viewDidMoveToWindow, self);
-    if (DPPeek.on && self.window && DPPeekHasCards()) DPPeekSyncTabs(self.window);
+    DPPeekSyncWindowOf(self);
 }
 
 static void DPPeekNewTab_viewDidMoveToWindow(NSView *self, SEL _cmd) {
     DPCallOriginal(DPPeekNewTab_viewDidMoveToWindow, self);
-    if (DPPeek.on && self.window && DPPeekHasCards()) DPPeekSyncTabs(self.window);
+    DPPeekSyncWindowOf(self);
 }
 
 static void DPPeekRunMain(void (^work)(void)) {
@@ -151,15 +155,12 @@ static void DPPeekPage_setVisibility(id self, SEL _cmd, NSInteger visibility) {
     DPCallOriginal(DPPeekPage_setVisibility, self, visibility);
     if (!DPPeek.on || !DPPeekHasCards()) return;
     __weak id weak = self;
-    if (visibility == DPPeekPageVisible) {
-        DPPeekRunMain(^{
-            if (DPPeek.on && DPPeekHasCards() && weak && !DPPeekCardForPage(weak)) DPPeekSyncAllWindows();
-        });
-    } else {
-        DPPeekRunMain(^{
-            if (DPPeek.on && DPPeekHasCards() && weak && DPPeekIsVisibleSource(weak)) DPPeekSyncAllWindows();
-        });
-    }
+    BOOL appeared = visibility == DPPeekPageVisible;
+    DPPeekRunMain(^{
+        if (!DPPeek.on || !DPPeekHasCards() || !weak) return;
+        BOOL stale = appeared ? !DPPeekCardForPage(weak) : DPPeekIsVisibleSource(weak);
+        if (stale) DPPeekSyncAllWindows();
+    });
 }
 
 static void DPPeekCloseForPageOrSource(id page) {

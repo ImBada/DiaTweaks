@@ -104,7 +104,6 @@ int main(void) {
         };
         setenv("DIATWEAKS_DOMAIN", domain.UTF8String, 1);
 
-        // 1. Default (appIcon OFF): Assets.car stays regular file and passes codesign --deep --strict.
         NSString *out = nil;
         expect(runCmd(@[ diapatch, @"build" ], env, &out) == 0, @"diapatch build succeeds with appIcon off");
         expect(runCmd(@[ diapatch, @"apply" ], env, &out) == 0, @"diapatch apply succeeds with appIcon off");
@@ -119,7 +118,6 @@ int main(void) {
         expect(runCmd(@[ diapatch, @"set-icon" ], env, &out) != 0, @"set-icon refuses unlinked bundle without corrupting it");
         expect(runCmd(@[ @"/usr/bin/codesign", @"--verify", @"--deep", @"--strict", installed ], nil, &out) == 0, @"codesign --deep --strict still passes after rejected set-icon");
 
-        // 2. Enable appIcon: build links Assets.car, signs over symlink, default validity passes, live set-icon keeps validity.
         setDomainValue(domain, CFSTR("appIcon"), kCFBooleanTrue);
         setDomainValue(domain, CFSTR("appIconChoice"), CFSTR("AppIconBlue"));
         expect(runCmd(@[ diapatch, @"build" ], env, &out) == 0, @"diapatch build succeeds with appIcon on");
@@ -133,7 +131,6 @@ int main(void) {
         expect(runCmd(@[ diapatch, @"set-icon" ], env, &out) == 0, @"live set-icon succeeds on linked bundle");
         expect(checkValidity(installed, kSecCSDefaultFlags) == errSecSuccess, @"SecStaticCode(Default) still passes after live set-icon");
 
-        // 3a. Paused overrides appIcon ON during build, restoring regular Assets.car + strict codesign.
         NSString *pausedFile = [home stringByAppendingPathComponent:@"paused"];
         expect([NSData.data writeToFile:pausedFile atomically:YES], @"create paused marker");
         expect(runCmd(@[ diapatch, @"build" ], env, &out) == 0, @"diapatch build succeeds while paused");
@@ -141,7 +138,6 @@ int main(void) {
         expect(runCmd(@[ @"/usr/bin/codesign", @"--verify", @"--deep", @"--strict", staged ], nil, &out) == 0, @"codesign --deep --strict passes while paused");
         [fm removeItemAtPath:pausedFile error:NULL];
 
-        // 3b. Safe mode level > 0 overrides appIcon ON during build, restoring regular Assets.car + strict codesign.
         NSString *safeFile = [home stringByAppendingPathComponent:@"safe-mode.plist"];
         expect([@{ @"level" : @1 } writeToFile:safeFile atomically:YES], @"write safe-mode.plist level=1");
         expect(runCmd(@[ diapatch, @"build" ], env, &out) == 0, @"diapatch build succeeds in safe mode");
@@ -149,7 +145,6 @@ int main(void) {
         expect(runCmd(@[ @"/usr/bin/codesign", @"--verify", @"--deep", @"--strict", staged ], nil, &out) == 0, @"codesign --deep --strict passes in safe mode");
         [fm removeItemAtPath:safeFile error:NULL];
 
-        // 4. Disable appIcon: build + apply restores regular Assets.car and passes strict codesign again.
         setDomainValue(domain, CFSTR("appIcon"), kCFBooleanFalse);
         expect(runCmd(@[ diapatch, @"build" ], env, &out) == 0, @"diapatch build succeeds after disabling appIcon");
         expect(runCmd(@[ diapatch, @"apply" ], env, &out) == 0, @"diapatch apply succeeds after disabling appIcon");
@@ -160,9 +155,6 @@ int main(void) {
         expect(runCmd(@[ @"/usr/bin/codesign", @"--verify", @"--deep", @"--strict", installed ], nil, &out) == 0, @"codesign --deep --strict passes after disabling appIcon");
         expect(checkValidity(installed, kSecCSStrictValidate | kSecCSRestrictSymlinks) == errSecSuccess, @"SecStaticCode(Strict|RestrictSymlinks) passes after disabling appIcon");
 
-        // 5. Direct DPPrepareIcons on a previously symlinked bundle (in-process ASan/UBSan check):
-        //    a) re-running with appIcon ON keeps base.car a regular file (never circular symlink)
-        //    b) running with appIcon OFF replaces symlink in place and restores Info.plist so strict codesign passes.
         NSString *direct = [root stringByAppendingPathComponent:@"Direct.app"];
         expect([fm copyItemAtPath:pristine toPath:direct error:NULL], @"copy Direct.app");
         setDomainValue(domain, CFSTR("appIcon"), kCFBooleanTrue);
@@ -181,7 +173,6 @@ int main(void) {
         expect(runCmd(@[ @"/usr/bin/codesign", @"--verify", @"--deep", @"--strict", direct ], nil, &out) == 0, @"Direct.app passes codesign --deep --strict after restore");
         expect(checkValidity(direct, kSecCSStrictValidate | kSecCSRestrictSymlinks) == errSecSuccess, @"Direct.app passes SecStaticCode(Strict|RestrictSymlinks) after restore");
 
-        // Clean up isolated preferences and temp dir.
         setDomainValue(domain, CFSTR("appIcon"), NULL);
         setDomainValue(domain, CFSTR("appIconChoice"), NULL);
         [fm removeItemAtPath:root error:NULL];

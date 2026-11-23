@@ -33,7 +33,6 @@ static NSString *DPTestSuiteName(void) {
 }
 @end
 
-// --- Shared stubs for linked patches ---
 DPPatch DPTranslucentSidebar, DPCompactWithChat, DPLittleDia, DPLittleDiaRemember;
 DPPatch DPHideToolbar, DPShowLoadingProgress;
 NSHashTable<NSView *> *DPPanes;
@@ -72,6 +71,7 @@ void DPDrawProgressShader(CAMetalLayer *layer, CGFloat progress, CGFloat cycle, 
 void DPEnforceHides(NSView *host) {}
 void DPApplyHides(DPPatch *patch) {}
 void DPDismissConnectAppPrompts(void) {}
+BOOL DPIsSingleAppUpsellBar(NSView *view) { return NO; }
 void DPAddLaunchFlag(NSString *flag) {}
 void DPDropLaunchFlag(NSString *flag) {}
 BOOL DPSavedOn(DPPatch *patch) { return NO; }
@@ -97,7 +97,6 @@ void DPOpenInProfile(NSString *url, NSUInteger index, void (^done)(BOOL opened))
 id DPMsg(id object, SEL sel) { return nil; }
 NSString *DPText(id value) { return [value isKindOfClass:NSString.class] ? value : nil; }
 
-// --- Test utilities & tracking layers ---
 static int failures;
 static void Check(BOOL ok, NSString *msg) {
     if (ok) return;
@@ -127,7 +126,6 @@ static void DrainMain(void) {
 - (void)setOpacity:(float)opacity { [self recordMutation]; [super setOpacity:opacity]; }
 @end
 
-// --- Fake Dia classes ---
 @interface _TtC6Window14PlatformWindow : NSWindow
 @property CGFloat fakeCornerRadius;
 @property BOOL fakeVisible, fakeMiniaturized;
@@ -530,8 +528,6 @@ static BOOL OverridesCornerRadius(CALayer *layer) {
     return !zero && !plain;
 }
 
-// --- Tests ---
-
 static void TestEdgeToEdgeOffAndRestore(void) {
     DPEdgeToEdge.on = NO;
     DPEdgeToEdge.progress = 0;
@@ -560,7 +556,6 @@ static void TestEdgeToEdgeOffAndRestore(void) {
     [bar addSubview:cornerBtn];
     [rounded addSubview:bar];
 
-    // Chat card nested inside rounded content
     NSView *chatRoot = [[NSView alloc] initWithFrame:rounded.bounds];
     NSView *chatHost = [[NSView alloc] initWithFrame:NSMakeRect(340, 10, 320, 500)];
     chatHost.wantsLayer = YES;
@@ -571,7 +566,6 @@ static void TestEdgeToEdgeOffAndRestore(void) {
     [rounded addSubview:chatRoot];
     chatHost.hidden = YES;
 
-    // Shadow/path subview
     NSView *borderHost = [[NSView alloc] initWithFrame:container.bounds];
     borderHost.wantsLayer = YES;
     CAShapeLayer *shape = [CAShapeLayer layer];
@@ -583,7 +577,6 @@ static void TestEdgeToEdgeOffAndRestore(void) {
     [container addSubview:borderHost];
     [win.contentView addSubview:container];
 
-    // 1. Both EdgeToEdge & WindowCorners OFF: ZERO mutations!
     container.frame = NSMakeRect(220, 6, 674, 588);
     [container layout];
     [container updateLayer];
@@ -594,11 +587,10 @@ static void TestEdgeToEdgeOffAndRestore(void) {
     Check(container->cornerRadius == 10, @"EdgeToEdge off: leaves cornerRadius ivar untouched");
     Check(CGPathEqualToPath(shape.path, origPath), @"EdgeToEdge off: leaves shape path untouched");
 
-    // 2. updateLayer with chat card visible must NOT synchronously write container.frame!
     DPEdgeToEdge.on = YES;
     DPEdgeToEdge.progress = 1;
     chatHost.hidden = YES;
-    container.frame = NSMakeRect(220, 6, 674, 588); // expands right/bottom/top
+    container.frame = NSMakeRect(220, 6, 674, 588);
     chatHost.hidden = NO;
     container.frameWrites = 0;
     [container updateLayer];
@@ -606,7 +598,6 @@ static void TestEdgeToEdgeOffAndRestore(void) {
     DrainMain();
     Check(container.frameWrites >= 1, @"EdgeToEdge: deferred restyle restores frame cleanly off updateLayer");
 
-    // 3. Turning ON applies square corners & continuous curve; turning OFF restores everything!
     chatHost.hidden = YES;
     container.frame = NSMakeRect(220, 6, 674, 588);
     [container layout];
@@ -691,19 +682,16 @@ static void TestWindowMaterialUpdateLayerAndIdempotency(void) {
     DPWindowMaterial.on = YES;
     gMaterialChoice = @"material.7";
 
-    // updateLayer on tile must NOT synchronously hide wash or mutate window!
     wash.hiddenCalls = 0;
     [tile updateLayer];
     [tile updateLayer];
     [tile updateLayer];
     Check(!wash.hidden && wash.hiddenCalls == 0, @"WindowMaterial: tile updateLayer does not synchronously call setHidden:");
 
-    // Draining main queue applies once cleanly
     DrainMain();
     Check(wash.hidden && wash.hiddenCalls == 1 && effect.material == NSVisualEffectMaterialSidebar,
           @"WindowMaterial: deferred coalesced updateLayer applies material and hides wash once");
 
-    // Repeated host layouts must NOT re-call setHidden: on already-hidden wash!
     wash.hiddenCalls = 0;
     for (int i = 0; i < 10; i++) [host layout];
     Check(wash.hidden && wash.hiddenCalls == 0, @"WindowMaterial: repeated layout makes 0 redundant setHidden: calls");
@@ -717,7 +705,7 @@ static void TestWindowMaterialUpdateLayerAndIdempotency(void) {
 static void TestPullRequestRepoAndCompactTabRows(void) {
     _TtC6Window14PlatformWindow *win = [[_TtC6Window14PlatformWindow alloc] initWithContentRect:NSMakeRect(-30000, -30000, 300, 500)
                                                                                      styleMask:NSWindowStyleMaskTitled backing:NSBackingStoreBuffered defer:NO];
-    win.fakeVisible = NO; // minimized/non-visible!
+    win.fakeVisible = NO;
     gFakeWindows = @[ win ];
 
     _TtC7TabList11TabListView *tabList = [[_TtC7TabList11TabListView alloc] initWithFrame:NSMakeRect(0, 0, 220, 400)];
@@ -747,7 +735,6 @@ static void TestPullRequestRepoAndCompactTabRows(void) {
     layout.cachedAttributes = attrs;
     layout->contentHeight = 111;
 
-    // TabContentView cell inside collection view
     _TtC5TabUI14TabContentView *content = [[_TtC5TabUI14TabContentView alloc] initWithFrame:NSMakeRect(0, 0, 220, 51)];
     DPFakePRVM *vm = [DPFakePRVM new];
     vm.delegate = [DPFakePRDelegate new];
@@ -779,7 +766,6 @@ static void TestPullRequestRepoAndCompactTabRows(void) {
     Check(statusLine != nil && !statusLine.hidden && [statusLine.stringValue isEqual:@"Approved"],
           @"PullRequestRepo: shows second-line PR status");
 
-    // 1. Add a 2nd tall PR row (uuidB) while Dia reuses cached attributes -> must undo 1st pass before applying both (NO double-grow of row 0!)
     _TtC5TabUI14TabContentView *contentB = [[_TtC5TabUI14TabContentView alloc] initWithFrame:NSMakeRect(0, 51, 220, 51)];
     DPFakePRVM *vmB = [DPFakePRVM new];
     vmB.delegate = [DPFakePRDelegate new];
@@ -797,31 +783,26 @@ static void TestPullRequestRepoAndCompactTabRows(void) {
           && fabs(NSMinY(attrs[2].frame) - 102) < 0.1 && fabs(layout->contentHeight - 139) < 0.1,
           @"PullRequestRepo: cached attributes undo previous offsets cleanly when adding 2nd PR row (no double-grow)");
 
-    // 2. Cell recycled from Tab A (PR) to Tab C (non-PR) with subtitleView hidden (NO setStringValue: call!):
     vm.delegate.tabID = uuidC;
     vm.delegate.currentlyRenderedLiveItem = @"normal";
     subWrap.hidden = YES;
     [content layout];
     Check(statusLine.hidden, @"PullRequestRepo: recycled cell hides stale DPPRStatusLine when rebound to non-PR tab");
-    // Tab A is still in DPTallTabs (merely scrolled off-screen, not navigated away)
     [layout prepareLayout];
     Check(fabs(NSHeight(attrs[0].frame) - 51) < 0.1, @"PullRequestRepo: recycling cell preserves off-screen Tab A tall height");
 
-    // 3. Same tab (Tab B) navigates away from PR to plain URL -> removes Tab B from DPTallTabs!
     vmB.delegate.currentlyRenderedLiveItem = @"normal";
     subLabelB.stringValue = @"docs.example.com";
     [layout prepareLayout];
     Check(fabs(NSHeight(attrs[1].frame) - 37) < 0.1 && fabs(layout->contentHeight - 125) < 0.1,
           @"PullRequestRepo: navigating PR tab to non-PR shrinks row back to 37pt");
 
-    // 4. Toggle OFF cleans minimized window & restores cached attributes + contentHeight!
     DPPullRequestRepo.on = NO;
     DPPullRequestRepo.apply(&DPPullRequestRepo);
     [layout prepareLayout];
     Check(statusLine.superview == nil && fabs(NSHeight(attrs[0].frame) - 37) < 0.1 && fabs(layout->contentHeight - 111) < 0.1,
           @"PullRequestRepo: toggle-off removes DPPRStatusLine in minimized window and restores cached layout");
 
-    // 5. CompactTabRows DPGroupCell_layout: 5x idempotent & toggle-off restore
     _TtC5TabUI16TabGroupCellView *group = [[_TtC5TabUI16TabGroupCellView alloc] initWithFrame:NSMakeRect(0, 0, 220, 100)];
     NSView *header = [[NSView alloc] initWithFrame:NSMakeRect(0, 62, 220, 34)];
     [group addSubview:header];
@@ -850,7 +831,6 @@ static void TestProfileEmojiTidyTabsGrainAndCA(void) {
     win.fakeVisible = YES;
     gFakeWindows = @[ win ];
 
-    // 1. ProfileEmoji: defaultOn with NO emojis configured makes ZERO dot frame mutations
     _TtC10TabSidebar17SpaceSwitcherView *switcher = [[_TtC10TabSidebar17SpaceSwitcherView alloc] initWithFrame:NSMakeRect(0, 0, 100, 28)];
     _TtC10TabSidebar21SpaceSwitcherItemView *item = [[_TtC10TabSidebar21SpaceSwitcherItemView alloc] initWithFrame:NSMakeRect(0, 0, 16, 28)];
     DPTrackingDot *dot = [[DPTrackingDot alloc] initWithFrame:NSMakeRect(2, 11, 6, 6)];
@@ -867,7 +847,6 @@ static void TestProfileEmojiTidyTabsGrainAndCA(void) {
     [item updateLayer];
     Check(dot.originWrites == 0, @"ProfileEmoji: default-on with zero emojis does not mutate dot frame");
 
-    // 2. ProfileEmoji with emoji configured: updateLayer never adds/removes subviews, only updates alphaValue
     [defaults setObject:@{ @"S1" : @"🔥" } forKey:@"profileEmojis"];
     [item layout];
     NSTextField *emojiLabel = nil;
@@ -880,7 +859,6 @@ static void TestProfileEmojiTidyTabsGrainAndCA(void) {
     Check(item.subviewAdds == 0 && item.subviewRemovals == 0 && fabs(emojiLabel.alphaValue - 0.45) < 0.01,
           @"ProfileEmoji: updateLayer updates alphaValue without mutating subview hierarchy");
 
-    // 3. SidebarGrain: updateLayer hooks defer & coalesce DPRefreshSidebarGrain off updateLayer!
     DPSidebarGrain.on = YES;
     item.isSelected = YES;
     gGrainRefreshes = 0;
@@ -894,7 +872,6 @@ static void TestProfileEmojiTidyTabsGrainAndCA(void) {
     Check(gGrainRefreshes == 1, @"SidebarGrain: multiple updateLayer hooks coalesce to 1 async refresh");
     DPSidebarGrain.on = NO;
 
-    // 4. TidyTabs: DPSeparator_updateLayer does not add/remove subviews; DPTidyRowView wraps _line in disableActions; toggle-off cleans hidden separator
     _TtC7TabList20TabListSeparatorView *sep = [[_TtC7TabList20TabListSeparatorView alloc] initWithFrame:NSMakeRect(0, 100, 200, 20)];
     sep.wantsLayer = YES;
     CALayer *sepLine = [CALayer layer];
@@ -916,7 +893,6 @@ static void TestProfileEmojiTidyTabsGrainAndCA(void) {
     for (NSView *sub in sep.subviews) if ([sub isKindOfClass:DPTidyBrush.class]) hadBrush = YES;
     Check(hadBrush && NSWidth(sepLine.frame) < 180, @"TidyTabs: layout places brush and trims separator line");
 
-    // Hide separator, then toggle TidyTabs OFF -> DPTidyBrushes sweep must still remove brush and restore line!
     sep.hidden = YES;
     DPTidyTabs.on = NO;
     DPTidySetBusy(NO);
@@ -926,7 +902,6 @@ static void TestProfileEmojiTidyTabsGrainAndCA(void) {
     Check(!stillHasBrush && fabs(NSWidth(sepLine.frame) - 180) < 0.5,
           @"TidyTabs: toggle-off cleans brush and restores line even on hidden separator");
 
-    // DPTidyRowView _line.backgroundColor uses CATransaction setDisableActions:YES
     DPTidyRowView *tidyRow = [[DPTidyRowView alloc] initWithFrame:NSMakeRect(0, 0, 200, 24)];
     DPActionCheckLayer *checkLine = [DPActionCheckLayer layer];
     Ivar lineIvar = class_getInstanceVariable(DPTidyRowView.class, "_line");
@@ -935,7 +910,6 @@ static void TestProfileEmojiTidyTabsGrainAndCA(void) {
     Check(checkLine.mutations == 1 && checkLine.unguardedMutations == 0,
           @"TidyTabs: DPTidyRowView updateLayer mutates _line.backgroundColor with disableActions=YES");
 
-    // 5. HideTabGroupBackground: DPStyleBackground wraps sublayer mutations in CATransaction setDisableActions:YES
     _TtC5TabUI16TabGroupCellView *gcell = [[_TtC5TabUI16TabGroupCellView alloc] initWithFrame:NSMakeRect(0, 0, 200, 80)];
     _TtCC5TabUI16TabGroupCellViewP33_6B047B569AD47EBB5C3E7DC66393AFEF23ContainerBackgroundView *gbg =
         [[_TtCC5TabUI16TabGroupCellViewP33_6B047B569AD47EBB5C3E7DC66393AFEF23ContainerBackgroundView alloc] initWithFrame:gcell.bounds];
@@ -953,7 +927,6 @@ static void TestProfileEmojiTidyTabsGrainAndCA(void) {
     Check(gshadow.mutations == 2 && gshadow.unguardedMutations == 0,
           @"HideTabGroupBackground: hide & restore mutate shadow sublayer with disableActions=YES");
 
-    // 6. CollapsePinned: DPPinnedHeader mutates self.line with CATransaction setDisableActions:YES
     Class headerCls = NSClassFromString(@"DPPinnedHeader");
     NSView *pinHeader = [headerCls new];
     DPActionCheckLayer *pinLine = [DPActionCheckLayer layer];
@@ -971,7 +944,6 @@ static void TestPlainTabGlowLittleDiaAndTurnOffAI(void) {
     win.fakeVisible = YES;
     gFakeWindows = @[ win ];
 
-    // 1. PlainTab: unselected tab losing backgroundColor clears stale DarkAqua appearance before recycling to light tab
     _TtCC8TabStrip31TabStripContainerViewControllerP33_466228EC43BE4F33691D8E9BB7BFDE208RootView *strip =
         [[_TtCC8TabStrip31TabStripContainerViewControllerP33_466228EC43BE4F33691D8E9BB7BFDE208RootView alloc] initWithFrame:NSMakeRect(0, 0, 400, 40)];
     _TtC5TabUI7TabView *tab = [[_TtC5TabUI7TabView alloc] initWithFrame:NSMakeRect(0, 0, 140, 32)];
@@ -993,21 +965,18 @@ static void TestPlainTabGlowLittleDiaAndTurnOffAI(void) {
 
     DPHideToolbar.on = YES;
     DPPlainSelectedTab.on = YES;
-    [fill updateLayer]; // saves DarkAqua, clears titlePart.appearance
+    [fill updateLayer];
     Check(titlePart.appearance == nil, @"PlainTab: clears forced DarkAqua while selected tab is plain");
 
-    // Tab becomes unselected -> Dia clears backgroundColor to nil -> stale appearance key MUST be cleared!
     fill.diaBG = nil;
     [fill updateLayer];
     Check(titlePart.appearance == nil, @"PlainTab: unselected tab with nil backgroundColor does not restore stale DarkAqua");
 
-    // Cell recycled to a light tab (titlePart.appearance stays nil) while PlainSelectedTab turns OFF:
     fill.diaBG = NSColor.systemYellowColor.CGColor;
     DPPlainSelectedTab.on = NO;
     [fill updateLayer];
     Check(titlePart.appearance == nil, @"PlainTab: recycled light tab never inherits previous dark tab's DarkAqua");
 
-    // 2. HideVerticalTabGlow: glass moving into a vertical TabShapeView registers shape for minimized-window restore!
     Class glassCls = NSClassFromString(@"NSGlassEffectView");
     if (glassCls) {
         _TtC10TabSidebar15SidebarRootView *sidebar = [[_TtC10TabSidebar15SidebarRootView alloc] initWithFrame:NSMakeRect(0, 0, 220, 400)];
@@ -1022,7 +991,6 @@ static void TestPlainTabGlowLittleDiaAndTurnOffAI(void) {
         [vshape addSubview:glass];
         Check(glass.hidden, @"HideVerticalTabGlow: glass moving into vertical shape is hidden");
 
-        // Now window minimizes (not visible -> absent from DPFindViews) and tweak turns OFF!
         win.fakeVisible = NO;
         DPHideVerticalTabGlow.on = NO;
         DPHideVerticalTabGlow.apply(&DPHideVerticalTabGlow);
@@ -1031,7 +999,6 @@ static void TestPlainTabGlowLittleDiaAndTurnOffAI(void) {
         win.fakeVisible = YES;
     }
 
-    // 3. LittleDia: DPSetChrome preserves NSWindowStyleMaskFullScreen; DPLittleDiaIsOver respects DPLittleDia.on; DPBarButton reuses mask!
     _TtC5Popup19PlatformPopupWindow *popup = [[_TtC5Popup19PlatformPopupWindow alloc] initWithContentRect:NSMakeRect(-30000, -30000, 400, 300)
                                                                                                styleMask:NSWindowStyleMaskTitled backing:NSBackingStoreBuffered defer:NO];
     popup.useFakeStyleMask = YES;
@@ -1046,14 +1013,12 @@ static void TestPlainTabGlowLittleDiaAndTurnOffAI(void) {
     Check(DPIsLittleDiaWindow(popup) && (popup.styleMask & NSWindowStyleMaskFullSizeContentView),
           @"LittleDia: claims popup and sets FullSizeContentView");
 
-    // Simulate entering macOS native fullscreen, then turning LittleDia OFF!
     popup.fakeStyleMask |= NSWindowStyleMaskFullScreen;
     DPLittleDia.on = NO;
     DPRefreshLittleDiaWindows();
     Check((popup.styleMask & NSWindowStyleMaskFullScreen) != 0 && (popup.styleMask & NSWindowStyleMaskFullSizeContentView) == 0,
           @"LittleDia: turning off in fullscreen preserves NSWindowStyleMaskFullScreen while restoring chrome");
 
-    // DPLittleDiaIsOver & DPUncoverAllLittleDia
     DPLittleDia.on = YES;
     DPPutLittleDiaOver(popup, win);
     Check(DPLittleDiaIsOver(win), @"LittleDia: DPLittleDiaIsOver true while on and popup visible");
@@ -1064,7 +1029,6 @@ static void TestPlainTabGlowLittleDiaAndTurnOffAI(void) {
     Check(!DPLittleDiaIsOver(win), @"LittleDia: DPUncoverAllLittleDia clears gOver mapping");
     DPLittleDia.on = NO;
 
-    // DPBarButton reuses CAShapeLayer mask across repeated layouts
     NSButton *barBtn = DPMakeBarButton(@"xmark", @"Close", nil, nil);
     barBtn.frame = NSMakeRect(0, 0, 28, 28);
     [barBtn setValue:@12.0 forKey:@"outerCorner"];
@@ -1073,7 +1037,6 @@ static void TestPlainTabGlowLittleDiaAndTurnOffAI(void) {
     [barBtn layout];
     Check(mask1 != nil && barBtn.layer.mask == mask1, @"LittleDia: DPBarButton reuses existing CAShapeLayer mask across layouts");
 
-    // 4. TurnOffAI: off does not call setHidden: on NSMenuItem; DPApplyAIRows restores minimized Settings table!
     DPTurnOffAI.on = NO;
     NSMenu *menu = [[NSMenu alloc] initWithTitle:@"File"];
     DPTrackingMenuItem *aiItem = [[DPTrackingMenuItem alloc] initWithTitle:@"New Chat" action:nil keyEquivalent:@""];
@@ -1083,7 +1046,7 @@ static void TestPlainTabGlowLittleDiaAndTurnOffAI(void) {
 
     _TtC6Window14PlatformWindow *settingsWin = [[_TtC6Window14PlatformWindow alloc] initWithContentRect:NSMakeRect(-30000, -30000, 400, 300)
                                                                                              styleMask:NSWindowStyleMaskTitled backing:NSBackingStoreBuffered defer:NO];
-    settingsWin.fakeVisible = NO; // minimized!
+    settingsWin.fakeVisible = NO;
     gFakeWindows = @[ settingsWin ];
     NSTableView *table = [[NSTableView alloc] initWithFrame:NSMakeRect(0, 0, 200, 200)];
     NSTableColumn *col = [[NSTableColumn alloc] initWithIdentifier:@"c"];
@@ -1103,7 +1066,6 @@ static void TestPlainTabGlowLittleDiaAndTurnOffAI(void) {
     DPApplyAIRows();
     Check(table.hiddenRowIndexes.count == 0, @"TurnOffAI: toggle-off unhides Apps and Skills even in minimized Settings window");
 
-    // 5. CompactCommandBar: DPApplyCompactCommandBar marks needsLayout even in minimized window
     _TtC15BoostCommandBar8RootView *cmdRoot = [[_TtC15BoostCommandBar8RootView alloc] initWithFrame:NSMakeRect(0, 0, 500, 100)];
     _TtC15BoostCommandBar18InputContainerView *cmdInput = [[_TtC15BoostCommandBar18InputContainerView alloc] initWithFrame:NSMakeRect(0, 0, 500, 40)];
     [cmdRoot addSubview:cmdInput];
@@ -1114,7 +1076,6 @@ static void TestPlainTabGlowLittleDiaAndTurnOffAI(void) {
     DPCompactCommandBar.apply(&DPCompactCommandBar);
     Check(cmdRoot.needsLayout && cmdInput.needsLayout, @"CompactCommandBar: apply marks minimized window command bar for relayout");
 
-    // 6. ProgressLine: viewDidChangeBackingProperties marks needsLayout
     _TtC11ContentPane15ContentPaneView *pane = [[_TtC11ContentPane15ContentPaneView alloc] initWithFrame:NSMakeRect(0, 0, 600, 400)];
     [win.contentView addSubview:pane];
     DPShowProgressLine(pane, 0.5);

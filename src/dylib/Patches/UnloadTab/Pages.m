@@ -24,15 +24,21 @@ static NSMapTable<id, NSString *> *DPPagePaneID;
 
 static void DPForgetPage(id page);
 
+static Class DPPeekCardClass(void) {
+    static Class cls;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ cls = NSClassFromString(@"DPPeekCard"); });
+    return cls;
+}
+
 static BOOL DPIsNonTabContainer(NSView *view) {
-    Class peekCard = NSClassFromString(@"DPPeekCard");
+    Class peekCard = DPPeekCardClass();
     if (peekCard && [view isKindOfClass:peekCard]) return YES;
     if (DPIsKind(view, DPDiaAssistantPanel) || DPIsKind(view, DPDiaPopover)) return YES;
     NSString *name = NSStringFromClass(view.class);
     return [name containsString:@"ExtensionSidePanel"] || [name containsString:@"AssistantPanel"];
 }
 
-// Excludes Peek cards, warmed Peek hosts, Little Dia popups, Side Chat, and Extension Side Panels from tab matching.
 static BOOL DPIsNonTabPage(id page) {
     if (!page) return YES;
     if ([objc_getAssociatedObject(page, NSSelectorFromString(@"dp_nonTabWebContents")) boolValue]) return YES;
@@ -150,7 +156,7 @@ static BOOL DPIsAuxiliaryPage(id page) {
     NSView *view = ((NSView *(*)(id, SEL))objc_msgSend)(page, @selector(nativeView));
     if (![view isKindOfClass:NSView.class]) return NO;
     if (DPIsKind(view.window, "_TtC5Popup19PlatformPopupWindow")) return YES;
-    Class card = NSClassFromString(@"DPPeekCard");
+    Class card = DPPeekCardClass();
     if (!card) return NO;
     for (NSView *up = view; up; up = up.superview)
         if ([up isKindOfClass:card]) return YES;

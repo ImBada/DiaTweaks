@@ -8,8 +8,7 @@ static NSTimer *DPProgressTimer;
 static char DPProgressKey;
 
 static BOOL DPPaneLoading(NSView *pane) {
-    NSView *bar = DPSubview(pane, DPDiaToolbar);
-    NSView *reload = bar ? DPFindView(bar, ^BOOL(NSView *view) { return DPIsKind(view, DPDiaReloadIcon); }) : nil;
+    NSView *reload = DPFindView(DPSubview(pane, DPDiaToolbar), ^BOOL(NSView *view) { return DPIsKind(view, DPDiaReloadIcon); });
     BOOL *loading = DPIvar(reload, "isLoading");
     return loading && *loading;
 }
@@ -43,7 +42,7 @@ static void DPRefreshProgress(void) {
         else DPFinishProgressLine(pane);
         loading = loading || paneLoading;
     }
-    // Reload buttons and reveals change after Chromium's updates, so this polls.
+    // The reload button changes after Chromium's own updates, so poll.
     BOOL watch = on && (loading || contents);
     if (watch && !DPProgressTimer) {
         DPProgressTimer = [NSTimer timerWithTimeInterval:0.1 repeats:YES block:^(NSTimer *timer) { DPRefreshProgress(); }];
@@ -93,11 +92,11 @@ DP_PATCH(DPShowLoadingProgress) {
     .defaultOn = YES,
     .order = 43,
     .title = @"Show Loading Progress",
-    .detail = @"Show Dia's loading glow along the top of the page while it loads, where the hidden toolbar would show it.",
+    .detail = @"Show Dia’s loading glow along the top of the page while it loads, where the hidden toolbar would show it.",
     .symbol = @"rectangle.topthird.inset.filled",
     .tint = @"systemIndigoColor",
     .requires = @"hideToolbar",
-    .section = @"While It's Hidden",
+    .section = @"While It’s Hidden",
     .classes = DPClasses(DPDiaWebContents, DPDiaReloadIcon),
     .choice = @"loadingProgressColor",
     .defaultChoice = @"dia",

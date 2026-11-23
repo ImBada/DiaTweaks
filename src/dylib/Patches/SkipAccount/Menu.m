@@ -1,8 +1,14 @@
 #import "Startup.h"
 
+static NSMenu *DPAppMenu(void) {
+    NSMenu *bar = NSApp.mainMenu;
+    return bar.numberOfItems ? [bar itemAtIndex:0].submenu : nil;
+}
+
+static NSMenu *DPFileMenu(void) { return [NSApp.mainMenu itemWithTitle:@"File"].submenu; }
+
 static BOOL DPIsSignIn(NSMenuItem *item) {
-    return item.menu && item.menu == NSApp.mainMenu.itemArray.firstObject.submenu
-        && [item.title hasPrefix:@"Sign In"];
+    return item.menu && item.menu == DPAppMenu() && [item.title hasPrefix:@"Sign In"];
 }
 
 static BOOL DPIsLocalAction(NSMenuItem *item) {
@@ -13,9 +19,8 @@ static BOOL DPIsLocalAction(NSMenuItem *item) {
         appItems = [NSSet setWithArray:@[ @"Settings…", @"Settings...", @"Set as Default Browser", @"Import from Another Browser…", @"Import from Another Browser..." ]];
         fileItems = [NSSet setWithArray:@[ @"New Window", @"New Incognito Window" ]];
     });
-    NSMenu *bar = NSApp.mainMenu;
-    if (item.menu == bar.itemArray.firstObject.submenu) return [appItems containsObject:item.title];
-    return item.menu == [bar itemWithTitle:@"File"].submenu && [fileItems containsObject:item.title];
+    if (item.menu == DPAppMenu()) return [appItems containsObject:item.title];
+    return item.menu == DPFileMenu() && [fileItems containsObject:item.title];
 }
 
 static void DPApplyItem(NSMenuItem *item) {
@@ -28,6 +33,7 @@ static void DPItem_setEnabled(NSMenuItem *self, SEL _cmd, BOOL enabled) {
 }
 
 static void DPUpdateMenu(NSMenu *menu) {
+    if (menu != DPAppMenu() && menu != DPFileMenu()) return;
     for (NSMenuItem *item in menu.itemArray) DPApplyItem(item);
 }
 
@@ -57,7 +63,7 @@ void DPSkipAccountMenus(void) {
     DPHookClass(NSMenu.class, @selector(insertItem:atIndex:), (IMP)DPMenu_insertItem);
     DPHookClass(NSMenu.class, @selector(update), (IMP)DPMenu_update);
     DPOnLaunch(^{
-        DPUpdateMenu(NSApp.mainMenu.itemArray.firstObject.submenu);
-        DPUpdateMenu([NSApp.mainMenu itemWithTitle:@"File"].submenu);
+        DPUpdateMenu(DPAppMenu());
+        DPUpdateMenu(DPFileMenu());
     });
 }

@@ -23,7 +23,6 @@ NSToolbarItemIdentifier const DPSearchItemIdentifier = @"DiaPatchesSearch";
 - (void)syncWithQuery:(NSString *)query {}
 @end
 
-// Stubs for GroupTabs menu/grouping isolation.
 id DPCommandBrowser(void) { return nil; }
 NSWindow *DPBrowserWindow(id browser) { return nil; }
 id DPBrowserOfWindow(NSWindow *window) { return nil; }
@@ -86,7 +85,6 @@ int main(void) {
     @autoreleasepool {
         [NSApplication sharedApplication];
 
-        // 1. Views.m NULL guards & DPOverride nil guards.
         expect(DPFindViews(NULL).count == 0, @"DPFindViews(NULL) returns empty without crashing");
         expect(DPSubview([NSView new], NULL) == nil, @"DPSubview(..., NULL) returns nil");
         expect(!DPIsKind([NSView new], NULL), @"DPIsKind(..., NULL) returns NO");
@@ -97,12 +95,10 @@ int main(void) {
         DPOverride(obj, &kKey, @"dia", nil);
         expect(DPGet(obj, &kKey) == nil, @"DPOverride ignores nil values safely");
 
-        // 2. TypedURL.m rejects non-ASCII Unicode digits in ports and IPv4.
         expect(DPAddressURL(@"example.com:8080") != nil, @"ASCII port parses");
         expect(DPAddressURL(@"example.com:\u0661\u0662\u0663") == nil, @"Arabic-Indic port digits are rejected");
         expect(DPAddressURL(@"\u0661.\u0662.\u0663.\u0664") == nil, @"Arabic-Indic IPv4 digits are rejected");
 
-        // 3. Settings.m fitDivider does not crash with negative row index when numberOfRows < DPOurRowCount.
         NSScrollView *scroll = [[NSScrollView alloc] initWithFrame:NSMakeRect(0, 0, 200, 500)];
         DPZeroRowsTable *table = [[DPZeroRowsTable alloc] initWithFrame:NSMakeRect(0, 0, 200, 500)];
         table.rowHeight = 28;
@@ -114,7 +110,6 @@ int main(void) {
         [settings fitDivider];
         expect(YES, @"fitDivider handles numberOfRows < DPOurRowCount without negative NSIndexSet crash");
 
-        // 4. Settings.m borrowBack: preserves original disabled state across repeated borrow calls, and allowResizing: restores zoom button.
         NSWindow *window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 600, 500) styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskResizable backing:NSBackingStoreBuffered defer:NO];
         NSViewController *plainVC = [NSViewController new];
         plainVC.view = scroll;
@@ -142,7 +137,6 @@ int main(void) {
         [settings borrowBack:NO];
         expect(!settings.backBorrowed, @"borrowBack:NO clears backBorrowed");
 
-        // 4b. HideHosts.m off-tweak invariant: DPSidebar_viewDidLayout must not burn DPMayAdjust budget when no hides are active.
         Class footerCls = objc_allocateClassPair(NSView.class, DPDiaSidebarFooter, 0);
         objc_registerClassPair(footerCls);
         Class sidebarCtrlCls = objc_allocateClassPair(NSViewController.class, DPDiaSidebarController, 0);
@@ -164,14 +158,12 @@ int main(void) {
         for (int i = 0; i < 20; i++) [sidebarCtrl viewDidLayout];
         expect(DPMayAdjust(footer), @"20 off-tweak sidebar layouts do not exhaust DPMayAdjust(footer)");
 
-        // 5. GroupTabs Order.m handles missing appleScriptWindows and empty places safely.
         expect(DPTabPlaces(@{ @1 : @"https://example.com" }) == nil, @"DPTabPlaces handles delegate without appleScriptWindows");
         DPRestorePlaces(nil, nil, @{ @"sessions" : @{}, @"order" : @[] });
         __block BOOL moveFailed = NO;
         DPMoveTab(nil, nil, nil, 0, nil, ^{ moveFailed = YES; });
         expect(moveFailed, @"DPMoveTab fails cleanly on nil args");
 
-        // 6. GroupTabs Grouping.m DPOfferUndo does not invoke delegate with nil browser after browser deallocs.
         DPFakeDelegate *delegate = [DPFakeDelegate new];
         DPGroupTabs.on = YES;
         @autoreleasepool {
@@ -184,7 +176,6 @@ int main(void) {
         undo();
         expect(delegate.ungroupCalls == 0, @"DPOfferUndo skips call when weak browser has deallocated");
 
-        // 7. GroupTabs Menu.m hides existing items in reused menus and skips injecting into new menus while off.
         DPInstallGroupMenus();
         DPGroupTabs.on = YES;
         NSMenu *reused = [[NSMenu alloc] initWithTitle:@"Tab"];
@@ -203,7 +194,6 @@ int main(void) {
         [fresh addItemWithTitle:@"New Group with 2 Tabs" action:nil keyEquivalent:@""];
         expect([fresh itemWithTag:DPGroupMenuTag] == nil, @"Menu.m does not mutate fresh context menus while off");
 
-        // 8. Settings.m DPRemoveDiaPaneItems handles non-array/missing KVC keys and DPSettings dealloc removes NSNotificationCenter observers.
         NSToolbar *testToolbar = [[NSToolbar alloc] initWithIdentifier:@"DPTestToolbar"];
         DPFakeToolbarDelegate *tbDelegate = [DPFakeToolbarDelegate new];
         testToolbar.delegate = tbDelegate;

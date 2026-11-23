@@ -47,12 +47,13 @@ void DPMatchPage(NSView *row, id page) {
     if ([current isEqual:color] || (!color && !current)) return;
     DPSet(row, &DPColorKey, color);
     row.wantsLayer = YES;
-    [CATransaction begin];
-    [CATransaction setDisableActions:YES];
-    row.layer.backgroundColor = color.CGColor;
-    [CATransaction commit];
+    DPWithoutAnimation(^{ row.layer.backgroundColor = color.CGColor; });
+    if (!color) {
+        row.appearance = nil;
+        return;
+    }
     CGFloat luminance = 0.2126 * color.redComponent + 0.7152 * color.greenComponent + 0.0722 * color.blueComponent;
-    row.appearance = !color ? nil : [NSAppearance appearanceNamed:luminance > 0.55 ? NSAppearanceNameAqua : NSAppearanceNameDarkAqua];
+    row.appearance = [NSAppearance appearanceNamed:luminance > 0.55 ? NSAppearanceNameAqua : NSAppearanceNameDarkAqua];
 }
 
 @interface DPBarButton : NSButton
@@ -93,7 +94,8 @@ void DPMatchPage(NSView *row, id page) {
 - (BOOL)mouseDownCanMoveWindow { return NO; }
 
 - (void)updateTint {
-    self.contentTintColor = !self.enabled ? NSColor.tertiaryLabelColor : self.hovered || self.pill ? NSColor.labelColor : NSColor.secondaryLabelColor;
+    if (!self.enabled) self.contentTintColor = NSColor.tertiaryLabelColor;
+    else self.contentTintColor = self.hovered || self.pill ? NSColor.labelColor : NSColor.secondaryLabelColor;
     // labelColor with alpha freezes the appearance it was made in, so it is resolved per appearance.
     CGFloat alpha = self.hovered ? 1 : 0.85;
     self.pillIcon.contentTintColor = self.pillLabel.textColor = [NSColor colorWithName:nil dynamicProvider:^NSColor *(NSAppearance *appearance) {
@@ -145,17 +147,18 @@ void DPMatchPage(NSView *row, id page) {
     CGPathAddArcToPoint(path, NULL, NSMinX(r), bottom, NSMinX(r), top, small);
     CGPathCloseSubpath(path);
     CAShapeLayer *mask = [self.layer.mask isKindOfClass:CAShapeLayer.class] ? (CAShapeLayer *)self.layer.mask : [CAShapeLayer layer];
-    [CATransaction begin];
-    [CATransaction setDisableActions:YES];
-    mask.frame = self.bounds;
-    if (!mask.path || !CGPathEqualToPath(mask.path, path)) mask.path = path;
-    if (self.layer.mask != mask) self.layer.mask = mask;
-    [CATransaction commit];
+    DPWithoutAnimation(^{
+        mask.frame = self.bounds;
+        if (!mask.path || !CGPathEqualToPath(mask.path, path)) mask.path = path;
+        if (self.layer.mask != mask) self.layer.mask = mask;
+    });
     CGPathRelease(path);
 }
 
 - (void)drawRect:(NSRect)rect {
-    CGFloat fill = self.pill ? (self.hovered ? 0.12 : 0.08) : (self.hovered && self.enabled ? 0.08 : 0);
+    CGFloat fill = 0;
+    if (self.pill) fill = self.hovered ? 0.12 : 0.08;
+    else if (self.hovered && self.enabled) fill = 0.08;
     self.layer.backgroundColor = fill ? [NSColor.labelColor colorWithAlphaComponent:fill].CGColor : nil;
     [super drawRect:rect];
 }
@@ -375,14 +378,17 @@ static DPLittleBar *DPBarFor(NSView *title) {
     return bar;
 }
 
+static DPLittleBar *DPActiveBar(NSView *title) {
+    if (DPLittleDia.on && DPIsLittleDiaWindow(title.window)) return DPBarFor(title);
+    DPRemoveBar(title);
+    return nil;
+}
+
 static void DPTitle_setFrameOrigin(NSView *self, SEL _cmd, NSPoint origin) {
     if (!DPInPopupBar(self)) return DPCallOriginal(DPTitle_setFrameOrigin, self, origin);
     DPSet(self, &DPDiaOriginKey, [NSValue valueWithPoint:origin]);
-    if (!DPLittleDia.on || !DPIsLittleDiaWindow(self.window)) {
-        DPRemoveBar(self);
-        return DPCallOriginal(DPTitle_setFrameOrigin, self, origin);
-    }
-    DPLittleBar *bar = DPBarFor(self);
+    DPLittleBar *bar = DPActiveBar(self);
+    if (!bar) return DPCallOriginal(DPTitle_setFrameOrigin, self, origin);
     DPCallOriginal(DPTitle_setFrameOrigin, self, DPTitleFrame(self, bar).origin);
     DPPlaceBar(bar);
 }
@@ -391,11 +397,8 @@ static void DPTitle_setFrameSize(NSView *self, SEL _cmd, NSSize size) {
     if (!DPInPopupBar(self)) return DPCallOriginal(DPTitle_setFrameSize, self, size);
     DPSet(self, &DPDiaSizeKey, [NSValue valueWithSize:size]);
     if (!DPGet(self, &DPDiaOriginKey)) DPSet(self, &DPDiaOriginKey, [NSValue valueWithPoint:self.frame.origin]);
-    if (!DPLittleDia.on || !DPIsLittleDiaWindow(self.window)) {
-        DPRemoveBar(self);
-        return DPCallOriginal(DPTitle_setFrameSize, self, size);
-    }
-    DPLittleBar *bar = DPBarFor(self);
+    DPLittleBar *bar = DPActiveBar(self);
+    if (!bar) return DPCallOriginal(DPTitle_setFrameSize, self, size);
     DPCallOriginal(DPTitle_setFrameSize, self, DPTitleFrame(self, bar).size);
     DPPlaceBar(bar);
 }

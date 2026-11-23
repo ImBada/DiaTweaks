@@ -17,6 +17,7 @@ void DPOnLaunch(void (^block)(void)) {}
 #import "Patches/TurnOffAI/TurnOffAI.m"
 #import "StdPatch/Hide.m"
 #import "StdPatch/HideHosts.m"
+#import "runloop.h"
 
 @interface _TtC6Dialog12DialogButton : NSButton
 @end
@@ -61,20 +62,20 @@ typedef NS_ENUM(NSInteger, DPTestOutcome) {
 
 @implementation _TtC6Dialog15DialogPanelView
 - (void)handleButton:(id)sender {
-    NSInteger tag = [sender isKindOfClass:NSControl.class] ? ((NSControl *)sender).tag : -1;
+    NSString *title = [sender isKindOfClass:NSButton.class] ? ((NSButton *)sender).title : nil;
     self.totalClicks++;
-    if (tag == 0) {
+    if (DPIsDeclineTitle(title)) {
+        self.declineCount++;
+        if (self.outcome == DPTestOutcomeNone) {
+            self.outcome = DPTestOutcomeDeclined;
+            self.continuationResumes++;
+        }
+    } else {
         self.acceptCount++;
         if (self.upsellContent && self.upsellContent.autoConnectCheckbox.state == NSControlStateValueOn)
             self.autoConnectPersisted = YES;
         if (self.outcome == DPTestOutcomeNone) {
             self.outcome = DPTestOutcomeAccepted;
-            self.continuationResumes++;
-        }
-    } else if (tag == 1) {
-        self.declineCount++;
-        if (self.outcome == DPTestOutcomeNone) {
-            self.outcome = DPTestOutcomeDeclined;
             self.continuationResumes++;
         }
     }
@@ -105,6 +106,14 @@ typedef NS_ENUM(NSInteger, DPTestOutcome) {
 @property (nonatomic) BOOL closed;
 @end
 @implementation _TtC6Dialog27DialogPanelWindowController
+@end
+
+@interface _TtC13AppsUpsellBar17AppsUpsellBarView : NSView
+@property (nonatomic, strong) NSTextField *subtitleLabel;
+@property (nonatomic, strong) NSButton *connectButton;
+@property (nonatomic, strong) NSButton *dismissButton;
+@end
+@implementation _TtC13AppsUpsellBar17AppsUpsellBarView
 @end
 
 static NSMutableArray<NSWindow *> *gTestWindows;
@@ -208,15 +217,15 @@ static _TtC6Dialog27DialogPanelWindowController *DPMakePanelWC(_TtC6Dialog15Dial
     return wc;
 }
 
-// The main queue is FIFO, so once the sentinel runs, every block queued before it has run too, however long a slow runner stalls.
-static void DPDrainMainQueue(void) {
-    NSDate *until = [NSDate dateWithTimeIntervalSinceNow:0.05];
-    __block BOOL drained = NO;
-    dispatch_async(dispatch_get_main_queue(), ^{ drained = YES; });
-    NSDate *limit = [NSDate dateWithTimeIntervalSinceNow:30];
-    while (!drained && limit.timeIntervalSinceNow > 0)
-        [NSRunLoop.mainRunLoop runMode:NSDefaultRunLoopMode beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
-    [NSRunLoop.mainRunLoop runUntilDate:until];
+static _TtC13AppsUpsellBar17AppsUpsellBarView *DPMakeUpsellBar(NSString *subtitle) {
+    _TtC13AppsUpsellBar17AppsUpsellBarView *bar = [[_TtC13AppsUpsellBar17AppsUpsellBarView alloc] initWithFrame:NSMakeRect(0, 0, 400, 44)];
+    bar.subtitleLabel = [NSTextField labelWithString:subtitle];
+    bar.connectButton = [NSButton buttonWithTitle:@"Connect GitHub" target:nil action:nil];
+    bar.dismissButton = [NSButton buttonWithTitle:@"" target:nil action:nil];
+    [bar addSubview:bar.subtitleLabel];
+    [bar addSubview:bar.connectButton];
+    [bar addSubview:bar.dismissButton];
+    return bar;
 }
 
 static int failures;
@@ -244,12 +253,12 @@ int main(void) {
 
         DPHideConnectAppPrompts.on = NO;
         DPTurnOffAI.on = NO;
+        DPInstallHides();
         DPHideConnectAppPrompts.install();
 
         NSWindow *browserWindow = DPNewWindow();
         [gTestWindows addObject:browserWindow];
 
-        // 1. Off-tweak & paused invariant: hooks do nothing while both tweaks are off.
         {
             _TtC6Dialog15DialogPanelView *panel = DPMakePanel(
                 @"Connect SharePoint to Dia?",
@@ -262,7 +271,7 @@ int main(void) {
 
             NSInteger before = gBeginSheetCalls;
             [browserWindow beginSheet:wc.window completionHandler:^(NSModalResponse r) { sheetDone = YES; }];
-            DPDrainMainQueue();
+            DPDrainMainQueue(0.05);
             check("off: sheet presents normally without hiding or clicking",
                   gBeginSheetCalls == before + 1 && !panel.hidden && wc.window.alphaValue == 1.0 && !wc.window.ignoresMouseEvents
                   && panel.totalClicks == 0 && !sheetDone && browserWindow.sheets.count == 1);
@@ -273,12 +282,11 @@ int main(void) {
             _TtC6Dialog27DialogPanelWindowController *nwc = DPMakePanelWC(nonModal);
             NSInteger mkBefore = gMakeKeyCalls;
             [nwc.window makeKeyAndOrderFront:nil];
-            DPDrainMainQueue();
+            DPDrainMainQueue(0.05);
             check("off: non-modal panel shows normally",
                   gMakeKeyCalls == mkBefore + 1 && !nonModal.hidden && nwc.window.alphaValue == 1.0 && nonModal.totalClicks == 0);
         }
 
-        // 2. Rebranded "Connect SharePoint to Dia?" via Sheet path (with Swift continuation & curly apostrophe).
         DPHideConnectAppPrompts.on = YES;
         {
             _TtC6Dialog15DialogPanelView *panel = DPMakePanel(
@@ -294,14 +302,13 @@ int main(void) {
             check("on (sheet): sheet hidden immediately before AppKit animation",
                   panel.hidden && wc.window.alphaValue == 0.0 && wc.window.ignoresMouseEvents
                   && wc.window.animationBehavior == NSWindowAnimationBehaviorNone);
-            DPDrainMainQueue();
+            DPDrainMainQueue(0.05);
             check("on (sheet): Decline invoked once, Accept never invoked, autoConnect never persisted",
                   panel.declineCount == 1 && panel.acceptCount == 0 && panel.totalClicks == 1 && !panel.autoConnectPersisted);
             check("on (sheet): InChat continuation resumed once with declined and sheet completion fired",
                   panel.continuationResumes == 1 && panel.outcome == DPTestOutcomeDeclined && sheetDone && browserWindow.sheets.count == 0);
         }
 
-        // 3. Non-modal panel path (makeKeyAndOrderFront: & orderFront:) suppressed with zero focus steal.
         {
             _TtC6Dialog15DialogPanelView *panel1 = DPMakePanel(
                 @"Connect Notion to Dia?", @"Legacy Notion prompt.", NO, @"Connect Notion", @"Not now");
@@ -310,7 +317,7 @@ int main(void) {
             panel1.onDismiss = ^{ [weakW1 close]; };
             NSInteger mkBefore = gMakeKeyCalls;
             [wc1.window makeKeyAndOrderFront:nil];
-            DPDrainMainQueue();
+            DPDrainMainQueue(0.05);
             check("on (non-modal makeKeyAndOrderFront): never ordered front, declined once, closed cleanly",
                   gMakeKeyCalls == mkBefore && panel1.hidden && wc1.window.alphaValue == 0.0
                   && panel1.declineCount == 1 && panel1.acceptCount == 0 && wc1.closed);
@@ -323,12 +330,11 @@ int main(void) {
             panel2.onDismiss = ^{ [weakW2 close]; };
             NSInteger ofBefore = gOrderFrontCalls;
             [wc2.window orderFront:nil];
-            DPDrainMainQueue();
+            DPDrainMainQueue(0.05);
             check("on (non-modal orderFront reconnect): never ordered front, declined once, never accepted",
                   gOrderFrontCalls == ofBefore && panel2.declineCount == 1 && panel2.acceptCount == 0 && wc2.closed);
         }
 
-        // 4. In-window overlay path (DialogPanelViewController): hidden in viewDidLoad and dismissed on move to window.
         {
             _TtC6Dialog15DialogPanelView *panel = DPMakePanel(
                 @"Connect Google Drive to Dia?", @"Use Google Drive in Chat.", YES, @"OK", @"Don\u2019t connect Google Drive");
@@ -339,12 +345,11 @@ int main(void) {
             [vc view]; // triggers loadView + viewDidLoad
             check("on (overlay): viewDidLoad hides backdrop and panel before attaching", vc.view.hidden && panel.hidden);
             [browserWindow.contentView addSubview:vc.view];
-            DPDrainMainQueue();
+            DPDrainMainQueue(0.05);
             check("on (overlay): Decline invoked once, Accept never invoked, overlay dismissed",
                   panel.declineCount == 1 && panel.acceptCount == 0 && vc.dismissed && !vc.view.superview);
         }
 
-        // 5. Non-target & explicit-connect / settings / other dialogs MUST NEVER be suppressed or clicked.
         {
             NSArray<NSArray<NSString *> *> *nonTargets = @[
                 @[ @"SharePoint is now connected in Dia", @"Dia can now search SharePoint.", @"OK", @"Settings" ],
@@ -358,7 +363,7 @@ int main(void) {
                 _TtC6Dialog27DialogPanelWindowController *wc = DPMakePanelWC(panel);
                 NSInteger mkBefore = gMakeKeyCalls;
                 [wc.window makeKeyAndOrderFront:nil];
-                DPDrainMainQueue();
+                DPDrainMainQueue(0.05);
                 check("non-target dialog stays visible and unclicked",
                       gMakeKeyCalls == mkBefore + 1 && !panel.hidden && wc.window.alphaValue == 1.0 && panel.totalClicks == 0);
             }
@@ -368,21 +373,32 @@ int main(void) {
             _TtC6Dialog27DialogPanelWindowController *okWC = DPMakePanelWC(onlyOK);
             NSInteger mkBefore = gMakeKeyCalls;
             [okWC.window makeKeyAndOrderFront:nil];
-            DPDrainMainQueue();
+            DPDrainMainQueue(0.05);
             check("double-lock: prompt without verified Decline button is never hidden or clicked",
                   gMakeKeyCalls == mkBefore + 1 && !onlyOK.hidden && onlyOK.totalClicks == 0);
 
             _TtC6Dialog15DialogPanelView *tagZeroDecline = DPMakePanel(@"Connect Linear to Dia?", @"Prompt", YES, nil, nil);
             [tagZeroDecline addSubview:DPMakeDialogButton(@"Don\u2019t connect Linear", 0, tagZeroDecline, @selector(handleButton:))];
             _TtC6Dialog27DialogPanelWindowController *tzWC = DPMakePanelWC(tagZeroDecline);
+            __weak NSWindow *weakTZ = tzWC.window;
+            tagZeroDecline.onDismiss = ^{ [weakTZ close]; };
             mkBefore = gMakeKeyCalls;
             [tzWC.window makeKeyAndOrderFront:nil];
-            DPDrainMainQueue();
-            check("double-lock: tag==0 button is never invoked even with decline title",
-                  gMakeKeyCalls == mkBefore + 1 && !tagZeroDecline.hidden && tagZeroDecline.totalClicks == 0);
+            DPDrainMainQueue(0.05);
+            check("decline button tagged 0 (first in the array) is still dismissed via Decline",
+                  gMakeKeyCalls == mkBefore && tagZeroDecline.hidden && tzWC.closed
+                  && tagZeroDecline.declineCount == 1 && tagZeroDecline.acceptCount == 0);
+
+            _TtC6Dialog15DialogPanelView *tagZeroAccept = DPMakePanel(@"Connect Linear to Dia?", @"Prompt", YES, nil, nil);
+            [tagZeroAccept addSubview:DPMakeDialogButton(@"Connect Linear", 0, tagZeroAccept, @selector(handleButton:))];
+            _TtC6Dialog27DialogPanelWindowController *taWC = DPMakePanelWC(tagZeroAccept);
+            mkBefore = gMakeKeyCalls;
+            [taWC.window makeKeyAndOrderFront:nil];
+            DPDrainMainQueue(0.05);
+            check("double-lock: a tag==0 button without a decline title is never hidden or clicked",
+                  gMakeKeyCalls == mkBefore + 1 && !tagZeroAccept.hidden && tagZeroAccept.totalClicks == 0);
         }
 
-        // 6. Already-visible prompts dismissed via Decline when toggling Hide Connect App Prompt ON (sheet + non-modal + overlay).
         DPHideConnectAppPrompts.on = NO;
         DPTurnOffAI.on = NO;
         {
@@ -407,23 +423,21 @@ int main(void) {
             ovPanel.onDismiss = ^{ [weakOv dismissOverlay]; };
             [browserWindow.contentView addSubview:ovVC.view];
 
-            DPDrainMainQueue();
+            DPDrainMainQueue(0.05);
             check("pre-toggle: all 3 open prompts stay visible while off",
                   !sheetPanel.hidden && !floatPanel.hidden && !ovPanel.hidden
                   && sheetPanel.totalClicks == 0 && floatPanel.totalClicks == 0 && ovPanel.totalClicks == 0);
 
             DPHideConnectAppPrompts.on = YES;
             DPHideConnectAppPrompts.apply(&DPHideConnectAppPrompts);
-            // Calling apply twice must not double-click.
             DPHideConnectAppPrompts.apply(&DPHideConnectAppPrompts);
-            DPDrainMainQueue();
+            DPDrainMainQueue(0.05);
             check("toggle ON: dismisses already-visible sheet, non-modal panel, and overlay via Decline once each",
                   sheetDone && sheetPanel.declineCount == 1 && sheetPanel.acceptCount == 0
                   && floatWC.closed && floatPanel.declineCount == 1 && floatPanel.acceptCount == 0
                   && ovVC.dismissed && ovPanel.declineCount == 1 && ovPanel.acceptCount == 0);
         }
 
-        // 7. Turn Off AI coverage: with Hide Connect App Prompt OFF and Turn Off AI ON, new & open prompts are suppressed.
         DPHideConnectAppPrompts.on = NO;
         DPTurnOffAI.on = NO;
         {
@@ -433,12 +447,12 @@ int main(void) {
             openPanel.onDismiss = ^{ [weakOpen close]; };
             [gTestWindows addObject:openWC.window];
             [openWC.window makeKeyAndOrderFront:nil];
-            DPDrainMainQueue();
+            DPDrainMainQueue(0.05);
             check("Turn Off AI pre-toggle: open prompt visible", !openPanel.hidden && openPanel.totalClicks == 0);
 
             DPTurnOffAI.on = YES;
             DPTurnOffAI.apply(&DPTurnOffAI);
-            DPDrainMainQueue();
+            DPDrainMainQueue(0.05);
             check("Turn Off AI ON dismisses open Connect App prompt via Decline",
                   openWC.closed && openPanel.declineCount == 1 && openPanel.acceptCount == 0);
 
@@ -448,27 +462,24 @@ int main(void) {
             newPanel.onDismiss = ^{ [weakNew close]; };
             NSInteger mkBefore = gMakeKeyCalls;
             [newWC.window makeKeyAndOrderFront:nil];
-            DPDrainMainQueue();
+            DPDrainMainQueue(0.05);
             check("Turn Off AI ON suppresses new Connect App prompts even when Hide Connect App Prompt is off",
                   gMakeKeyCalls == mkBefore && newWC.closed && newPanel.declineCount == 1 && newPanel.acceptCount == 0);
 
-            // Turn Off AI OFF (and Hide Connect App Prompt still OFF) -> future prompts appear normally again.
             DPTurnOffAI.on = NO;
             DPTurnOffAI.apply(&DPTurnOffAI);
             _TtC6Dialog15DialogPanelView *afterOff = DPMakePanel(@"Connect SharePoint to Dia?", @"SharePoint", YES, @"OK", @"Don\u2019t connect SharePoint");
             _TtC6Dialog27DialogPanelWindowController *afterWC = DPMakePanelWC(afterOff);
             mkBefore = gMakeKeyCalls;
             [afterWC.window makeKeyAndOrderFront:nil];
-            DPDrainMainQueue();
+            DPDrainMainQueue(0.05);
             check("both OFF again: future Connect App prompts present normally",
                   gMakeKeyCalls == mkBefore + 1 && !afterOff.hidden && afterOff.totalClicks == 0);
         }
 
-        // 8. Adversarial races: hotkey Accept during 1-tick gap, double-invocation, toggle-off after viewDidLoad, multi-panel search.
         DPHideConnectAppPrompts.on = YES;
         DPTurnOffAI.on = NO;
         {
-            // 8a. Hotkey Accept race during 1-tick async gap is blocked; async Decline fires once.
             _TtC6Dialog15DialogPanelView *panel = DPMakePanel(
                 @"Connect SharePoint to Dia?", @"Use SharePoint in Chat.", YES, @"OK", @"Don\u2019t connect SharePoint");
             NSButton *acceptBtn = nil, *declineBtn = nil;
@@ -488,13 +499,11 @@ int main(void) {
             [panel handleButton:acceptBtn];
             check("hotkey race: Accept button blocked while suppressed sheet awaits async decline",
                   panel.acceptCount == 0 && !panel.autoConnectPersisted && panel.continuationResumes == 0);
-            DPDrainMainQueue();
-            // Duplicate handleButton: call after decline must also be ignored (continuation resumed at most once).
+            DPDrainMainQueue(0.05);
             [panel handleButton:declineBtn];
             check("hotkey race + at-most-once: Decline fires exactly once, Accept never fires",
                   sheetDone && panel.declineCount == 1 && panel.acceptCount == 0 && panel.continuationResumes == 1 && !panel.autoConnectPersisted);
 
-            // 8b. Toggling OFF between DialogPanelViewController viewDidLoad and presentation restores visibility.
             _TtC6Dialog15DialogPanelView *togglePanel = DPMakePanel(
                 @"Connect Linear to Dia?", @"Use Linear in Chat.", YES, @"OK", @"Don\u2019t connect Linear");
             _TtC6Dialog25DialogPanelViewController *toggleVC = [_TtC6Dialog25DialogPanelViewController new];
@@ -503,12 +512,11 @@ int main(void) {
             check("toggle-off race: viewDidLoad initially hides overlay while ON", toggleVC.view.hidden && togglePanel.hidden);
             DPHideConnectAppPrompts.on = NO;
             [browserWindow.contentView addSubview:toggleVC.view];
-            DPDrainMainQueue();
+            DPDrainMainQueue(0.05);
             check("toggle-off race: turning OFF before attachment restores hidden overlay and does not decline",
                   !toggleVC.view.hidden && !togglePanel.hidden && togglePanel.totalClicks == 0 && !toggleVC.dismissed);
             [toggleVC.view removeFromSuperview];
 
-            // Same toggle-off restoration for sheet/panel presentation path.
             DPHideConnectAppPrompts.on = YES;
             _TtC6Dialog15DialogPanelView *sheetTogglePanel = DPMakePanel(
                 @"Connect Notion to Dia?", @"Use Notion in Chat.", YES, @"OK", @"Don\u2019t connect Notion");
@@ -521,11 +529,10 @@ int main(void) {
             [sheetWin.contentView addSubview:sheetToggleVC.view];
             DPHideConnectAppPrompts.on = NO;
             [sheetWin makeKeyAndOrderFront:nil];
-            DPDrainMainQueue();
+            DPDrainMainQueue(0.05);
             check("toggle-off race (window): turning OFF before makeKeyAndOrderFront restores visibility",
                   !sheetToggleVC.view.hidden && !sheetTogglePanel.hidden && sheetTogglePanel.totalClicks == 0);
 
-            // 8c. Multiple DialogPanelViews in one container: first lacks Decline button, second is valid Connect prompt.
             DPHideConnectAppPrompts.on = YES;
             NSWindow *multiWin = DPNewWindow();
             _TtC6Dialog15DialogPanelView *decoy = DPMakePanel(@"Connect Fake to Dia?", @"No decline", YES, @"OK", nil);
@@ -537,12 +544,71 @@ int main(void) {
             __weak NSWindow *weakMulti = multiWin;
             realPrompt.onDismiss = ^{ [weakMulti close]; };
             [multiWin makeKeyAndOrderFront:nil];
-            DPDrainMainQueue();
+            DPDrainMainQueue(0.05);
             check("multi-panel container skips decoy without decline and suppresses valid Connect prompt",
                   decoy.totalClicks == 0 && realPrompt.declineCount == 1 && realPrompt.acceptCount == 0 && multiWC.closed);
         }
 
-        // 9. Metadata checks.
+        DPHideConnectAppPrompts.on = YES;
+        DPTurnOffAI.on = NO;
+        {
+            _TtC13AppsUpsellBar17AppsUpsellBarView *single = DPMakeUpsellBar(@"Bring the full context from GitHub into Dia");
+            [browserWindow.contentView addSubview:single];
+            [single layout];
+            check("on: single-app upsell bar is hidden", single.hidden);
+
+            _TtC13AppsUpsellBar17AppsUpsellBarView *allApps = DPMakeUpsellBar(@"Get better answers from your apps");
+            [browserWindow.contentView addSubview:allApps];
+            [allApps layout];
+            check("on: all-apps upsell bar is left alone", !allApps.hidden);
+
+            _TtC13AppsUpsellBar17AppsUpsellBarView *late = DPMakeUpsellBar(@"");
+            [browserWindow.contentView addSubview:late];
+            [late layout];
+            check("on: unlabelled bar is not hidden yet", !late.hidden);
+            late.subtitleLabel.stringValue = @"Bring the full context from Notion into Dia";
+            [late layout];
+            check("on: bar labelled after layout is hidden on the next pass", late.hidden);
+
+            DPHideConnectAppPrompts.on = NO;
+            DPHideConnectAppPrompts.apply(&DPHideConnectAppPrompts);
+            check("off: single-app upsell bars are restored and the all-apps bar stays visible",
+                  !single.hidden && !late.hidden && !allApps.hidden);
+            [single removeFromSuperview];
+            [late removeFromSuperview];
+            [allApps removeFromSuperview];
+        }
+
+        DPHideConnectAppPrompts.on = NO;
+        DPTurnOffAI.on = YES;
+        {
+            _TtC13AppsUpsellBar17AppsUpsellBarView *covered = DPMakeUpsellBar(@"Bring the full context from GitHub into Dia");
+            [browserWindow.contentView addSubview:covered];
+            [covered layout];
+            check("turnOffAI alone: single-app upsell bar is hidden", covered.hidden);
+
+            _TtC13AppsUpsellBar17AppsUpsellBarView *coveredLate = DPMakeUpsellBar(@"");
+            [browserWindow.contentView addSubview:coveredLate];
+            [coveredLate layout];
+            check("turnOffAI alone: unlabelled bar is not hidden yet", !coveredLate.hidden);
+            coveredLate.subtitleLabel.stringValue = @"Bring the full context from Notion into Dia";
+            [coveredLate layout];
+            check("turnOffAI alone: bar labelled after layout is hidden on the next pass", coveredLate.hidden);
+
+            _TtC13AppsUpsellBar17AppsUpsellBarView *coveredAll = DPMakeUpsellBar(@"Get better answers from your apps");
+            [browserWindow.contentView addSubview:coveredAll];
+            [coveredAll layout];
+            check("turnOffAI alone: all-apps upsell bar is left alone", !coveredAll.hidden);
+
+            DPTurnOffAI.on = NO;
+            DPTurnOffAI.apply(&DPTurnOffAI);
+            check("turnOffAI off: single-app upsell bars are restored",
+                  !covered.hidden && !coveredLate.hidden && !coveredAll.hidden);
+            [covered removeFromSuperview];
+            [coveredLate removeFromSuperview];
+            [coveredAll removeFromSuperview];
+        }
+
         check("patch metadata matches spec",
               [DPHideConnectAppPrompts.key isEqualToString:@"hideConnectAppPrompts"]
               && DPHideConnectAppPrompts.order == 220

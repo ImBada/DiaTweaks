@@ -282,7 +282,6 @@ int main(void) {
         NSView *holder1 = MakeHolder(window, NSMakeRect(200, 0, 700, 600), &pane1);
         _TtC3ADK18WebContentChromium *delegate = [_TtC3ADK18WebContentChromium new];
 
-        // 1. Multiple Peeks per window: Tab A -> P1, switch to Tab B -> P2, switch to C, return to A.
         ArcWebContents *sourceA = [ArcWebContents new], *sourceB = [ArcWebContents new];
         NSString *uuidA = @"11111111-1111-1111-1111-111111111111";
         _TtC5TabUI7TabView *rowA = MakeTabRow(window.contentView, uuidA, @"selected");
@@ -294,14 +293,12 @@ int main(void) {
         Check(p1.superview == holder1 && p1.tabBadge.superview == rowA, "P1 mounts in holder1 with badge on rowA");
         Check(DPPeekSyncTimer != nil, "sync timer runs while cards exist");
 
-        // Duplicate Peek on Tab A is rejected (and warm page discarded).
         ArcWebContents *dupWarm = [ArcWebContents new];
         dupWarm.url = [NSURL URLWithString:@"about:blank"];
         gCloseCalls = 0;
         DPPeekOpenFrom(window, @"A", [NSURL URLWithString:@"https://dup.example"], NSMakeRect(250, 200, 80, 20), delegate, sourceA, dupWarm, nil);
         Check(DPPeekAllCards(window).count == 1 && gCloseCalls == 1, "duplicate Peek on Tab A rejected and warm page discarded");
 
-        // Switch to Tab B: P1 hides & parks on contentView without detaching or closing p1Page.
         gDetachCalls = gCloseCalls = 0;
         [window makeFirstResponder:p1.host];
         sw.activeID = @"B";
@@ -313,21 +310,18 @@ int main(void) {
         Check(window.firstResponder != p1.host, "hiding P1 clears first responder off hidden card");
         Check(p1.tabBadge.superview == rowA, "👀 badge stays on Tab A row while parked");
 
-        // Stale click for Tab A while on Tab B is rejected cleanly.
         ArcWebContents *staleWarm = [ArcWebContents new];
         staleWarm.url = [NSURL URLWithString:@"about:blank"];
         gCloseCalls = 0;
         DPPeekOpenFrom(window, @"A", [NSURL URLWithString:@"https://stale.example"], NSMakeRect(250, 200, 80, 20), delegate, sourceA, staleWarm, nil);
         Check(DPPeekAllCards(window).count == 1 && gCloseCalls == 1, "stale click for inactive origin tab discarded cleanly");
 
-        // Open Peek P2 on Tab B while P1 is parked.
         DPPeekOpenFrom(window, @"B", [NSURL URLWithString:@"https://b.example"], NSMakeRect(250, 200, 80, 20), delegate, sourceB, nil, nil);
         DPPeekCard *p2 = DPPeekCardIn(window);
         ArcWebContents *p2Page = (ArcWebContents *)p2.page;
         p2Page.url = [NSURL URLWithString:@"about:blank"];
         Check(p2 != nil && p2 != p1 && DPPeekAllCards(window).count == 2 && DPPeekHiddenCards(window).count == 1, "P2 opens on Tab B alongside parked P1");
 
-        // 2. Hidden card MUST NOT intercept Esc, Cmd+W, Cmd+F, Cmd++, Control+Tab!
         NSEvent *esc = KeyEvent(window, @"\x1b", kVK_Escape, 0);
         NSEvent *cmdW = KeyEvent(window, @"w", kVK_ANSI_W, NSEventModifierFlagCommand);
         NSEvent *cmdF = KeyEvent(window, @"f", kVK_ANSI_F, NSEventModifierFlagCommand);
@@ -337,13 +331,11 @@ int main(void) {
         Check(DPPeekHandleKeyEvent(p1, cmdF) == cmdF, "hidden P1 does not intercept Cmd+F");
         Check(DPPeekHandleKeyEvent(p1, ctrlTab) == ctrlTab, "hidden P1 does not intercept Control+Tab");
 
-        // Zoom reaches P2 (active), NOT hidden P1!
         _TtC6Window24PlatformWindowController *wc = [[_TtC6Window24PlatformWindowController alloc] initWithWindow:window];
         gZoomCalls = gOrigZoomCalls = 0;
         [wc zoomIn:nil];
         Check(gZoomCalls == 1 && p2Page.zoomFactor > 0 && p1Page.zoomFactor == 0, "zoom reaches active P2, not hidden P1");
 
-        // Switch to Tab C (no Peek): both P1 and P2 hidden; zoom goes to Dia!
         sw.activeID = @"C";
         DPPeekSyncTabs(window);
         Check(p1.hidden && p2.hidden && DPPeekCardIn(window) == nil && DPPeekHiddenCards(window).count == 2, "Tab C hides both P1 and P2");
@@ -352,7 +344,6 @@ int main(void) {
         [wc zoomIn:nil];
         Check(gZoomCalls == 0 && gOrigZoomCalls == 1, "zoom passes through to Dia on Tab C with no visible Peek");
 
-        // 3. Container replacement & sidebar->top-tab badge migration while parked!
         [holder1 removeFromSuperview];
         [rowA removeFromSuperview];
         _TtC11ContentPane15ContentPaneView *pane2 = nil;
@@ -369,8 +360,6 @@ int main(void) {
         Check(p1.tabBadge.superview == topRowA, "👀 badge reattaches onto rebuilt top-tab rowA");
         Check(window.firstResponder == p1.host, "returning to A restores first responder to P1");
 
-        // 3b. Recycled TabView cell: when rowA is rebound to another tab's contentID and uuidA scrolls off-screen,
-        // DPPeekRefreshTabBadge removes 👀 badge & tracking area from the recycled cell, then re-attaches when uuidA returns.
         NSString *uuidOther = @"99999999-9999-9999-9999-999999999999";
         topRowA.viewModel.stateSubject.currentValue.contentID = uuidOther;
         DPPeekRefreshTabBadge(p1);
@@ -384,7 +373,6 @@ int main(void) {
         topRowA.viewModel.stateSubject.currentValue.contentID = uuidA;
         DPPeekRefreshTabBadge(p1);
 
-        // 3c. Multi-display backingScaleFactor change (1x <-> 2x) updates Peek card/find borderWidth and control icon contentsScale.
         window.fakeScale = 1.0;
         [p1 viewDidChangeBackingProperties];
         Check(fabs(p1.clip.layer.borderWidth - 1.0) < 0.01, "DPPeekCard updates clip borderWidth for 1x display");
@@ -405,7 +393,6 @@ int main(void) {
         window.fakeScale = 2.0;
         DPPeekHideFind(p1);
 
-        // Address edit end & Find hide while hidden MUST NOT steal focus back to hidden P1.
         DPPeekAddress *addr = (DPPeekAddress *)DPPeekAddressFor(p1Page);
         addr.frame = NSMakeRect(0, 0, 200, 30);
         [p1.clip addSubview:addr];
@@ -419,7 +406,6 @@ int main(void) {
         DPPeekHideFind(p1);
         Check(window.firstResponder != p1.host, "closing Find bar on hidden P1 never steals focus");
 
-        // External text view keeps focus when returning to Tab A.
         NSTextView *externalBar = [[NSTextView alloc] initWithFrame:NSMakeRect(0, 0, 200, 30)];
         [window.contentView addSubview:externalBar];
         [window makeFirstResponder:externalBar];
@@ -428,7 +414,6 @@ int main(void) {
         DrainMain();
         Check(window.firstResponder == externalBar, "returning to A does not steal focus from external NSTextView");
 
-        // 4. Profile switch preserves parked Peeks; closing/moving origin tab prunes them!
         DPProfileMock *prof1 = [DPProfileMock new];
         prof1.appleScriptTabs = [NSMutableArray arrayWithObjects:[DPTabMock tabWithID:@"A"], [DPTabMock tabWithID:@"B"], nil];
         DPProfileMock *prof2 = [DPProfileMock new];
@@ -440,21 +425,18 @@ int main(void) {
         Check(p1.hidden && p2.hidden && !p1.closing && !p2.closing && DPPeekAllCards(window).count == 2,
               "switching profiles hides Peeks without pruning other profile's tabs");
 
-        // Unreadable selection (active == nil) hides cards and does NOT prune!
         sw.activeID = nil;
         DPPeekSyncTabs(window);
         Check(p1.hidden && p2.hidden && !p1.closing && !p2.closing, "unreadable selection hides without exposing or pruning");
 
-        // Tab B closed/moved out of window (removed from prof1 while active is P2-1): ONLY P2 closes!
         gCloseCalls = 0;
         window.makeKeyCalls = 0;
-        [prof1.appleScriptTabs removeLastObject]; // removes B
+        [prof1.appleScriptTabs removeLastObject];
         sw.activeID = @"P2-1";
         DPPeekSyncTabs(window);
         Check(p2.closing && !p2.superview && gCloseCalls == 1 && window.makeKeyCalls == 0, "removed origin tab B synchronously closes hidden P2 without makeKeyWindow");
         Check(!p1.closing && DPPeekAllCards(window).count == 1, "P1 stays alive when B is removed");
 
-        // 5. Declined discard does NOT close P1; confirmed discard (Unload Tab) DOES close hidden P1 immediately!
         gCloseCalls = 0;
         [delegate webContents:sourceA finalizeDiscardRequest:NO];
         Check(!p1.closing && DPPeekAllCards(window).count == 1, "declined discard leaves hidden P1 open");
@@ -463,8 +445,7 @@ int main(void) {
               "confirmed discard (unload) immediately tears down hidden P1");
         Check(DPPeekSyncTimer == nil, "sync timer stops once last card closes");
 
-        // 6. Pinned icon tile (TabDockItemView) + closeWithForegroundCommitTiming: while hidden!
-        topRowA.hidden = YES; // Hidden stale row must not steal badge from visible pinned tile.
+        topRowA.hidden = YES;
         sw.appleScriptTabs = [NSMutableArray arrayWithObjects:[DPTabMock tabWithID:@"pin-1"], [DPTabMock tabWithID:@"C"], nil];
         sw.appleScriptProfiles = nil;
         sw.activeID = @"pin-1";
@@ -484,13 +465,11 @@ int main(void) {
         Check(!pinPeek.hidden && DPPeekCardIn(window) == pinPeek, "returning to pinned tile restores its Peek");
         sw.activeID = @"C";
         DPPeekSyncTabs(window);
-        // Sleeping/closing pinned tab's WebContents closes its hidden Peek even though pin-1 stays in appleScriptTabs!
         gCloseCalls = 0;
         [pinSource closeWithForegroundCommitTiming:0];
         Check(pinPeek.closing && !pinPeek.superview && gCloseCalls == 1 && DPPeekAllCards(window).count == 0,
               "closing pinned tab's WebContents tears down hidden Peek immediately");
 
-        // 7. Immediate parking when visible Peek source hides (switching to NTP/unloaded tab) and window.close() inside Peek.
         {
             sw.activeID = @"C";
             ArcWebContents *ntpSource = [ArcWebContents new];
@@ -503,7 +482,6 @@ int main(void) {
             // Simulate Dia hiding source WebContents when switching to a non-WebContents NTP/unloaded tab (no new page gets setVisibility:2).
             [ntpSource setVisibility:0];
             Check(ntpPeek.hidden && DPPeekCardIn(window) == nil, "hiding visible Peek source immediately parks Peek without waiting for sync timer");
-            // Return to C and simulate window.close() inside Peek's own WebContents.
             sw.activeID = @"C";
             DPPeekSyncTabs(window);
             Check(!ntpPeek.hidden, "Peek restores on return to C");
@@ -513,7 +491,6 @@ int main(void) {
                   "window.close() on visible Peek page immediately begins closing Peek card");
             [ntpPeek handOverTo:nil attach:nil];
 
-            // Parked (hidden) Peek receiving closeWithForegroundCommitTiming: synchronously tears down.
             DPPeekOpenFrom(window, @"C", [NSURL URLWithString:@"https://parked-close.example"], NSMakeRect(100, 100, 80, 20), delegate, ntpSource, nil, nil);
             DPPeekCard *parkedClose = DPPeekCardIn(window);
             ArcWebContents *parkedClosePage = (ArcWebContents *)parkedClose.page;
@@ -526,7 +503,6 @@ int main(void) {
                   "closeWithForegroundCommitTiming: on parked Peek page synchronously removes Peek card");
         }
 
-        // 7b. Promoting a Peek hands its page to the tab and leaves a parked Peek on another tab untouched.
         {
             sw.appleScriptTabs = [NSMutableArray arrayWithObjects:[DPTabMock tabWithID:@"A"], [DPTabMock tabWithID:@"B"], nil];
             sw.activeID = @"A";
@@ -557,7 +533,6 @@ int main(void) {
             sw.appleScriptTabs = [NSMutableArray arrayWithObjects:[DPTabMock tabWithID:@"pin-1"], [DPTabMock tabWithID:@"C"], nil];
         }
 
-        // 8. Source deallocation closes only its own Peek; multi-window close & Peek OFF clean everything.
         DPPeekTabWindow *window2 = [[DPPeekTabWindow alloc] initWithContentRect:NSMakeRect(-30000, -30000, 800, 500)
             styleMask:NSWindowStyleMaskTitled backing:NSBackingStoreBuffered defer:NO];
         window2.releasedWhenClosed = NO;
@@ -584,18 +559,15 @@ int main(void) {
         DPPeekSyncTabs(window2);
         Check(DPPeekAllCards(window).count == 2 && DPPeekAllCards(window2).count == 1 && cX.hidden, "two windows hold visible + hidden cards");
 
-        // Closing window 1 tears down both c1 (hidden) and c2 (visible) without touching window 2's cX.
         [NSNotificationCenter.defaultCenter postNotificationName:NSWindowWillCloseNotification object:window];
         Check(DPPeekAllCards(window).count == 0 && DPPeekAllCards(window2).count == 1 && !cX.closing,
               "closing window 1 tears down visible+hidden cards in window 1 only");
 
-        // Turning Peek OFF tears down hidden cX in window 2 and stops sync timer.
         DPPeek.on = NO;
         DPPeekCloseAll();
         Check(DPPeekAllCards(nil).count == 0 && DPPeekHiddenCards(nil).count == 0 && DPPeekSyncTimer == nil,
               "DPPeekCloseAll tears down hidden background cards across all windows and stops sync timer");
 
-        // Off-tweak invariant: hooks do nothing when DPPeek.on == NO.
         [pane2 removeFromSuperview];
         [holder2 addSubview:pane2];
         [sX setVisibility:2];

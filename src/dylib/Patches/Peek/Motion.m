@@ -247,15 +247,14 @@ static char DPGrowthKey, DPInTimerKey;
     BOOL openingNotShown = self.card.alphaValue == 0;
     CALayer *dim = self.dim.layer.presentationLayer;
     CGFloat opacity = openingNotShown ? 0 : dim ? dim.opacity : self.dim.alphaValue;
-    [CATransaction begin];
-    [CATransaction setDisableActions:YES];
-    // A promotion before the first Peek frame still starts its motion at the link.
-    if (openingNotShown) DPPeekTravel(self, YES);
-    self.card.alphaValue = self.dim.alphaValue = 1;
-    CASpringAnimation *undim = DPPeekDim(NO);
-    undim.fromValue = @(opacity);
-    [self.dim.layer addAnimation:undim forKey:@"peek"];
-    [CATransaction commit];
+    DPWithoutAnimation(^{
+        // A promotion before the first Peek frame still starts its motion at the link.
+        if (openingNotShown) DPPeekTravel(self, YES);
+        self.card.alphaValue = self.dim.alphaValue = 1;
+        CASpringAnimation *undim = DPPeekDim(NO);
+        undim.fromValue = @(opacity);
+        [self.dim.layer addAnimation:undim forKey:@"peek"];
+    });
     [DPPeekGrowth grow:self done:completion];
 }
 

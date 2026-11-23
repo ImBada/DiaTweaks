@@ -10,7 +10,6 @@ DPPatch DPWindowCorners;
 CGFloat DPWindowCornerGrowth(NSWindow *window) { return 0; }
 BOOL DPAnimating(void) { return NO; }
 
-// --- Fake Dia classes ---
 @interface _TtC6Window14PlatformWindow : NSWindow
 @property CGFloat fakeCornerRadius;
 @property NSWindowStyleMask fakeStyleMask;
@@ -54,7 +53,6 @@ BOOL DPAnimating(void) { return NO; }
 @implementation _TtCC14DynamicPopover28DynamicPopoverViewControllerP33_AB0357A1429F4D6D7F128058B713C93F8RootView
 @end
 
-// --- Test utilities ---
 static int failures;
 
 static void Check(BOOL ok, NSString *what) {
@@ -132,9 +130,6 @@ static void SetPatches(BOOL edgeToEdge, BOOL fullScreenOnly) {
     DPWindowCorners.on = NO;
 }
 
-// --- Tests ---
-
-// A full-screen window must not drag a windowed one along with it.
 static void TestPerWindowIsolation(void) {
     SetPatches(YES, YES);
     _TtC6Window14PlatformWindow *full = MakeWindow(NSMakeSize(1440, 900), YES);
@@ -151,7 +146,6 @@ static void TestPerWindowIsolation(void) {
     Check(NSEqualRects(a.container.frame, NSMakeRect(220, 0, 1220, 900)), @"full-screen container reaches the edges");
     Check(NSEqualRects(b.container.frame, NSMakeRect(220, 6, 674, 588)), @"windowed container stays where Dia put it");
 
-    // Entering full screen on one window must not touch the other.
     SetFullScreen(plain, YES);
     [NSNotificationCenter.defaultCenter postNotificationName:NSWindowDidEnterFullScreenNotification object:plain];
     DrainMain();
@@ -164,7 +158,6 @@ static void TestPerWindowIsolation(void) {
     Check(NSEqualRects(b.container.frame, NSMakeRect(220, 6, 674, 588)), @"leaving full screen brings the padding back");
 }
 
-// A window that is already screen-sized still has to change when the mask flips.
 static void TestScreenSizedWindowTransition(void) {
     SetPatches(YES, YES);
     _TtC6Window14PlatformWindow *window = MakeWindow(NSMakeSize(1440, 900), NO);
@@ -182,7 +175,6 @@ static void TestScreenSizedWindowTransition(void) {
     Check(NSEqualRects(f.container.frame, NSMakeRect(0, 6, 1440, 888)), @"and comes back when it leaves full screen");
 }
 
-// Toggling the option live has to re-apply the frame in both directions.
 static void TestLiveToggle(void) {
     SetPatches(YES, YES);
     _TtC6Window14PlatformWindow *window = MakeWindow(NSMakeSize(900, 600), NO);
@@ -199,7 +191,6 @@ static void TestLiveToggle(void) {
     Relayout(&DPFullScreenOnly);
     Check(NSEqualRects(f.container.frame, NSMakeRect(220, 6, 674, 588)), @"turning it back on restores the padding at once");
 
-    // Halfway through the ease the padding is half gone, and the corners follow the same amount.
     DPFullScreenOnly.progress = 0.5;
     Relayout(&DPFullScreenOnly);
     Check(NSEqualRects(f.container.frame, NSMakeRect(220, 3, 677, 594)), @"the ease moves the frame by the same amount");
@@ -207,7 +198,6 @@ static void TestLiveToggle(void) {
     Relayout(&DPFullScreenOnly);
 }
 
-// Corners follow the same per-window amount as the frame.
 static void TestSquareCorners(void) {
     SetPatches(YES, YES);
     _TtC6Window14PlatformWindow *window = MakeWindow(NSMakeSize(900, 600), NO);
@@ -225,7 +215,6 @@ static void TestSquareCorners(void) {
     DPRestyleContainer(f.container);
     Check(DPCornersRound(f.rounded.layer, NO) && DPCornersRound(f.rounded.layer, YES), @"back to windowed: corners are round again");
 
-    // With the option off, a windowed page keeps the square sidebar corners it always had.
     DPFullScreenOnly.on = NO;
     DPFullScreenOnly.progress = 0;
     f.container.frame = NSMakeRect(220, 6, 674, 588);
@@ -233,7 +222,6 @@ static void TestSquareCorners(void) {
     Check(!DPCornersRound(f.rounded.layer, NO) && DPCornersRound(f.rounded.layer, YES), @"option off: sidebar corners are square again");
 }
 
-// The side chat is a card, so it never goes edge-to-edge and never counts as full screen.
 static void TestChatCard(void) {
     SetPatches(YES, YES);
     _TtC6Window14PlatformWindow *window = MakeWindow(NSMakeSize(1440, 900), YES);
@@ -251,7 +239,6 @@ static void TestChatCard(void) {
     Check(NSEqualRects(f.container.frame, NSMakeRect(220, 0, 1220, 900)), @"closing the chat goes edge-to-edge again");
 }
 
-// Popovers follow the page, and stay put while the page is padded.
 static void TestPopover(void) {
     SetPatches(YES, YES);
     _TtC6Window14PlatformWindow *window = MakeWindow(NSMakeSize(900, 600), NO);
@@ -274,7 +261,6 @@ static void TestPopover(void) {
     Check(NSEqualRects(popover.frame, NSMakeRect(100, 500, 200, 200)), @"back to windowed: the popover returns to Dia's origin");
 }
 
-// Pausing every tweak has to leave Dia exactly as it found it.
 static void TestPauseTweaks(void) {
     SetPatches(YES, YES);
     _TtC6Window14PlatformWindow *window = MakeWindow(NSMakeSize(900, 600), NO);
@@ -300,7 +286,6 @@ static void TestPauseTweaks(void) {
     DPPaused = NO;
 }
 
-// The option's own check: a windowed page must be exactly where Dia put it.
 static void TestVerify(void) {
     SetPatches(YES, YES);
     _TtC6Window14PlatformWindow *window = MakeWindow(NSMakeSize(900, 600), NO);
@@ -328,7 +313,6 @@ static void TestVerify(void) {
     DPEdgeToEdge.on = YES;
 }
 
-// A window that closes must not leave anything behind.
 static void TestWindowClose(void) {
     SetPatches(YES, YES);
     NSUInteger before = DPContainers.allObjects.count;

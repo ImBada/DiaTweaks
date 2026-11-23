@@ -47,17 +47,12 @@ enum { DPIgnoreAction = 0, DPCurrentTab = 1, DPForegroundTab = 2, DPBackgroundTa
 - (void)finish:(DPPeekExit)exit;
 @end
 
-// Active visible (non-closing, non-hidden) Peek card in window, or nil.
 DPPeekCard *DPPeekCardIn(NSWindow *window);
-// Active visible Peek's hosted page in window, or nil.
 id DPPeekPageIn(NSWindow *window);
-// All tracked Peek cards in window (or all windows when window is nil), including hidden and closing cards.
+// Every tracked card in window (all windows when nil), hidden and closing ones included.
 NSArray<DPPeekCard *> *DPPeekAllCards(NSWindow *window);
-// Non-closing hidden background Peek cards in window (or all windows when window is nil).
 NSArray<DPPeekCard *> *DPPeekHiddenCards(NSWindow *window);
-// Tracked Peek card whose hosted page is page (visible or hidden), or nil.
 DPPeekCard *DPPeekCardForPage(id page);
-// Tracked non-closing Peek card pinned to originTabID (or source) in window, or nil.
 DPPeekCard *DPPeekCardForOrigin(NSWindow *window, NSString *originTabID, id source);
 BOOL DPPeekHasCards(void);
 DPPeekCard *DPPeekShowCard(NSWindow *window, id<DPPeekPage> page, NSView *warmHost, NSRect screenLink);

@@ -16,13 +16,13 @@ static NSString *DPVerifyProfileColorPicker(DPPatch *patch) {
 
 DP_PATCH(DPProfileColorPicker) {
     .key = @"profileColorPicker",
-    .order = 240,
+    .order = 84,
     .title = @"Profile Color Picker",
     .detail = @"Pick any custom color or enter a hex value in Settings › Profiles to tint each profile’s window, sidebar, and tab bar.",
     .symbol = @"paintpalette.fill",
-    .tint = @"systemTealColor",
-    .section = @"Sidebar & Tab Bar",
-    .classes = DPClasses(DPDiaProfilePane, DPDiaSettingsFormGroup, DPDiaThemePicker, DPDiaWindowTint, DPDiaGradientView),
+    .tint = @"systemRedColor",
+    .section = @"Profiles",
+    .classes = DPClasses(DPDiaProfilePane, DPDiaThemePicker, DPDiaWindowTint, DPDiaGradientView),
     .install = DPInstallProfileColorPicker,
     .apply = DPApplyProfileColorPicker,
     .verify = DPVerifyProfileColorPicker,

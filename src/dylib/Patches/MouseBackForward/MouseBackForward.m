@@ -12,9 +12,12 @@ static void DPPage_setVisibility(id self, SEL _cmd, NSInteger visibility) {
 }
 
 static NSInteger DPOffset(NSEvent *event) {
-    if (event.type == NSEventTypeSwipe)
-        return event.phase == NSEventPhaseNone && fabs(event.deltaX) > fabs(event.deltaY) ? (event.deltaX > 0 ? -1 : 1) : 0;
-    return event.buttonNumber == 3 ? -1 : event.buttonNumber == 4 ? 1 : 0;
+    if (event.type == NSEventTypeSwipe) {
+        if (event.phase != NSEventPhaseNone || !(fabs(event.deltaX) > fabs(event.deltaY))) return 0;
+        return event.deltaX > 0 ? -1 : 1;
+    }
+    if (event.buttonNumber == 3) return -1;
+    return event.buttonNumber == 4 ? 1 : 0;
 }
 
 static BOOL DPPageBool(id page, SEL sel) { return ((BOOL (*)(id, SEL))objc_msgSend)(page, sel); }
@@ -31,7 +34,7 @@ static id DPPageAt(NSEvent *event) {
     NSView *hit = [window.contentView.superview hitTest:point];
     id focused = nil, only = nil;
     NSUInteger count = 0;
-    for (id page in DPPages.allObjects) {
+    for (id page in DPPages) {
         NSView *view = [page performSelector:@selector(nativeView)];
         if (view.window != window || ((NSInteger (*)(id, SEL))objc_msgSend)(page, @selector(visibility)) == DPWebContentsHidden) continue;
         if ([hit isDescendantOf:view]) return page;
@@ -74,12 +77,12 @@ static NSString *DPVerifyMouseBackForward(DPPatch *patch) {
 
 DP_PATCH(DPMouseBackForward) {
     .key = @"mouseBackForward",
-    .order = 86,
+    .order = 12,
     .title = @"Mouse Back and Forward Buttons",
     .detail = @"Use your mouse’s side buttons to go back and forward, even on sites that block them. In split tabs, navigate the page under the pointer.",
     .symbol = @"computermouse.fill",
-    .tint = @"systemPinkColor",
-    .section = @"Tabs",
+    .tint = @"systemBlueColor",
+    .section = @"Page",
     .classes = DPClasses(DPDiaWebContents, DPDiaNavigationController),
     .install = DPInstallMouseBackForward,
     .verify = DPVerifyMouseBackForward,

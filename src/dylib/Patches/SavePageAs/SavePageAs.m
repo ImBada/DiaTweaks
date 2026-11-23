@@ -23,7 +23,7 @@ static id DPFrontPage(void) {
     NSView *hit = [window.contentView.superview hitTest:window.mouseLocationOutsideOfEventStream];
     id focused = nil, under = nil, only = nil;
     NSUInteger count = 0;
-    for (id page in DPPages.allObjects) {
+    for (id page in DPPages) {
         NSView *view = [page performSelector:@selector(nativeView)];
         if (view.window != window || ((NSInteger (*)(id, SEL))objc_msgSend)(page, @selector(visibility)) != DPWebContentsVisible) continue;
         if (((BOOL (*)(id, SEL))objc_msgSend)(page, @selector(hasFocus))) focused = page;
@@ -70,12 +70,12 @@ static NSString *DPVerifySavePageAs(DPPatch *patch) {
 
 DP_PATCH(DPSavePageAs) {
     .key = @"savePageAs",
-    .order = 86,
+    .order = 11,
     .title = @"Save Page As",
     .detail = @"Add Save Page As… to the File menu, with a shortcut, ⌥⌘S unless you set another.",
     .symbol = @"square.and.arrow.down.fill",
-    .tint = @"systemPinkColor",
-    .section = @"Tabs",
+    .tint = @"systemBlueColor",
+    .section = @"Page",
     .classes = DPClasses(DPDiaWebContents),
     .install = DPInstallSavePageAs,
     .apply = DPApplySavePageAs,

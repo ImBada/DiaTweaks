@@ -37,7 +37,7 @@ static void DPRemoveHost(NSString *name, NSString *relay) {
     NSString *kept = DPAppSupport([NSString stringWithFormat:@"DiaPatches/%@", file]);
     for (NSString *dir in DPHostFolders()) {
         NSString *path = [dir stringByAppendingPathComponent:file];
-        if (![files fileExistsAtPath:path] || ![DPHostAt(path)[@"path"] isEqual:relay]) continue;
+        if (![DPHostAt(path)[@"path"] isEqual:relay]) continue;
         [files removeItemAtPath:path error:nil];
         if ([files fileExistsAtPath:kept]) [files moveItemAtPath:kept toPath:path error:nil];
     }
@@ -77,7 +77,7 @@ static NSError *DPRegisterHost(NSString *name, NSString *description, NSArray<NS
     for (NSString *dir in DPHostFolders()) {
         if ([dir isEqualToString:hostFolder]) continue;
         NSString *stale = [dir stringByAppendingPathComponent:file];
-        if ([files fileExistsAtPath:stale] && [DPHostAt(stale)[@"path"] isEqual:relay]) [files removeItemAtPath:stale error:nil];
+        if ([DPHostAt(stale)[@"path"] isEqual:relay]) [files removeItemAtPath:stale error:nil];
     }
     return nil;
 }
@@ -92,16 +92,19 @@ static void DPRegisterHosts(BOOL on) {
         gWritePath = [DPHostFolders().lastObject stringByAppendingPathComponent:@"com.apple.passwordmanager.json"];
         return;
     }
-    NSString *p1 = nil, *p2 = nil, *p3 = nil;
-    NSError *apple = DPRegisterHost(@"com.apple.passwordmanager", @"DiaTweaks relay to iCloud Passwords",
-                                    @[ @"chrome-extension://pejdijmoenmkgeppbflobdenhhabjlaj/", @"chrome-extension://mfbcdcnpokpoajjciilocoachedjkima/" ], on, hostFolder, &p1);
-    NSError *betterPasswords = DPRegisterHost(@"io.github.fanckush.betterpasswords.bridge", @"DiaTweaks relay for Better Passwords to iCloud Passwords",
-                                              @[ @"chrome-extension://ocongmkplhijgajnipnhhggfcjfdilgj/" ], on, hostFolder, &p2);
-    NSError *openPasswords = DPRegisterHost(@"com.openpasswords.icloud", @"DiaTweaks relay for Open Passwords to iCloud Passwords",
-                                            @[ @"chrome-extension://iaojbcjndjmmblmoemilknlnjijokkfg/", @"chrome-extension://abpahgnajbkclfhpodhjhlmgfjhpibaa/" ], on, hostFolder, &p3);
-    if (apple) gWriteError = apple, gWritePath = p1;
-    else if (betterPasswords) gWriteError = betterPasswords, gWritePath = p2;
-    else if (openPasswords) gWriteError = openPasswords, gWritePath = p3;
+    NSArray<NSArray *> *hosts = @[
+        @[ @"com.apple.passwordmanager", @"DiaTweaks relay to iCloud Passwords",
+           @[ @"chrome-extension://pejdijmoenmkgeppbflobdenhhabjlaj/", @"chrome-extension://mfbcdcnpokpoajjciilocoachedjkima/" ] ],
+        @[ @"io.github.fanckush.betterpasswords.bridge", @"DiaTweaks relay for Better Passwords to iCloud Passwords",
+           @[ @"chrome-extension://ocongmkplhijgajnipnhhggfcjfdilgj/" ] ],
+        @[ @"com.openpasswords.icloud", @"DiaTweaks relay for Open Passwords to iCloud Passwords",
+           @[ @"chrome-extension://iaojbcjndjmmblmoemilknlnjijokkfg/", @"chrome-extension://abpahgnajbkclfhpodhjhlmgfjhpibaa/" ] ],
+    ];
+    for (NSArray *host in hosts) {
+        NSString *failedPath = nil;
+        NSError *error = DPRegisterHost(host[0], host[1], host[2], on, hostFolder, &failedPath);
+        if (error && !gWriteError) gWriteError = error, gWritePath = failedPath;
+    }
 }
 
 static NSString *DPICloudPasswordsProblem(DPPatch *patch) {
@@ -145,6 +148,7 @@ DP_PATCH(DPICloudPasswords) {
     .symbol = @"apple.passwords key.fill",
     .tint = @"systemGreenColor",
     .section = @"Passwords",
+    .group = @"passwordManagers",
     .install = DPInstallICloudPasswords,
     .apply = DPApplyICloudPasswords,
     .ready = DPICloudPasswordsProblem,

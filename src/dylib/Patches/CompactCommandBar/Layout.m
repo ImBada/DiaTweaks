@@ -21,7 +21,7 @@ static void DPPopover_setFrameSize(NSView *self, SEL _cmd, NSSize size) {
     DPCallOriginal(DPPopover_setFrameSize, self, compact);
 }
 
-// Shrunk with its container the bar would squeeze the suggestions to keep the row, so the container clips the row.
+// Shrunk with its container, the bar would squeeze the suggestions to keep the row; the container clips the row instead.
 static void DPCommandBar_setFrameSize(NSView *self, SEL _cmd, NSSize size) {
     CGFloat trim = 0;
     for (NSView *view = self.superview; view && !trim; view = view.superview) trim = DPTrim(view);
@@ -47,6 +47,16 @@ static void DPRefit(NSView *commandBar) {
     box.superview.superview.needsLayout = YES;
 }
 
+static NSView *DPCommandBarAbove(NSView *view) {
+    while (view && !DPIsKind(view, DPDiaCommandBar)) view = view.superview;
+    return view;
+}
+
+static NSStackView *DPToolbarStack(NSView *toolbar) {
+    NSStackView *stack = toolbar.subviews.firstObject;
+    return [stack isKindOfClass:NSStackView.class] ? stack : nil;
+}
+
 static void DPCommandBar_layout(NSView *self, SEL _cmd) {
     DPCallOriginal(DPCommandBar_layout, self);
     DPRefit(self);
@@ -58,9 +68,8 @@ static void DPCommandBar_layout(NSView *self, SEL _cmd) {
         frame.origin.y = NSMaxY(suggestions.frame) - hidden;
         if (!NSEqualRects(toolbar.frame, frame) && DPMayAdjust(toolbar)) toolbar.frame = frame;
     }
-    NSStackView *stack = toolbar.subviews.firstObject;
-    if (![stack isKindOfClass:NSStackView.class]) return;
-    if (!compact && !DPGet(stack, &DPCompactedKey)) return;
+    NSStackView *stack = DPToolbarStack(toolbar);
+    if (!stack || (!compact && !DPGet(stack, &DPCompactedKey))) return;
     DPSet(stack, &DPCompactedKey, compact ? @YES : nil);
     for (NSView *view in stack.views)
         if (view != DPGoButton(toolbar)) view.alphaValue = !compact;
@@ -92,8 +101,7 @@ static void DPCommandBarInput_layout(NSView *self, SEL _cmd) {
 static void DPCommandBarButton_layout(NSView *self, SEL _cmd) {
     DPCallOriginal(DPCommandBarButton_layout, self);
     if (!DPCompactCommandBar.on) return;
-    NSView *commandBar = self;
-    while (commandBar && !DPIsKind(commandBar, DPDiaCommandBar)) commandBar = commandBar.superview;
+    NSView *commandBar = DPCommandBarAbove(self);
     NSView *input = DPCommandBarPart(commandBar, DPDiaCommandBarInput), *text = DPCommandBarPart(input, DPDiaCommandBarText);
     if (text && self == DPGoButton(DPCompactToolbar(commandBar)) && fabs(NSWidth(text.frame) - DPTextWidth(input, text, self)) > 0.5) input.needsLayout = YES;
 }
@@ -101,11 +109,10 @@ static void DPCommandBarButton_layout(NSView *self, SEL _cmd) {
 static void DPCommandBarButton_setAccessibilityLabel(NSView *self, SEL _cmd, NSString *label) {
     DPCallOriginal(DPCommandBarButton_setAccessibilityLabel, self, label);
     if (!DPCompactCommandBar.on) return;
-    NSView *commandBar = self;
-    while (commandBar && !DPIsKind(commandBar, DPDiaCommandBar)) commandBar = commandBar.superview;
+    NSView *commandBar = DPCommandBarAbove(self);
     NSView *toolbar = DPCommandBarPart(commandBar, DPDiaCommandBarToolbar);
-    NSStackView *stack = toolbar.subviews.firstObject;
-    if (![stack isKindOfClass:NSStackView.class] || ![stack.views containsObject:self] || self == DPGoButton(toolbar)) return;
+    NSStackView *stack = DPToolbarStack(toolbar);
+    if (!stack || ![stack.views containsObject:self] || self == DPGoButton(toolbar)) return;
     DPRememberChatLocked(DPChatLocked(toolbar));
     if ((DPCompactToolbar(commandBar) != nil) == (DPGet(stack, &DPCompactedKey) != nil)) return;
     for (NSView *view = commandBar; view; view = view.superview) view.needsLayout = YES;

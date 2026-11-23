@@ -50,7 +50,17 @@ static NSView *DPWideRow(NSView *view) {
         NSMutableArray<NSView *> *lines = [NSMutableArray arrayWithObjects:DPLabel(option->title, 13, NSFontWeightRegular, NSColor.labelColor),
                                            DPLabel(option->detail, 11, NSFontWeightRegular, NSColor.secondaryLabelColor), nil];
         if (option->unavailable) [lines addObject:DPLabel(DPWhyDisabled(option), 11, NSFontWeightRegular, NSColor.secondaryLabelColor)];
-        add(title, DPRow(DPColumn(lines, 2), [self switchFor:option]));
+        NSView *leading = DPColumn(lines, 2);
+        // An option of an option sits under the one it needs, so the pair reads as one setting.
+        if (DPRequired(option) != patch) {
+            NSView *spacer = [NSView new];
+            [spacer.widthAnchor constraintEqualToConstant:16].active = YES;
+            NSStackView *indented = [NSStackView stackViewWithViews:@[ spacer, leading ]];
+            indented.orientation = NSUserInterfaceLayoutOrientationHorizontal;
+            indented.spacing = 0;
+            leading = indented;
+        }
+        add(title, DPRow(leading, [self switchFor:option]));
         NSArray<NSView *> *optionRows = DPRowsOf(option);
         if (option->choices || optionRows.count) {
             NSMutableArray<NSView *> *under = [NSMutableArray arrayWithCapacity:optionRows.count + (option->choices != NULL)];
@@ -72,6 +82,21 @@ static NSView *DPWideRow(NSView *view) {
         [titles removeObject:unavailable];
         [titles addObject:unavailable];
     }
+    // Cards read in the order the tweak declares its options, so Behavior can come before Appearance.
+    NSMutableDictionary<NSString *, NSNumber *> *ranks = [NSMutableDictionary new];
+    for (NSString *title in titles) {
+        if ([title isEqual:@"Options"]) continue;
+        for (NSUInteger i = 0; i < DPPatchCount; i++) {
+            DPPatch *option = DPPatches[i];
+            if (!DPRequired(option) || ![title isEqual:option->section ?: @"Options"]) continue;
+            NSNumber *rank = ranks[title];
+            if (!rank || DPDeclaredOrder(option) < rank.intValue) ranks[title] = @(DPDeclaredOrder(option));
+        }
+    }
+    [titles sortUsingComparator:^NSComparisonResult(NSString *a, NSString *b) {
+        if ([a isEqual:@"Options"] != [b isEqual:@"Options"]) return [a isEqual:@"Options"] ? NSOrderedAscending : NSOrderedDescending;
+        return [ranks[a] ?: @(NSIntegerMax) compare:ranks[b] ?: @(NSIntegerMax)];
+    }];
     for (NSString *title in titles)
         if (groups[title].count) [views addObjectsFromArray:@[DPHeader(title), DPGroup(groups[title])]];
 
@@ -93,10 +118,8 @@ static NSView *DPWideRow(NSView *view) {
         [headingText addObjectsFromArray:@[gap, DPLabel(_patch->hint, 11, NSFontWeightRegular, NSColor.secondaryLabelColor)]];
     }
     [headingText addObject:_note];
-    SEL tintSel = _patch->tint.length ? NSSelectorFromString(_patch->tint) : NULL;
-    NSColor *tint = tintSel && [NSColor respondsToSelector:tintSel] ? [NSColor valueForKey:_patch->tint] : NSColor.systemGrayColor;
     NSStackView *heading = [NSStackView stackViewWithViews:@[
-        DPIconTile(_patch->symbol, tint),
+        DPIconTile(_patch->symbol, DPTintColor(_patch->tint)),
         DPColumn(headingText, 2),
     ]];
     heading.spacing = 10;
@@ -105,14 +128,16 @@ static NSView *DPWideRow(NSView *view) {
 }
 
 - (NSView *)footerGroup {
-    NSURL *wiki = DPWikiURL(_patch);
-    NSView *wikiRow = DPLinkRow(DPRow(DPLabel(@"Read more on the wiki", 13, NSFontWeightRegular, NSColor.labelColor),
-                                      DPSymbol(@"arrow.up.right", 11, NSColor.secondaryLabelColor)),
-                                @"Read more on the wiki", ^{ [NSWorkspace.sharedWorkspace openURL:wiki]; });
     NSTextField *how = DPLabel([@"diatweaks enable " stringByAppendingString:_patch->key], 12, NSFontWeightRegular, NSColor.secondaryLabelColor);
     how.font = [NSFont monospacedSystemFontOfSize:12 weight:NSFontWeightRegular];
     how.selectable = YES;
     NSView *howRow = DPRow(DPColumn(@[DPLabel(@"Turn on from Terminal", 13, NSFontWeightRegular, NSColor.labelColor), how], 2), [NSStackView new]);
+    // A local tweak has no wiki page, and opening a nil URL throws.
+    NSURL *wiki = DPWikiURL(_patch);
+    if (!wiki) return DPGroup(@[ howRow ]);
+    NSView *wikiRow = DPLinkRow(DPRow(DPLabel(@"Read more on the wiki", 13, NSFontWeightRegular, NSColor.labelColor),
+                                      DPSymbol(@"arrow.up.right", 11, NSColor.secondaryLabelColor)),
+                                @"Read more on the wiki", ^{ [NSWorkspace.sharedWorkspace openURL:wiki]; });
     return DPGroup(@[wikiRow, howRow]);
 }
 
@@ -165,14 +190,14 @@ static void DPSetRowControlsEnabled(NSView *view, BOOL enabled) {
                 break;
             }
     }
-    BOOL controlsEnabled = _patch->on && !DPSafeMode && !DPPaused && !DPPausedAtLaunch;
-    for (NSView *row in _rows) DPSetRowControlsEnabled(row, controlsEnabled);
+    BOOL running = !DPSafeMode && !DPPaused && !DPPausedAtLaunch;
+    for (NSView *row in _rows) DPSetRowControlsEnabled(row, _patch->on && running);
     // Fade in after the group has grown, or the row rides over the one above.
     NSMutableArray<NSView *> *appeared = nil;
     for (NSView *row in _optionChoices) {
         DPPatch *option = [DPGet(row, &DPChoicePatchKey) pointerValue];
-        DPSetRowControlsEnabled(row, option->on && !DPWhyDisabled(option) && !DPSafeMode && !DPPaused && !DPPausedAtLaunch);
-        BOOL shown = DPPaused ? DPSavedOn(option) : option->on;
+        DPSetRowControlsEnabled(row, option->on && !DPWhyDisabled(option) && running);
+        BOOL shown = DPShownOn(option);
         if (row.hidden != shown) continue;
         NSArray<NSView *> *rows = ((NSStackView *)row.superview).arrangedSubviews;
         NSUInteger i = [rows indexOfObject:row];

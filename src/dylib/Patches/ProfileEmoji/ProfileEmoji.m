@@ -17,13 +17,15 @@ static NSString *DPSpaceIDOf(NSView *view, NSDictionary *views) {
     return nil;
 }
 
+static BOOL DPAnyEmoji(NSDictionary *views, NSDictionary *emojis) {
+    for (id key in views) if (emojis[[key description]]) return YES;
+    return NO;
+}
+
 static BOOL DPAnySidebarEmoji(NSView *switcher) {
     if (!DPProfileEmoji.on || !switcher) return NO;
     NSDictionary *emojis = [DPEmojiDefaults dictionaryForKey:DPEmojisKey];
-    if (!emojis.count) return NO;
-    NSDictionary *views = DPSwiftValue(switcher, @"itemViews");
-    for (id key in views) if (emojis[[key description]]) return YES;
-    return NO;
+    return emojis.count && DPAnyEmoji(DPSwiftValue(switcher, @"itemViews"), emojis);
 }
 
 static void DPShowEmoji(NSView *host, NSView *dot, NSString *emoji, CGFloat size, CGFloat alpha) {
@@ -84,13 +86,16 @@ static void DPSidebarItem_setFrame(NSView *self, SEL _cmd, NSRect frame) {
     if (!emojis.count) return DPCallOriginal(DPSidebarItem_setFrame, self, frame);
     NSView *switcher = self.superview;
     NSDictionary *views = DPSwiftValue(switcher, @"itemViews");
-    BOOL anyEmoji = NO;
-    for (id key in views) if (emojis[[key description]]) { anyEmoji = YES; break; }
-    if (anyEmoji) {
+    if (DPAnyEmoji(views, emojis)) {
         CGFloat middle = NSMidX(switcher.bounds);
         NSInteger index = lround((NSMinX(frame) - (middle - views.count * NSWidth(frame) / 2)) / NSWidth(frame));
-        NSMutableArray<NSView *> *row = [[views.allValues filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"self != %@", self]] mutableCopy];
-        [row sortUsingComparator:^NSComparisonResult(NSView *a, NSView *b) { return [@(NSMidX(a.frame)) compare:@(NSMidX(b.frame))]; }];
+        NSMutableArray<NSView *> *row = [NSMutableArray arrayWithCapacity:views.count + 1];
+        for (NSView *item in views.allValues) if (item != self) [row addObject:item];
+        [row sortUsingComparator:^NSComparisonResult(NSView *a, NSView *b) {
+            CGFloat left = NSMidX(a.frame), right = NSMidX(b.frame);
+            if (left < right) return NSOrderedAscending;
+            return left > right ? NSOrderedDescending : NSOrderedSame;
+        }];
         [row insertObject:self atIndex:MIN(MAX(index, 0), (NSInteger)row.count)];
         CGFloat total = 0, x = 0;
         for (NSView *item in row) total += DPSidebarItemWidth(item, views, emojis);
@@ -239,13 +244,13 @@ static void DPInstallProfileEmoji(void) {
 
 DP_PATCH(DPProfileEmoji) {
     .key = @"profileEmoji",
-    .order = 78,
+    .order = 84,
     .defaultOn = YES,
     .title = @"Profile Emoji",
     .detail = @"Show an emoji in place of each profile’s dot in the profile switcher. Choose them in Settings › Profiles.",
     .symbol = @"emoji.face.grinning.inverse face.smiling.inverse",
-    .tint = @"systemTealColor",
-    .section = @"Sidebar & Tab Bar",
+    .tint = @"systemRedColor",
+    .section = @"Profiles",
     .classes = DPClasses(DPDiaSpaceSwitcher, DPDiaSpaceSwitcherItem, DPDiaPageIndicatorDot, DPDiaProfilePane, DPDiaSettingsFormGroup),
     .install = DPInstallProfileEmoji,
     .apply = DPApplyProfileEmoji,

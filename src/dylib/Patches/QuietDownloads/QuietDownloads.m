@@ -6,9 +6,10 @@ static Class DPDownloadsMenu;
 static __weak NSView *DPPressed;
 
 static BOOL DPButton_press(NSView *self, SEL _cmd) {
-    if (!DPQuietDownloads.on) return DPCallOriginal(DPButton_press, self);
-    DPPressed = self;
-    dispatch_async(dispatch_get_main_queue(), ^{ DPPressed = nil; });
+    if (DPQuietDownloads.on) {
+        DPPressed = self;
+        dispatch_async(dispatch_get_main_queue(), ^{ DPPressed = nil; });
+    }
     return DPCallOriginal(DPButton_press, self);
 }
 

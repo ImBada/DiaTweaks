@@ -29,8 +29,9 @@ void DPRefreshLittleDiaNewWindow(void) {
 
 void DPInstallLittleDiaNewWindow(void) {
     gItem = DPMenuItem(@"New Little Dia Window", ^{
-        if (DPShouldShow()) DPOpenBlankLittleDia();
-        else NSBeep();
+        if (!DPShouldShow()) return NSBeep();
+        if (DPLittleDiaLauncher.on) DPToggleLittleDiaLauncher();
+        else DPOpenBlankLittleDia();
     });
     gItem.keyEquivalent = @"n";
     gItem.keyEquivalentModifierMask = NSEventModifierFlagOption | NSEventModifierFlagCommand;
@@ -39,7 +40,9 @@ void DPInstallLittleDiaNewWindow(void) {
 }
 
 NSString *DPLittleDiaNewWindowProblem(void) {
-    BOOL shown = [DPFileMenu() indexOfItem:gItem] >= 0 && !gItem.hidden;
+    NSMenu *file = DPFileMenu();
+    if (!file) return nil;
+    BOOL shown = [file indexOfItem:gItem] >= 0 && !gItem.hidden;
     if (shown && !DPShouldShow()) return @"New Little Dia Window stays in the File menu";
     if (!shown && DPShouldShow()) return @"the File menu has no New Little Dia Window";
     return nil;

@@ -40,7 +40,7 @@ static NSView *DPPeekOriginTab(NSWindow *window, id source) {
     return exact ?: selected;
 }
 
-// An icon tile's links already leave in a new tab, but a pinned row's stay in it, and only its menu says it is pinned.
+// Icon tiles' links already open new tabs; a pinned row's don't, and only its context menu says it is pinned.
 BOOL DPPeekInPinnedRow(NSWindow *window, id page) {
     NSView *tab = DPPeekOriginTab(window, page);
     NSMenuItem *unpin = tab && !DPIsKind(tab, DPDiaPinnedTab) ? [DPTabContextMenu(tab) itemWithTitle:@"Unpin"] : nil;
@@ -161,8 +161,9 @@ void DPPeekRefreshTabBadge(DPPeekCard *peek) {
 BOOL DPPeekTabBadgeSelected(DPPeekCard *peek, BOOL *known) {
     DPPeekTabBadge *badge = (DPPeekTabBadge *)peek.tabBadge;
     NSWindow *window = peek.window ?: peek.originWindow;
-    NSView *tab = !badge ? nil : badge.contentKey ? DPPeekTabWithContent(window, badge.contentKey)
-                                                  : (badge.superview.window == window ? badge.superview : nil);
+    NSView *tab = nil;
+    if (badge.contentKey) tab = DPPeekTabWithContent(window, badge.contentKey);
+    else if (badge.superview.window == window) tab = badge.superview;
     BOOL readable = tab && DPTabState(tab) != nil;
     if (known) *known = readable;
     return readable && DPTabSelected(tab);

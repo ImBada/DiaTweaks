@@ -20,7 +20,6 @@ BOOL DPWindowFullScreen(NSWindow *window) {
     return window && (window.styleMask & NSWindowStyleMaskFullScreen);
 }
 
-// How far edge-to-edge is applied: the patch's own ease, held back while the option asks for full screen only.
 CGFloat DPEdgeToEdgeAmount(NSView *view) {
     if (DPFullScreenOnly.progress <= 0 || DPWindowFullScreen(view.window)) return DPEdgeToEdge.progress;
     return DPEdgeToEdge.progress * (1 - DPFullScreenOnly.progress);
@@ -66,10 +65,7 @@ void DPAnimateLayer(NSView *container, CALayer *layer, NSString *key, id value) 
     NSArray *animation = DPGet(container, &DPAnimationKey);
     CFTimeInterval remaining = [animation.firstObject doubleValue] - CACurrentMediaTime();
     id from = [layer.presentationLayer valueForKey:key];
-    [CATransaction begin];
-    [CATransaction setDisableActions:YES];
-    [layer setValue:value forKey:key];
-    [CATransaction commit];
+    DPWithoutAnimation(^{ [layer setValue:value forKey:key]; });
     if (remaining <= 0 || !from || [from isEqual:value]) return;
     CABasicAnimation *move = [CABasicAnimation animationWithKeyPath:key];
     move.fromValue = from;
@@ -80,7 +76,7 @@ void DPAnimateLayer(NSView *container, CALayer *layer, NSString *key, id value) 
 }
 
 static void DPContainer_setFrame(NSView *self, SEL _cmd, NSRect frame) {
-    BOOL active = DPEdgeToEdge.on || DPEdgeToEdge.progress > 0 || DPWindowCorners.on;
+    BOOL active = DPEdgeToEdgeActive();
     if (active) {
         NSAnimationContext *context = NSAnimationContext.currentContext;
         if (context.allowsImplicitAnimation || CATransaction.animationDuration > 0) {

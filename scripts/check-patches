@@ -14,9 +14,26 @@ function run(argv) {
     return lines.filter(line => line && !line.split(" ").some(name => $.NSImage.imageWithSystemSymbolNameAccessibilityDescription(name, $()).isNil() === false)).join("\n")
 }')
 python3 - "$manifest" "$missing" <<'PY'
-import json, sys
+import glob, json, re, sys
 patches = {p["key"]: p for p in json.load(open(sys.argv[1]))["patches"]}
 problems = [f'no SF Symbol called "{name}"' for name in sys.argv[2].split("\n") if name]
+
+# The folder rows live in Settings, so read their keys and sections from there.
+settings = open("src/dylib/Settings/Folder.m").read().split("DPFolders[] = {", 1)[1].split("\n};", 1)[0]
+folders = {key: section for key, _, _, _, _, section in re.findall(
+    r'\{\s*@"([^"]+)",\s*@"([^"]+)",\s*@"([^"]*)",\s*@"([^"]+)",\s*@"([^"]+)",\s*@"([^"]+)"\s*\}', settings, re.S)}
+for key, patch in patches.items():
+    if not patch.get("group"):
+        continue
+    if patch["requires"]:
+        problems.append(f'{key} is in the {patch["group"]} folder, so it can\'t need another tweak')
+    elif patch["group"] not in folders:
+        problems.append(f'{key} is in a folder called {patch["group"]}, which Settings doesn\'t have')
+    elif patch["section"] != folders[patch["group"]]:
+        problems.append(f'{key} is in {patch["section"]}, but its {patch["group"]} folder is in {folders[patch["group"]]}')
+for key in folders:
+    if not any(patch.get("group") == key for patch in patches.values()):
+        problems.append(f'the {key} folder has no tweaks in it')
 
 def root(patch):
     seen = set()
@@ -38,6 +55,26 @@ for patch in patches.values():
 for section, by_tint in tints.items():
     if len(by_tint) > 1:
         problems.append(f'{section} mixes colors: ' + "; ".join(f'{tint} for {", ".join(keys)}' for tint, keys in by_tint.items()))
+
+for key, patch in patches.items():
+    for field in ("title", "detail", "section"):
+        value = patch.get(field)
+        if isinstance(value, str) and "'" in value:
+            problems.append(f'{key}\'s {field} uses a straight apostrophe: {value}')
+for path in sorted(glob.glob("src/dylib/**/*.m", recursive=True)):
+    for number, line in enumerate(open(path), 1):
+        if re.search(r'\.(?:section|hint)\s*=\s*@"[^"]*\'', line):
+            problems.append(f'{path}:{number} uses a straight apostrophe in a user-visible string')
+
+bug = open(".github/ISSUE_TEMPLATE/bug.yml").read().split("id: patch", 1)[1].split("- type:", 1)[0]
+listed = set(re.findall(r'^\s+- (.+)$', bug, re.M))
+sentinels = {"Patches pane in Settings", "Installing, updating or restoring", "Not sure"}
+titles = {patch["title"] for patch in patches.values()}
+for title in sorted(titles - listed):
+    problems.append(f'bug.yml has no option for "{title}"')
+for option in sorted(listed - titles - sentinels):
+    problems.append(f'bug.yml lists "{option}", which is not a tweak')
+
 for problem in problems:
     print(problem, file=sys.stderr)
 if not problems:

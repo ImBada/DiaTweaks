@@ -12,11 +12,13 @@ struct DPPatch {
     __unsafe_unretained NSString *hint;
     __unsafe_unretained NSString *symbol, *tint;  // symbol: space-separated fallbacks for older macOS. tint: an NSColor class property.
     __unsafe_unretained NSString *section;
+    __unsafe_unretained NSString *group;  // A folder row in Settings; the folder's key, not a section.
     const char *const *classes;
     __unsafe_unretained NSString *requires;
     __unsafe_unretained NSString *disabledBy;
     __unsafe_unretained NSString *coveredBy;
     BOOL relaunch;  // Applies only at launch.
+    BOOL installLate;  // Installs after every other patch, for hooks that must run outermost.
     __unsafe_unretained NSString *choice, *defaultChoice;  // Saved as the chosen item's representedObject.
     NSMenu *(*choices)(void);
     NSArray<NSView *> *(*rows)(void);
@@ -36,15 +38,28 @@ struct DPPatch {
 
 #define DPClasses(...) ((const char *const []){__VA_ARGS__, NULL})
 
+static inline void DPWithoutAnimation(void (^work)(void)) {
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    work();
+    [CATransaction commit];
+}
+
+// A local tweak records the DPPatch layout it was built against; bump this whenever DPPatch changes so stale ones are refused.
+#define DP_LOCAL_ABI 1
+
 #define DP_PATCH(name)                                                                                                      \
     DPPatch name;                                                                                                           \
     __attribute__((used, no_sanitize("address"), section("__DATA,__dppatches"))) static DPPatch *const name##Entry = &name; \
+    __attribute__((used, section("__DATA,__dpabi"))) static const struct { uint32_t abi, patchSize; } DPABI_##name = {     \
+        DP_LOCAL_ABI, sizeof(DPPatch)};                                                                                     \
     DPPatch name =
 
 extern DPPatch *const *DPPatches;
 extern NSUInteger DPPatchCount;
 DPPatch *DPPatchNamed(NSString *key);
 DPPatch *DPRequired(DPPatch *patch);
+int DPDeclaredOrder(DPPatch *patch);  // Where the tweak sits in the source, before Settings order.
 void DPSetPatch(DPPatch *patch, BOOL on, BOOL save);
 void DPApplySavedSettings(void);
 BOOL DPEffectiveOn(DPPatch *patch);
@@ -56,6 +71,11 @@ void DPLoadPatches(void);
 void DPWatchSavedSettings(void);
 void DPInstallPatches(void);
 BOOL DPWriteManifest(NSString *path);
+// Local tweaks are ordinary DPPatch entries; a side table tags them so DPPatch, and a prebuilt dylib's ABI stamp, stay valid.
+BOOL DPIsLocalPatch(DPPatch *patch);
+NSString *DPLocalProblem(DPPatch *patch);
+void DPNoteLocalPatch(DPPatch *patch, NSString *identifier, NSString *problem);
+NSString *DPLocalIdentifier(DPPatch *patch);
 NSString *DPAppSupport(NSString *path);
 NSArray<NSString *> *DPHostFolders(void);
 NSString *DPHostFolder(BOOL create, NSError **error);

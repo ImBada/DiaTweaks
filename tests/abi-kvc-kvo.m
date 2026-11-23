@@ -12,6 +12,7 @@
 #import "Patches/SkipAccount/Startup.h"
 #import "Settings/Settings.h"
 #import "watchdog.h"
+#import "runloop.h"
 
 extern NSString *DPIDKey(id value);
 extern NSArray<NSString *> *DPSelectionIDKeys(id selection);
@@ -19,7 +20,6 @@ extern void DPEachValue(id collection, void (^visit)(id));
 extern id DPMakePureSwiftSelection(NSString *primary, NSArray<NSString *> *all);
 extern id DPMakePureSwiftIDBox(NSString *raw);
 
-// Shared stubs for linked patch units.
 NSNotificationName const DPPatchesDidChangeNotification = @"DPPatchesDidChange";
 DPPatch DPLittleDia, DPLittleDiaTabLinks, DPPeekPinnedLinks;
 DPPatch DPHideToolbar, DPRevealToolbarOnHover, DPShowLoadingProgress;
@@ -29,6 +29,7 @@ BOOL DPPeekGiving;
 BOOL DPPeekFindingLink;
 
 DPPatch *DPRequired(DPPatch *patch) { return nil; }
+BOOL DPIsLocalPatch(DPPatch *patch) { return NO; }
 void DPOnLaunch(void (^block)(void)) {}
 BOOL DPShortcutMatches(NSEvent *event, DPPatch *patch) { return NO; }
 BOOL DPEventIsKey(NSEvent *event, NSString *key) { return [event.charactersIgnoringModifiers.lowercaseString isEqualToString:key.lowercaseString]; }
@@ -148,17 +149,6 @@ NSView *DPPeekGlowFor(id page) { return [NSView new]; }
 static int failures;
 #define CHECK(cond, msg) do { if (!(cond)) { printf("FAIL: %s\n", msg); failures++; } } while (0)
 
-// The main queue is FIFO, so once the sentinel runs, every block queued before it has run too, however long a slow runner stalls.
-static void DrainMainQueue(NSTimeInterval seconds) {
-    NSDate *until = [NSDate dateWithTimeIntervalSinceNow:seconds];
-    __block BOOL drained = NO;
-    dispatch_async(dispatch_get_main_queue(), ^{ drained = YES; });
-    NSDate *limit = [NSDate dateWithTimeIntervalSinceNow:30];
-    while (!drained && limit.timeIntervalSinceNow > 0)
-        [NSRunLoop.mainRunLoop runMode:NSDefaultRunLoopMode beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
-    [NSRunLoop.mainRunLoop runUntilDate:until];
-}
-
 int main(void) {
     @autoreleasepool {
         [NSApplication sharedApplication];
@@ -191,7 +181,7 @@ int main(void) {
 
         NSDictionary *histMatch = @{ @"hasTabMatch" : @NO, @"providerType" : @"HistoryURL", @"matchType" : @"history-url" };
         NSDictionary *searchMatch = @{ @"hasTabMatch" : @NO, @"providerType" : @"Search", @"matchType" : @"search-what-you-typed" };
-        NSObject *opaqueMatch = [NSObject new]; // missing all KVC keys -> kept safely
+        NSObject *opaqueMatch = [NSObject new];
         DPFakeAutocompleteResult *goodRes = [[DPFakeAutocompleteResult alloc] init:@[ histMatch, searchMatch, opaqueMatch ]
                                                                 perProviderMatches:@{ @"HistoryURL" : @[ histMatch ], @"Search" : @[ searchMatch, opaqueMatch ], @"Bad" : @"not-an-array" }];
         DPFakeAutocompleteResult *filtered = DPWithoutHistory(goodRes);
@@ -216,7 +206,7 @@ int main(void) {
         DPFocusTab([NSObject new]);
         DPCloseTab([NSObject new]);
         CHECK(DPLittleDiaProfiles().count == 0, "DPLittleDiaProfiles skips profiles missing name");
-        delegate.appleScriptWindows = @[ @{ @"appleScriptProfiles" : @[ @{ @"name" : @"Work" } ] } ]; // has profile, missing windowId
+        delegate.appleScriptWindows = @[ @{ @"appleScriptProfiles" : @[ @{ @"name" : @"Work" } ] } ];
         __block BOOL openedResult = YES;
         DPOpenInProfile(@"https://example.com", 0, ^(BOOL opened) { openedResult = opened; });
         CHECK(!openedResult, "DPOpenInProfile returns NO synchronously when window lacks windowId");
@@ -243,7 +233,6 @@ int main(void) {
             DPPeekAddToolbar(card);
             weakZone = card.toolbarZone;
             [peekWin.contentView addSubview:card];
-            // Trigger check via notification while attached; missing isLoading/loadProgress must not throw.
             DPShowLoadingProgress.on = YES;
             DPHideToolbar.on = YES;
             DPHideToolbar.progress = 1;
@@ -273,9 +262,9 @@ int main(void) {
             dispatch_semaphore_wait(fired, DISPATCH_TIME_FOREVER);
             [bridge detach];
             [bridge detach]; // Idempotent double-detach must not throw over-remove KVO exception.
-            [bridge handleKey:@"isLoading"]; // Post-detach handleKey must be a no-op.
+            [bridge handleKey:@"isLoading"];
         }
-        DrainMainQueue(0.05);
+        DPDrainMainQueue(0.05);
         CHECK(weakBridge == nil, "DPPeekChatBridge deallocates cleanly after off-main-thread KVO + detach race");
 
         DPStage("7. DPStayingAction NSProxy safety");
@@ -314,7 +303,7 @@ int main(void) {
             prevWin.contentView = [NSView new];
         }
         CHECK(weakPreview == nil, "DPPreviewView deallocates cleanly with zero NSTimer or CADisplayLink retain cycle");
-        [linkProxy step:nil]; // Weak target nil -> safe no-op.
+        [linkProxy step:nil];
 
         DPStage("9. SkipAccount binary patcher NULL/empty guards & RX page round-trip");
         DPSkipPattern badNull = { .signature = NULL, .length = 1 };

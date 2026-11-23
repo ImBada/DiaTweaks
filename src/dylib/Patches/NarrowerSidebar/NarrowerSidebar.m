@@ -54,16 +54,19 @@ static BOOL DPWriteSidebarClamp(const uint32_t words[4]) {
     return NO;
 }
 
+static BOOL DPIsNarrow(void) { return DPIsSidebarClamp(DPSidebarClampNarrow); }
+
+static BOOL DPKnowsSidebarClamp(void) { return DPIsSidebarClamp(DPSidebarClampWide) || DPIsNarrow(); }
+
 static void DPApplyNarrowerSidebar(DPPatch *patch) {
-    BOOL wide = DPIsSidebarClamp(DPSidebarClampWide), narrow = DPIsSidebarClamp(DPSidebarClampNarrow);
-    if (!wide && !narrow) return (void)NSLog(@"DiaPatches: Narrower Sidebar found no sidebar clamp to change");
-    if (patch->on == narrow) return;
+    if (!DPKnowsSidebarClamp()) return (void)NSLog(@"DiaPatches: Narrower Sidebar found no sidebar clamp to change");
+    if (patch->on == DPIsNarrow()) return;
     if (!DPWriteSidebarClamp(patch->on ? DPSidebarClampNarrow : DPSidebarClampWide))
         NSLog(@"DiaPatches: Narrower Sidebar couldn't change the sidebar clamp");
 }
 
 static void DPInstallNarrowerSidebar(void) {
-    if (!DPIsSidebarClamp(DPSidebarClampWide) && !DPIsSidebarClamp(DPSidebarClampNarrow)) {
+    if (!DPKnowsSidebarClamp()) {
         DPNarrowerSidebar.unavailable = YES;
         DPNarrowerSidebar.on = NO;
         return (void)NSLog(@"DiaPatches: Narrower Sidebar doesn't know this Dia's resize code, so it stays off");
@@ -72,9 +75,8 @@ static void DPInstallNarrowerSidebar(void) {
 }
 
 static NSString *DPVerifyNarrowerSidebar(DPPatch *patch) {
-    BOOL wide = DPIsSidebarClamp(DPSidebarClampWide), narrow = DPIsSidebarClamp(DPSidebarClampNarrow);
-    if (!wide && !narrow) return @"Dia's sidebar clamp isn't where this patch expects it";
-    if (patch->on != narrow) return patch->on ? @"the sidebar still stops at 190" : @"the sidebar still stops at 164";
+    if (!DPKnowsSidebarClamp()) return @"Dia's sidebar clamp isn't where this patch expects it";
+    if (patch->on != DPIsNarrow()) return patch->on ? @"the sidebar still stops at 190" : @"the sidebar still stops at 164";
     return nil;
 }
 

@@ -246,7 +246,6 @@ int main(void) {
         DPHandOver(handed);
         CHECK(DPTakeHandOver(window) == handed && DPTakeHandOver(window) == nil, "DPTakeHandOver returns and clears handed-over bar");
 
-        // Regression: HideTabButton restores DPSavedKey & DPHoldsSelection on invisible window during layout/updateLayer when off.
         Class bgCls = objc_allocateClassPair(TabUI_TabBackgroundView.class, DPDiaTabBackground, 0);
         objc_registerClassPair(bgCls);
         DPInstallStandIn();
@@ -268,7 +267,6 @@ int main(void) {
         [bg layout];
         CHECK(gGiveBackCalls == 1, "subsequent layouts while off do nothing");
 
-        // Regression: the stand-in shows only on the sidebar page listing the hidden tab, not the next space's page a swipe slides in.
         Class listCls = objc_allocateClassPair(DPFakeList.class, DPDiaTabListCollection, 0);
         objc_registerClassPair(listCls);
         Class tabCls = objc_allocateClassPair(DPFakeTabView.class, DPDiaTabView, 0);
@@ -293,7 +291,6 @@ int main(void) {
         CHECK(DPVerifyStandIn(pages, barA) != nil, "verify still flags a missing stand-in on the hidden tab's own page");
         DPSelectionStyle(pageA.buttonBackground)[0] = 0;
 
-        // The same swipe the other way, once the bar's tab is in the other space.
         [gHidden removeAllObjects];
         [gHidden addObject:barB];
         DPStandInFor(pages, barB);
@@ -301,7 +298,6 @@ int main(void) {
         CHECK(DPGet(pageA.buttonBackground, &DPSavedKey) == nil && DPGet(pageB.buttonBackground, &DPSavedKey) != nil, "the left page's New Tab button is restored");
         CHECK(gGiveBackCalls > 0, "the left page's front tab is given its selection back");
 
-        // The cache follows the list: a tab arriving or leaving changes who is listed.
         [pageA setTabs:@[ backA, barA, barB ]];
         gGiveBackCalls = 0;
         DPStandInFor(pages, barB);
@@ -310,7 +306,6 @@ int main(void) {
         DPStandInFor(pages, barB);
         CHECK(!pageA.buttonSelected && pageB.buttonSelected, "a hidden tab that leaves a page takes its stand-in with it");
 
-        // A button outside any list, such as the tab bar's, is the window's only stand-in.
         NSView *stripButton = [[_TtC7TabList14NewTabCellView alloc] initWithFrame:NSMakeRect(0, 0, 100, 30)];
         TabUI_TabBackgroundView *stripBackground = [[bgCls alloc] initWithFrame:stripButton.bounds];
         [stripButton addSubview:stripBackground];
@@ -318,7 +313,6 @@ int main(void) {
         DPStandInFor(pages, barB);
         CHECK(DPStyleSelected(stripBackground->style), "a New Tab button outside any sidebar page is the stand-in");
 
-        // Turning hiding off, or closing the bar, restores every page.
         gHiding = NO;
         DPStandInFor(pages, nil);
         for (DPPage *page in @[ pageA, pageB ]) [page.buttonBackground layout];

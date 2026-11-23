@@ -39,10 +39,7 @@ static char DPLineKey;
 
 - (void)updateLayer {
     [self.effectiveAppearance performAsCurrentDrawingAppearance:^{
-        [CATransaction begin];
-        [CATransaction setDisableActions:YES];
-        self.fill.backgroundColor = [NSColor.controlAccentColor CGColor];
-        [CATransaction commit];
+        DPWithoutAnimation(^{ self.fill.backgroundColor = [NSColor.controlAccentColor CGColor]; });
     }];
     [self draw];
 }
@@ -60,14 +57,13 @@ static char DPLineKey;
 
 - (void)layout {
     [super layout];
-    [CATransaction begin];
-    [CATransaction setDisableActions:YES];
-    self.fill.frame = self.fillFrame;
-    self.glow.frame = self.bounds;
-    self.glow.mask.frame = self.glow.bounds;
-    self.glow.contentsScale = self.window.backingScaleFactor ?: 2;
-    self.glow.drawableSize = CGSizeMake(NSWidth(self.bounds) * self.glow.contentsScale, NSHeight(self.bounds) * self.glow.contentsScale);
-    [CATransaction commit];
+    DPWithoutAnimation(^{
+        self.fill.frame = self.fillFrame;
+        self.glow.frame = self.bounds;
+        self.glow.mask.frame = self.glow.bounds;
+        self.glow.contentsScale = self.window.backingScaleFactor ?: 2;
+        self.glow.drawableSize = CGSizeMake(NSWidth(self.bounds) * self.glow.contentsScale, NSHeight(self.bounds) * self.glow.contentsScale);
+    });
     [self draw];
 }
 
@@ -119,11 +115,10 @@ void DPShowProgressLine(NSView *pane, CGFloat fraction) {
     DPProgressLineView *line = DPGet(pane, &DPLineKey);
     if (!line) DPSet(pane, &DPLineKey, line = [DPProgressLineView new]);
     if (!DPLineIn(pane) || line.finishing) {
-        [CATransaction begin];
-        [CATransaction setDisableActions:YES];
-        line.finishing = NO;
-        line.fraction = 0;
-        [CATransaction commit];
+        DPWithoutAnimation(^{
+            line.finishing = NO;
+            line.fraction = 0;
+        });
         line.alphaValue = 1;
     }
     [line placeIn:pane];

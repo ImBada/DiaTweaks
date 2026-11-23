@@ -21,6 +21,8 @@ static void child(const char *support, const char *home) {
         NSURL *reports = [NSURL fileURLWithPath:@(home)];
         class_replaceMethod(NSFileManager.class, @selector(homeDirectoryForCurrentUser), imp_implementationWithBlock(^NSURL *(id self) { return reports; }), "@@:");
         DPTestDylib = [[@(support) stringByAppendingPathComponent:@"DiaPatches.dylib"] fileSystemRepresentation];
+        // Keep DPLocalFolderHasTweaks off the real local folder, which would change the crash path.
+        setenv("DIAPATCH_HOME", support, 1);
         DPBeginLaunch();
         printf("level %ld paused %d\n", (long)DPSafeMode, DPPaused);
         fflush(stdout);
@@ -128,7 +130,6 @@ int main(int argc, const char *argv[]) {
         expect(!resumed.paused, @"removing the pause file resumes");
         [resumed end:@"quit"];
 
-        // A crash while paused must not be counted when the next launch resumes unpaused.
         [NSData.data writeToFile:pause atomically:YES];
         DPLaunch *pausedCrash = launch();
         leaveCrashed(pausedCrash);
@@ -138,7 +139,6 @@ int main(int argc, const char *argv[]) {
                @"a crash while paused is not counted on the next unpaused launch");
         [afterPausedCrash end:@"quit"];
 
-        // A clean paused launch must neither erase a prior unpaused crash nor step down level 2.
         DPLaunch *unpausedCrash = launch();
         leaveCrashed(unpausedCrash);
         [NSData.data writeToFile:pause atomically:YES];
@@ -161,7 +161,6 @@ int main(int argc, const char *argv[]) {
         expect([state()[@"level"] integerValue] == 2, @"a clean paused launch does not step down level 2");
         [NSFileManager.defaultManager removeItemAtPath:pause error:nil];
 
-        // Chromium helper child processes (--type=renderer / gpu-process / utility) must never touch safe-mode.plist.
         [NSFileManager.defaultManager removeItemAtPath:[support stringByAppendingPathComponent:@"safe-mode.plist"] error:nil];
         DPLaunch *browser = launch();
         pid_t browserPid = browser.task.processIdentifier;
@@ -175,7 +174,6 @@ int main(int argc, const char *argv[]) {
         [browser end:@"quit"];
         expect(![state()[@"launching"] boolValue], @"browser still clears launching marker cleanly after child helper exits");
 
-        // Corrupt safe-mode.plist types (non-NSDate launched, out-of-range level) never crash and clamp level.
         NSMutableDictionary *corrupt = [state() mutableCopy];
         corrupt[@"launching"] = @YES;
         corrupt[@"launched"] = @"not-a-date";
@@ -186,7 +184,6 @@ int main(int argc, const char *argv[]) {
         expect(afterCorrupt.level == 0, @"corrupt negative level and non-NSDate launched handled cleanly without crashing");
         [afterCorrupt end:@"quit"];
 
-        // Compact JSON ("pid":123,) in .ips crash report is detected as a crash too.
         DPLaunch *compactCrash = launch();
         [compactCrash end:@"crash"];
         NSString *folder = [home stringByAppendingPathComponent:@"Library/Logs/DiagnosticReports"];

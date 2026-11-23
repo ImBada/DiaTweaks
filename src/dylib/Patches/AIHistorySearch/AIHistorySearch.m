@@ -7,10 +7,8 @@
 
 extern DPPatch DPExcludeSitesFromAIHistory;
 
-// HistorySearchPrivacyController resolves a site with no memory_key_value_store entry to .automatic, which reads as
-// included, so every new site starts in AI history search. These immediates are the "absent" arm of that mapping:
-// they copy isContentSafe into the site preference. Rewriting them to .exclude leaves stored preferences alone, so
-// sites you already included or excluded keep their setting and turning the address-bar switch on still sticks.
+// HistorySearchPrivacyController reads a site with no stored preference as included. These immediates are that "absent" arm;
+// rewriting them to .exclude leaves stored preferences alone.
 static const uint32_t DPIncludedSync = 0x120002f6;   // and w22, w23, #0x1
 static const uint32_t DPExcludedSync = 0x52800056;   // mov w22, #2
 static const uint32_t DPIncludedAsync = 0x120002b4;  // and w20, w21, #0x1
@@ -131,18 +129,18 @@ static BOOL DPWanted(void) {
     return DPExcludeSitesFromAIHistory.on || DPTurnOffAI.on;
 }
 
-static BOOL DPIsExcluded(void) {
-    if (!DPSyncSite || *DPSyncSite != DPExcludedSync) return NO;
+static BOOL DPSitesHold(uint32_t sync, uint32_t async) {
+    if (!DPSyncSite || *DPSyncSite != sync) return NO;
     for (NSUInteger i = 0; i < DPAsyncSiteCount; i++)
-        if (DPAsyncSite[i][0] != DPExcludedAsync) return NO;
+        if (DPAsyncSite[i][0] != async) return NO;
     return YES;
 }
 
-static BOOL DPIsIncluded(void) {
-    if (!DPSyncSite || *DPSyncSite != DPIncludedSync) return NO;
-    for (NSUInteger i = 0; i < DPAsyncSiteCount; i++)
-        if (DPAsyncSite[i][0] != DPIncludedAsync) return NO;
-    return YES;
+static BOOL DPIsExcluded(void) { return DPSitesHold(DPExcludedSync, DPExcludedAsync); }
+static BOOL DPIsIncluded(void) { return DPSitesHold(DPIncludedSync, DPIncludedAsync); }
+
+static void DPLogExcludeFailure(void) {
+    NSLog(@"DiaPatches: Exclude Sites from AI History couldn't change Dia's history search check");
 }
 
 static void DPApplyExcludeSitesFromAIHistory(DPPatch *patch) {
@@ -159,12 +157,12 @@ static void DPApplyExcludeSitesFromAIHistory(DPPatch *patch) {
     if (want ? DPIsExcluded() : DPIsIncluded()) return;
     uint32_t from = want ? DPIncludedSync : DPExcludedSync, to = want ? DPExcludedSync : DPIncludedSync;
     uint32_t fromAsync = want ? DPIncludedAsync : DPExcludedAsync, toAsync = want ? DPExcludedAsync : DPIncludedAsync;
-    if (!DPWrite(DPSyncSite, from, to)) return (void)NSLog(@"DiaPatches: Exclude Sites from AI History couldn't change Dia's history search check");
+    if (!DPWrite(DPSyncSite, from, to)) return DPLogExcludeFailure();
     for (NSUInteger i = 0; i < DPAsyncSiteCount; i++) {
         if (DPWrite(DPAsyncSite[i], fromAsync, toAsync)) continue;
         DPWrite(DPSyncSite, to, from);
         for (NSUInteger j = 0; j < i; j++) DPWrite(DPAsyncSite[j], toAsync, fromAsync);
-        return (void)NSLog(@"DiaPatches: Exclude Sites from AI History couldn't change Dia's history search check");
+        return DPLogExcludeFailure();
     }
 }
 

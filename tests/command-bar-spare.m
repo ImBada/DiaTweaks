@@ -7,6 +7,7 @@ static CFTimeInterval gIdleSeconds = 10;
 #import "Patches/CommandBar/HideTabButton.m"
 #import "Patches/CommandBar/CommandBarSpare.m"
 #import "Patches/CommandBar/CommandBarSpareMaker.m"
+#import "runloop.h"
 
 DPPatch DPCommandBar, DPCommandBarKeepText, DPNewTabNextToCurrent;
 NSNotificationName const DPPatchesDidChangeNotification = @"DPPatchesDidChange";
@@ -203,13 +204,6 @@ static DPCommandBarOverlay *DPMakeOverlay(NSWindow *window, DPFakeTab *opened, D
 static int failures;
 #define CHECK(cond, msg) do { if (!(cond)) { printf("FAIL: %s\n", msg); failures++; } } while (0)
 
-// Spins the main run loop until the condition holds, so a slow runner can't end the wait before an animation or timer lands.
-static void PumpUntil(BOOL (^done)(void)) {
-    NSDate *limit = [NSDate dateWithTimeIntervalSinceNow:30];
-    while (!done() && limit.timeIntervalSinceNow > 0)
-        [NSRunLoop.mainRunLoop runMode:NSDefaultRunLoopMode beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
-}
-
 int main(void) {
     @autoreleasepool {
         [NSApplication sharedApplication];
@@ -306,7 +300,7 @@ int main(void) {
         CHECK(DPParkSpare(DPMakeOverlay(winA, spareA3, pageA)), "parks spareA3");
         swA.activeTab = spareA3;
         CHECK(DPAdoptSpare(winA, pageView), "adopts spareA3");
-        PumpUntil(^BOOL { return spareA3.closed; });
+        DPPumpUntil(^BOOL { return spareA3.closed; });
         CHECK(spareA3.closed, "adopt timer closes an unused empty spare in a multi-tab space");
         [profA.appleScriptTabs removeObject:spareA2];
         [profA.appleScriptTabs removeObject:spareA3];
@@ -383,7 +377,6 @@ int main(void) {
         DPApplySpares(&DPCommandBarSpare);
         CHECK(DPSpareTimer == nil && !DPSpareIn(winA), "turning off invalidates the timer and drops any spare");
 
-        // Regression: DPDropSpare must never close a space's only tab or a navigated tab.
         DPCommandBarSpare.on = YES;
         DPFakeTab *onlySpare = DPAddHiddenTab(winA, profA, @"only-spare");
         [profA.appleScriptTabs removeAllObjects];
@@ -399,7 +392,6 @@ int main(void) {
         DPDropSpare(winA);
         CHECK(!navSpare.closed && !DPSpareIn(winA), "DPDropSpare does not close a navigated tab");
 
-        // Regression: DPForgetSpare (window close) clears spare & noted ID without calling DPCloseTab.
         DPFakeTab *closingSpare = DPAddHiddenTab(winA, profA, @"closing-spare");
         DPSet(winA, &DPSpareKey, DPMakeOverlay(winA, closingSpare, pageA));
         DPNoteSpare(@"closing-spare", YES);
@@ -407,7 +399,6 @@ int main(void) {
         CHECK(!closingSpare.closed && !DPSpareIn(winA) && ![gDefaults.store[DPSparesKey] containsObject:@"closing-spare"],
               "DPForgetSpare clears spare and persisted ID without closing tab");
 
-        // Regression: DPMakeSpare stops the 1 Hz timer when spares turn off without a notification.
         DPApplySpares(&DPCommandBarSpare);
         CHECK(DPSpareTimer != nil && DPSpareTimer.valid, "timer active while spares on");
         DPCommandBar.on = NO;
@@ -415,7 +406,6 @@ int main(void) {
         CHECK(DPSpareTimer == nil, "DPMakeSpare invalidates timer when DPCommandBar turns off");
         DPCommandBar.on = YES;
 
-        // Regression: DPApplyHideTab turning off stops spare timer and clears hidden/parked state.
         DPApplySpares(&DPCommandBarSpare);
         DPFakeTab *hidTab = DPAddHiddenTab(winA, profA, @"hid-tab");
         DPCommandBarHideTab.on = NO;
@@ -424,8 +414,6 @@ int main(void) {
               "turning HideTab off stops spare timer and clears hidden/parked tables");
         (void)hidTab;
 
-        // Regression: DPMakeSpare skips background spare creation while a visible Peek card is open,
-        // and DPParkSpare restores focus to Peek's web view rather than the covered background tab.
         DPCommandBarHideTab.on = YES;
         DPCommandBarSpare.on = YES;
         DPCommandBar.on = YES;
@@ -463,8 +451,6 @@ int main(void) {
         DPStopExpecting();
         [peekCard removeFromSuperview];
 
-        // Regression: a parked spare belongs to its own space, so another space coming forward drops it
-        // (never touching the new space's tabs) instead of showing it there.
         DPCommandBarSpare.on = YES;
         DPCommandBarHideTab.on = YES;
         peekCard.hidden = NO;
@@ -498,6 +484,36 @@ int main(void) {
         DPStopExpecting();
         swA.appleScriptProfiles = [NSMutableArray arrayWithObject:profA];
         swA.activeTab = pageA;
+
+        DPCommandBarSpare.on = NO;
+        DPCommandBarHideTab.on = YES;
+        DPCommandBarHideTab.unavailable = NO;
+        DPCommandBar.on = YES;
+        CHECK(!DPSparesOn(), "spares are off for the open-bar-tab regression");
+
+        DPFakeTab *leftOpen = DPMakeTab(@"left-open", @"");
+        [profA.appleScriptTabs addObject:leftOpen];
+        DPNoteOpenTab(@"left-open", YES);
+        CHECK([gDefaults.store[DPOpenTabsKey] containsObject:@"left-open"], "opening the bar notes its tab even with spares off");
+        DPNoteSpare(@"left-open", NO);
+        CHECK(![gDefaults.store[DPOpenTabsKey] containsObject:@"left-open"], "dismissing the bar clears the noted tab");
+
+        DPNoteOpenTab(@"left-open", YES);
+        swA.activeTab = pageA;
+        gIdleSeconds = 10;
+        DPCloseLeftBarTabs();
+        CHECK(leftOpen.closed, "launch cleanup closes the tab the bar left behind with spares off");
+        CHECK(![gDefaults.store[DPOpenTabsKey] containsObject:@"left-open"], "launch cleanup clears the noted tab");
+        [profA.appleScriptTabs removeObject:leftOpen];
+
+        DPFakeTab *onlyOpen = DPMakeTab(@"only-open", @"");
+        [profA.appleScriptTabs removeAllObjects];
+        [profA.appleScriptTabs addObject:onlyOpen];
+        swA.activeTab = onlyOpen;
+        DPNoteOpenTab(@"only-open", YES);
+        DPCloseLeftBarTabs();
+        CHECK(!onlyOpen.closed, "launch cleanup keeps a space's only tab");
+        CHECK(![gDefaults.store[DPOpenTabsKey] containsObject:@"only-open"], "launch cleanup forgets a tab it can't close");
 
         if (failures) return 1;
         puts("PASS: command bar spare guards, launch cleanup, and timer lifecycle");

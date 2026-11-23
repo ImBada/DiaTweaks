@@ -22,7 +22,6 @@ static NSString *DPTestSuiteName(void) {
 }
 @end
 
-// Minimal StdPatch & cross-patch stubs for standalone unit testing.
 CFTimeInterval DPFoldedAt;
 static BOOL gCanUndoGrouping;
 BOOL DPCanUndoGrouping(void) { return gCanUndoGrouping; }
@@ -70,7 +69,6 @@ static void Check(BOOL ok, NSString *msg) {
     printf("FAIL: %s\n", msg.UTF8String);
 }
 
-// --- 1. HideSleepingTabs fixtures ---
 @interface DPFakeSwitcherState : NSObject
 @property NSArray *items;
 @property NSString *focusedItemID;
@@ -150,7 +148,6 @@ static void TestHideSleepingTabs(void) {
     vc.collectionView = [DPFakeGrid new];
     vc.cellSize = NSMakeSize(200, 150);
 
-    // 10 tabs total (5x2 grid), only 3 awake -> must fit in 3 columns x 1 row!
     NSMutableArray *uuids = [NSMutableArray new];
     NSMutableDictionary *ctrls = [NSMutableDictionary new];
     for (int i = 0; i < 10; i++) {
@@ -182,13 +179,11 @@ static void TestHideSleepingTabs(void) {
         Check(object_getClass(w) == NSLayoutConstraint.class && object_getClass(h) == NSLayoutConstraint.class,
               @"HideSleepingTabs: watches constraints without KVO isa-swizzling");
 
-        // Width then height: 3 awake tabs fit in 3 columns x 1 row (height = 152 + 150 = 302, NOT 452!).
         w.constant = 152 + 5 * 200;
         h.constant = 152 + 2 * 150;
         Check(fabs(w.constant - (152 + 3 * 200)) < 0.5, @"HideSleepingTabs: shrinks width to 3 columns");
         Check(fabs(h.constant - (152 + 1 * 150)) < 0.5, @"HideSleepingTabs: shrinks height to 1 row (width-first)");
 
-        // Height BEFORE width from stale 1-column width: 5 awake tabs in 5x3 grid must still end at 1 row!
         for (int i = 3; i < 5; i++) ((DPFakeTabCtrl *)ctrls[uuids[i]]).viewModel.stateSubject.currentValue = @"state(snapshot: Optional(img))";
         w.constant = 152 + 1 * 200;
         h.constant = 152 + 3 * 150;
@@ -196,14 +191,12 @@ static void TestHideSleepingTabs(void) {
         Check(fabs(w.constant - (152 + 5 * 200)) < 0.5, @"HideSleepingTabs: 5 awake tabs use 5 columns");
         Check(fabs(h.constant - (152 + 1 * 150)) < 0.5, @"HideSleepingTabs: 5 awake tabs shrink height to 1 row even when height set before width");
 
-        // Unrelated nested NSCollectionView does not receive switcher's DPShownPath.
         DPFakeGrid *nested = [DPFakeGrid new];
         gNestedGrid = nested;
         [vc collectionView:vc.collectionView itemForRepresentedObjectAtIndexPath:[NSIndexPath indexPathForItem:2 inSection:0]];
         gNestedGrid = nil;
         Check(nested.lastMakePath.item == 99 && vc.collectionView.lastMakePath.item == 2, @"HideSleepingTabs: DPShownPath scoped to switcher grid only");
 
-        // Off-tweak: setConstant passes through untouched.
         DPHideSleepingTabs.on = NO;
         w.constant = 152 + 5 * 200;
         h.constant = 152 + 3 * 150;
@@ -216,7 +209,6 @@ static void TestHideSleepingTabs(void) {
     Check(weakW == nil, @"HideSleepingTabs: watched constraints deallocate cleanly with no KVO leak");
 }
 
-// --- 2. HideTabGroupBackground fixtures ---
 @interface _TtCC5TabUI16TabGroupCellViewP33_6B047B569AD47EBB5C3E7DC66393AFEF23ContainerBackgroundView : NSView
 @end
 @implementation _TtCC5TabUI16TabGroupCellViewP33_6B047B569AD47EBB5C3E7DC66393AFEF23ContainerBackgroundView
@@ -249,17 +241,14 @@ static void TestHideTabGroupBackground(void) {
     [cell addSubview:bg];
     [hiddenWin.contentView addSubview:cell];
 
-    // Off-tweak does nothing.
     DPHideTabGroupBackground.on = NO;
     [cell updateLayer];
     Check(bg.layer.backgroundColor != nil && bg.layer.borderWidth == 1.5 && !shadow.hidden, @"HideTabGroupBackground: off does not mutate layer");
 
-    // On hides grey background, border, and shadow.
     DPHideTabGroupBackground.on = YES;
     [cell updateLayer];
     Check(bg.layer.backgroundColor == nil && bg.layer.borderWidth == 0 && shadow.hidden, @"HideTabGroupBackground: on hides grey background and shadow");
 
-    // Off restores saved backgroundColor, borderWidth, and shadow even in a non-visible/minimized window!
     DPHideTabGroupBackground.on = NO;
     DPHideTabGroupBackground.apply(&DPHideTabGroupBackground);
     Check(bg.layer.backgroundColor != nil && CGColorEqualToColor(bg.layer.backgroundColor, grey), @"HideTabGroupBackground: off restores saved backgroundColor in minimized window");
@@ -267,7 +256,6 @@ static void TestHideTabGroupBackground(void) {
     Check(DPHideTabGroupBackground.verify(&DPHideTabGroupBackground) == nil, @"HideTabGroupBackground: verify passes after restore");
 }
 
-// --- 3. KeepFoldersOpen fixtures ---
 @interface _TtC5TabUI12TabGroupView : NSView {
 @public
     id viewModel;
@@ -304,7 +292,6 @@ static void TestKeepFoldersOpen(void) {
     Check(YES, @"KeepFoldersOpen: off apply and layout clear state cleanly");
 }
 
-// --- 4. CollapsePinned drag refusal + minimized window fixtures ---
 static int gDragEnteredCalls, gDragUpdatedCalls, gDragExitedCalls;
 @interface DPFakeSpace : NSObject
 @property (copy) NSString *spaceID;
@@ -402,7 +389,6 @@ static void TestCollapsePinned(void) {
     for (NSView *sub in cv.subviews) if ([NSStringFromClass(sub.class) isEqualToString:@"DPPinnedHeader"]) header = sub;
     Check(header != nil && !header.hidden, @"CollapsePinned: creates visible Pinned header when on");
 
-    // Force collapsed header, refuse drag over header, then exit, then turn OFF.
     [header setValue:@YES forKey:@"collapsed"];
     DPFakeDrag *drag = [DPFakeDrag new];
     drag.draggingLocation = [cv convertPoint:NSMakePoint(50, 10) toView:nil];
@@ -412,7 +398,6 @@ static void TestCollapsePinned(void) {
     [(id)tabList draggingExited:(id)drag];
     Check(gDragExitedCalls == 0, @"CollapsePinned: exiting a refused drag does not send stray draggingExited");
 
-    // Now refuse again WITHOUT exiting, then turn CollapsePinned OFF mid-drag!
     [(id)tabList draggingEntered:(id)drag];
     DPCollapsePinned.on = NO;
     DPCollapsePinned.apply(&DPCollapsePinned);
@@ -424,8 +409,6 @@ static void TestCollapsePinned(void) {
     Check(gDragEnteredCalls == 1 && gDragUpdatedCalls == 2, @"CollapsePinned: off clears refused state and forwards draggingUpdated normally");
 }
 
-
-// --- 4b. CollapsePinned beside Hide New Tab Until Opened: the Pinned line and rows below it stay put ---
 static NSArray<NSArray<NSString *> *> *gFakeNames;
 static CGFloat gInnerShift;
 
@@ -516,14 +499,12 @@ static void TestCollapsePinnedWithHideTab(void) {
     Check(header && !header.hidden && NSMinY(header.frame) == 0 && NSMaxY(header.frame) == 28, @"CollapsePinned: Pinned line sits at the top of the list");
     Check(RowFrame(0, 3).origin.y == 28 && RowFrame(1, 0).origin.y == 29 && RowFrame(1, 1).origin.y == 66, @"CollapsePinned: folded pinned rows leave no gap under the Pinned line");
 
-    // A hook under ours that moves the rows above the line must not reach the line's own measurements.
     gInnerShift = 100;
     [layout prepareLayout];
     Check([[header valueForKey:@"top"] doubleValue] == 0 && [[header valueForKey:@"end"] doubleValue] == 111, @"CollapsePinned: measures the Pinned line from Dia's rows, not from hooks around them");
     gInnerShift = 0;
     [layout prepareLayout];
 
-    // Cmd+T: the bar's rows freeze, then the new tab's row is left out of the list.
     DPExpectNewTab(w);
     [layout prepareLayout];
     Check(NSMinY(header.frame) == 0 && RowFrame(0, 3).origin.y == 28 && RowFrame(1, 0).origin.y == 29, @"CollapsePinned: Cmd+T with Hide New Tab Until Opened leaves the Pinned line and rows where they were");
@@ -538,7 +519,6 @@ static void TestCollapsePinnedWithHideTab(void) {
     [layout prepareLayout];
     Check(RowFrame(1, 1).origin.y == 66 && NSHeight(RowFrame(1, 1)) == 37 && RowFrame(1, 2).origin.y == 103, @"CollapsePinned: the new tab's row takes its place once the bar opens it");
 
-    // Open the Bar Instantly: a spare tab parked in the list.
     FakeRows(@[ @[ P1, P2, P3, @".sep" ], @[ @".newtab", S, N, R1, R2, R3 ] ]);
     DPHideBlank(SPARE, YES, w);
     [layout prepareLayout];
@@ -546,7 +526,6 @@ static void TestCollapsePinnedWithHideTab(void) {
     Check(DPCollapsePinned.verify(&DPCollapsePinned) == nil, @"CollapsePinned: verify passes with a parked spare tab");
     DPShowTabRow(SPARE, NO);
 
-    // Compact Tab Rows trims the rows first and the Pinned line follows them, through Cmd+T and Escape.
     gSmallRows = DPCompactTabRows.on = YES;
     FakeRows(@[ @[ P1, P2, P3, @".sep" ], @[ @".newtab", R1, R2, R3 ] ]);
     [layout prepareLayout];
@@ -564,7 +543,6 @@ static void TestCollapsePinnedWithHideTab(void) {
     Check(!DPHidingATab(w) && RowFrame(1, 0).origin.y == 29 && RowFrame(1, 1).origin.y == 59, @"CollapsePinned: Escape closes the bar and leaves the rows under the Pinned line");
     gSmallRows = DPCompactTabRows.on = NO;
 
-    // Unfolded, the pinned rows show under the line.
     [defaults setObject:@[] forKey:@"collapsedPinned"];
     DPCleanHideTab();
     FakeRows(@[ @[ P1, P2, P3, @".sep" ], @[ @".newtab", N, R1, R2, R3 ] ]);
@@ -580,8 +558,6 @@ static void TestCollapsePinnedWithHideTab(void) {
     [w close];
 }
 
-
-// --- 4c. CollapsePinned and the pill that scrolls to the active tab ---
 // Dia judges the active tab from the row it cached against the visible rect, without going through any hook.
 static NSCollectionViewLayoutAttributes *DiaRow(NSCollectionViewLayout *layout, NSInteger section, NSInteger item) {
     SEL sel = @selector(layoutAttributesForItemAtIndexPath:);
@@ -608,8 +584,7 @@ static BOOL RowsAgree(NSCollectionViewLayout *layout) {
     return YES;
 }
 
-// The main queue is FIFO, so once the sentinel runs, every block queued before it has run too, however long a slow runner stalls.
-// A second pass catches a block that queues another, and the spin that follows lets a pass of AppKit's own layout land.
+// The main queue is FIFO, so a sentinel runs after every block queued before it; a second pass catches blocks that queue more.
 static void Settle(void) {
     NSDate *until = [NSDate dateWithTimeIntervalSinceNow:0.05];
     for (int pass = 0; pass < 2; pass++) {
@@ -670,7 +645,6 @@ static void TestCollapsePinnedPill(void) {
     relayout();
     Settle();
     Check(tabList.scrolled == 1, @"CollapsePinned: a layout that moves nothing leaves Dia's pill alone");
-    // A tab with a pull request status is taller and moves the rows below it, after we moved the rows.
     DPPullRequestRepo.install();
     DPPullRequestRepo.on = YES;
     NSView *statusContent = [[objc_getClass(DPDiaTabContentView) alloc] initWithFrame:NSMakeRect(0, 0, 200, 51)];
@@ -691,13 +665,11 @@ static void TestCollapsePinnedPill(void) {
     ScrollTo(scroll, 0);
     Check(DPCollapsePinned.verify(&DPCollapsePinned) == nil, @"CollapsePinned: verify passes with Dia's rows moved");
 
-    // Dia moved a row of its own after we did: verify says so.
     NSCollectionViewLayoutAttributes *line = DiaRow(layout, 0, 3);
     line.frame = NSOffsetRect(line.frame, 0, 5);
     Check(DPCollapsePinned.verify(&DPCollapsePinned) != nil, @"CollapsePinned: verify notices Dia's rows apart from the list");
     relayout();
 
-    // Dia rebuilds its rows without our hooks: the list still shows them in place.
     SEL prepare = @selector(prepareLayout);
     ((void (*)(id, SEL))DPDiaIMP(objc_getClass(DPDiaTabListLayout), prepare))(layout, prepare);
     Check(RowFrame(0, 3).origin.y == 28 && layout.collectionViewContentSize.height == 806, @"CollapsePinned: rows Dia rebuilt on its own still show under the Pinned line");
@@ -713,7 +685,6 @@ static void TestCollapsePinnedPill(void) {
     Check([PillEdge(layout, scroll, 8) isEqual:@"bottom"] && PillEdge(layout, scroll, 3) == nil, @"CollapsePinned: pill follows the unfolded rows");
     Check(tabList.scrolled == 2, @"CollapsePinned: Dia judges the active tab again when the list unfolds");
 
-    // Off, or paused: Dia's rows are its own again.
     DPCollapsePinned.on = NO;
     DPCollapsePinned.apply(&DPCollapsePinned);
     relayout();
@@ -730,7 +701,6 @@ static void TestCollapsePinnedPill(void) {
     [w close];
 }
 
-// --- 5. UndoCloseTab off-tweak monitor guard ---
 @interface ArcWebContents : NSObject
 @property (nonatomic) NSView *nativeView;
 @property (nonatomic) NSInteger visibility;
@@ -759,19 +729,17 @@ static void TestUndoCloseTabAndSavePageAs(void) {
     DPUndoCloseTab.on = YES;
     ArcWebContents *page = [ArcWebContents new];
     [page closeWithForegroundCommitTiming:0];
-    // Turn off (e.g. Pause Tweaks) BEFORE pressing Cmd+Z!
     DPUndoCloseTab.on = NO;
     NSEvent *cmdZ = [NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:NSEventModifierFlagCommand
                                     timestamp:0 windowNumber:0 context:nil characters:@"z" charactersIgnoringModifiers:@"z" isARepeat:NO keyCode:6];
     Check(undoMonitor(cmdZ) == cmdZ, @"UndoCloseTab: turning off/pausing before Cmd+Z passes event through without reopening tab");
 
-    // SavePageAs: detached page (nativeView.window == nil) must NOT match when keyWindow/mainWindow are nil!
     NSUInteger saveBefore = gMonitors.count;
     DPSavePageAs.install();
     NSEvent *(^saveMonitor)(NSEvent *) = gMonitors[saveBefore];
     DPSavePageAs.on = YES;
     ArcWebContents *detached = [ArcWebContents new];
-    detached.nativeView = [NSView new]; // window == nil!
+    detached.nativeView = [NSView new];
     detached.visibility = 2;
     NSEvent *cmdSave = [NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:NSEventModifierFlagCommand
                                        timestamp:0 windowNumber:0 context:nil characters:@"z" charactersIgnoringModifiers:@"z" isARepeat:NO keyCode:6];
@@ -779,7 +747,6 @@ static void TestUndoCloseTabAndSavePageAs(void) {
           @"SavePageAs: windowless detached page does not match when no window is key/main");
 }
 
-// --- 6. ProfileEmoji DPTopDot_layout self-hiding regression ---
 @interface DPFakeIndicator : NSView
 @property NSDictionary *dotViews;
 @property NSString *focusedSpaceID;
@@ -806,7 +773,6 @@ static void TestProfileEmoji(void) {
     indicator.focusedSpaceID = @"SPACE-TEST-1";
     [indicator addSubview:dot];
 
-    // Layout twice with NO native dot subview: label must NOT hide itself on second layout!
     [dot layout];
     [dot layout];
     NSTextField *label = nil;
@@ -814,7 +780,6 @@ static void TestProfileEmoji(void) {
     Check(label != nil && !label.hidden && [label.stringValue isEqualToString:@"🚀"], @"ProfileEmoji: top dot without native subview does not hide its own emoji label");
 }
 
-// --- 7. PullRequestRepo author-prefix-of-repo + off-tweak restoration ---
 @interface _TtC5ARCUI24FeatheredTruncatingLabel : NSTextField
 @end
 @implementation _TtC5ARCUI24FeatheredTruncatingLabel
@@ -856,7 +821,6 @@ static void TestPullRequestRepo(void) {
     DPFakePRVM *vm = [DPFakePRVM new];
     vm.delegate = [DPFakePRDelegate new];
     vm.delegate.tabID = @"11111111-1111-1111-1111-111111111111";
-    // Author "jace" is a prefix of repo "jacethings"!
     vm.delegate.currentlyRenderedLiveItem = @".pullRequest(url: https://github.com/org/jacethings/pull/42, author: \"jace\", status: PullRequest.Status.open)";
     content.viewModel = vm;
     _TtC5ARCUI27FeatheredTransitioningLabel *trans = [[_TtC5ARCUI27FeatheredTransitioningLabel alloc] initWithFrame:NSMakeRect(0, 0, 180, 16)];
@@ -869,21 +833,17 @@ static void TestPullRequestRepo(void) {
     label.stringValue = @"jace • Approved";
     Check([label.stringValue isEqualToString:@"jacethings #42 · Open • Approved"], @"PullRequestRepo: replaces author with repo when author prefixes repo");
 
-    // Re-setting already-rewritten string must NOT mis-parse "things #42 ..." as review status!
     NSString *rewritten = label.stringValue;
     label.stringValue = rewritten;
     Check([label.stringValue isEqualToString:rewritten], @"PullRequestRepo: does not re-split repo name prefixed by author");
 
-    // Verify must pass even though "jacethings #42..." starts with "jace".
     Check(DPPullRequestRepo.verify(&DPPullRequestRepo) == nil, @"PullRequestRepo: verify passes when author prefixes repo");
 
-    // Turn off on non-visible/minimized window: layout must restore original author string!
     DPPullRequestRepo.on = NO;
     [label layout];
     Check([label.stringValue isEqualToString:@"jace • Approved"], @"PullRequestRepo: off layout restores author subtitle");
 }
 
-// --- 8. UnloadTab DPTabOpen & DPPageOf nil safety ---
 @interface DPFakeUnloadDelegate : NSObject
 @property NSURL *webContentURL;
 @property NSString *tabID;
@@ -950,7 +910,6 @@ static void TestUnloadTab(void) {
     NSMenu *menu = [tab menuForEvent:rightClick];
     Check([menu itemWithTitle:@"Unload Tab"] == nil, @"UnloadTab: nil contentViews safely produces no Unload Tab item");
 
-    // Scripted tab with nil tabId must NOT throw NSInvalidArgumentException in DPPageOf!
     DPFakeUnloadContentView *cv = [DPFakeUnloadContentView new];
     cv.viewModel = [DPFakeUnloadContentVM new];
     cv.viewModel.delegate = [DPFakeUnloadDelegate new];
@@ -959,7 +918,7 @@ static void TestUnloadTab(void) {
     tab.contentViews = @{ @"main" : cv };
     tab.viewModel = [DPFakeTabVM new];
     tab.viewModel.stateSubject = [DPFakeSubject new];
-    tab.viewModel.stateSubject.currentValue = [DPFakeTabSelectionState new]; // selectionStyle == nil
+    tab.viewModel.stateSubject.currentValue = [DPFakeTabSelectionState new];
 
     DPFakeUnloadScriptTab *badTab = [DPFakeUnloadScriptTab new];
     badTab.URL = @"https://unload.example/";
@@ -975,7 +934,6 @@ static void TestUnloadTab(void) {
     Check(menu != nil && [menu itemWithTitle:@"Unload Tab"] == nil, @"UnloadTab: nil tabId in appleScriptTabs does not crash DPPageOf");
 }
 
-// --- 9. CompactSidebarHeader off-tweak no-swizzle ---
 @interface DPUnrelatedSidebarChild : NSView
 @end
 @implementation DPUnrelatedSidebarChild
@@ -1007,7 +965,6 @@ static void TestCompactSidebarHeader(void) {
     Check(beforeIMP == afterIMP, @"CompactSidebarHeader: off does not swizzle sidebar subview classes");
 }
 
-// --- 10. TidyTabs off-tweak & minimized window cleanup ---
 @interface _TtC7TabList20TabListSeparatorView : NSView
 @end
 @implementation _TtC7TabList20TabListSeparatorView
@@ -1038,7 +995,6 @@ static void TestTidyTabsCleanup(void) {
     [sidebar addSubview:list];
     [minimized.contentView addSubview:sidebar];
 
-    // Turn on -> attaches tracking area on sidebar and places brush on separator when busy.
     DPTidyTabs.on = YES;
     DPTidySetBusy(YES);
     [list layout];
@@ -1049,7 +1005,6 @@ static void TestTidyTabsCleanup(void) {
     Check(hover.tracking != nil && [sidebar.trackingAreas containsObject:hover.tracking], @"TidyTabs: attaches hover tracking area when on");
     Check(hasBrush && NSWidth(line.frame) < 180, @"TidyTabs: places separator brush and trims line when on");
 
-    // Turn off while window is non-visible/minimized -> MUST detach tracking area, remove brush, and restore line width!
     DPTidyTabs.on = NO;
     DPTidySetBusy(NO);
     DPTidyTabs.apply(&DPTidyTabs);

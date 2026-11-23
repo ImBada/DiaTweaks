@@ -15,7 +15,7 @@ static void DPInstallToggleToolbar(void) {
     }];
 }
 
-// Without an apply, toggling eases and relayouts every patch.
+// Empty on purpose: without an apply, toggling eases and relayouts every patch.
 static void DPApplyToggleToolbar(DPPatch *patch) {}
 
 static NSString *DPVerifyToggleToolbar(DPPatch *patch) { return DPKeyMonitor ? nil : @"nothing listens for the shortcut"; }
@@ -23,7 +23,7 @@ static NSString *DPVerifyToggleToolbar(DPPatch *patch) { return DPKeyMonitor ? n
 DP_PATCH(DPToggleToolbarVisibility) {
     .key = @"toggleToolbarVisibility",
     .order = 35,
-    .title = @"Toggle toolbar visibility",
+    .title = @"Toggle Toolbar Visibility",
     .detail = @"Hide or show the toolbar with a keyboard shortcut, ⌃D unless you set another.",
     .symbol = @"command",
     .tint = @"systemIndigoColor",

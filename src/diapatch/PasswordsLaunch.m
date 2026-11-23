@@ -64,6 +64,65 @@ static int listenAt(NSString *path) {
     return -1;
 }
 
+// Dia's Info.plist has no LSUIElement, so a genuine copy registers as a Foreground app and flashes
+// in the Dock. Launching it through a symlink inside a UIElement bundle keeps the signature and the
+// resolved path that 1Password and Apple's launch constraint check, but not the Dock icon.
+static BOOL linkTo(NSString *target, NSString *path) {
+    NSFileManager *files = NSFileManager.defaultManager;
+    if ([[files destinationOfSymbolicLinkAtPath:path error:nil] isEqual:target]) return YES;
+    NSString *tmp = [path stringByAppendingFormat:@".%d.%u", getpid(), arc4random()];
+    unlink(tmp.fileSystemRepresentation);
+    struct stat info;
+    if (lstat(path.fileSystemRepresentation, &info) == 0 && S_ISDIR(info.st_mode)) [files removeItemAtPath:path error:nil];
+    BOOL linked = symlink(target.fileSystemRepresentation, tmp.fileSystemRepresentation) == 0
+        && rename(tmp.fileSystemRepresentation, path.fileSystemRepresentation) == 0;
+    if (!linked) unlink(tmp.fileSystemRepresentation);
+    return linked;
+}
+
+static NSString *buildHeadlessApp(NSString *app, NSDictionary *info) {
+    NSFileManager *files = NSFileManager.defaultManager;
+    NSString *wrapper = [app.stringByDeletingLastPathComponent stringByAppendingPathComponent:@"Headless.app"];
+    NSString *contents = [wrapper stringByAppendingPathComponent:@"Contents"];
+    NSMutableDictionary *headless = [info mutableCopy];
+    headless[@"LSUIElement"] = @YES;
+    NSData *plist = [NSPropertyListSerialization dataWithPropertyList:headless format:NSPropertyListXMLFormat_v1_0 options:0 error:nil];
+    NSString *plistPath = [contents stringByAppendingPathComponent:@"Info.plist"];
+    if (!plist || ![files createDirectoryAtPath:[contents stringByAppendingPathComponent:@"MacOS"] withIntermediateDirectories:YES attributes:nil error:nil])
+        return nil;
+    if (![plist isEqualToData:[NSData dataWithContentsOfFile:plistPath]] && ![plist writeToFile:plistPath atomically:YES]) return nil;
+    NSString *relative = [@"../" stringByAppendingString:app.lastPathComponent];
+    for (NSString *part in @[ @"MacOS/Dia", @"Frameworks", @"Resources" ]) {
+        NSString *inside = [@"Contents/" stringByAppendingString:part];
+        if (![files fileExistsAtPath:[app stringByAppendingPathComponent:inside]]) continue;
+        NSString *up = @"";
+        for (NSUInteger i = part.pathComponents.count; i > 0; i--) up = [up stringByAppendingString:@"../"];
+        if (!linkTo([[up stringByAppendingString:relative] stringByAppendingPathComponent:inside], [contents stringByAppendingPathComponent:part]))
+            return nil;
+    }
+    return wrapper;
+}
+
+static int lockFolder(NSString *folder) {
+    int lock = open([folder stringByAppendingPathComponent:@".lock"].fileSystemRepresentation, O_CREAT | O_RDWR | O_CLOEXEC, 0600);
+    while (lock >= 0 && flock(lock, LOCK_EX) != 0) {
+        if (errno == EINTR) continue;
+        close(lock);
+        return -1;
+    }
+    return lock;
+}
+
+static NSString *headlessApp(NSString *app) {
+    NSDictionary *info = [NSDictionary dictionaryWithContentsOfFile:[app stringByAppendingPathComponent:@"Contents/Info.plist"]];
+    if (!info) return nil;
+    int lock = lockFolder(app.stringByDeletingLastPathComponent);
+    if (lock < 0) return nil;
+    NSString *wrapper = buildHeadlessApp(app, info);
+    close(lock);
+    return wrapper;
+}
+
 static pid_t launchOriginal(NSString *app, NSString *folder, NSString *socket) {
     NSString *dia = [app stringByAppendingPathComponent:@"Contents/MacOS/Dia"];
     NSString *profile = [@"--user-data-dir=" stringByAppendingString:[folder stringByAppendingPathComponent:@"ud"]];
@@ -72,18 +131,17 @@ static pid_t launchOriginal(NSString *app, NSString *folder, NSString *socket) {
                            "--no-default-browser-check", "--use-mock-keychain", "--mute-audio", NULL };
     NSString *fixedHome = [@"CFFIXED_USER_HOME=" stringByAppendingString:folder];
     NSString *handoff = [NSString stringWithFormat:@"%s=%@", DPHandoffVariable, socket];
-    NSString *handoffPrefix = [NSString stringWithFormat:@"%s=", DPHandoffVariable];
     size_t envCount = 0;
     while (environ[envCount]) envCount++;
     const char **envp = calloc(envCount + 3, sizeof *envp);
     if (!envp) return 0;
     size_t out = 0;
     envp[out++] = fixedHome.UTF8String;
-    envp[out++] = handoff.UTF8String;
-    const char *handoffPrefixStr = handoffPrefix.UTF8String;
-    size_t handoffPrefixLen = strlen(handoffPrefixStr);
+    const char *handoffEntry = handoff.UTF8String;
+    envp[out++] = handoffEntry;
+    size_t handoffPrefixLen = strlen(DPHandoffVariable) + 1;
     for (size_t i = 0; i < envCount; i++) {
-        if (!strncmp(environ[i], "CFFIXED_USER_HOME=", 18) || !strncmp(environ[i], handoffPrefixStr, handoffPrefixLen)) continue;
+        if (!strncmp(environ[i], "CFFIXED_USER_HOME=", 18) || !strncmp(environ[i], handoffEntry, handoffPrefixLen)) continue;
         envp[out++] = environ[i];
     }
 
@@ -106,7 +164,10 @@ static int acceptSubprocess(int listener, pid_t *dia, pid_t *peer) {
     for (NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:kStartupTimeout]; deadline.timeIntervalSinceNow > 0;) {
         struct pollfd ready = { .fd = listener, .events = POLLIN };
         if (poll(&ready, 1, 100) <= 0) {
-            if (waitpid(*dia, NULL, WNOHANG) == *dia) return *dia = 0, -1;
+            if (waitpid(*dia, NULL, WNOHANG) == *dia) {
+                *dia = 0;
+                return -1;
+            }
             continue;
         }
         int client = accept(listener, NULL, NULL);
@@ -265,6 +326,15 @@ static BOOL cloneBundle(NSString *from, NSString *to) {
     return task.terminationStatus == 0;
 }
 
+static BOOL swapIntoPlace(NSString *fresh, NSString *clone) {
+    const char *src = fresh.fileSystemRepresentation, *dst = clone.fileSystemRepresentation;
+    struct stat info;
+    if (lstat(dst, &info) != 0) return rename(src, dst) == 0;
+    if (!S_ISDIR(info.st_mode)) return unlink(dst) == 0 && rename(src, dst) == 0;
+    return renamex_np(src, dst, RENAME_SWAP) == 0
+        || (errno == ENOTSUP && [NSFileManager.defaultManager removeItemAtPath:clone error:nil] && rename(src, dst) == 0);
+}
+
 // Its sandbox reads only apps under /Applications, hence the clone.
 static NSString *applicationsCopyIn(NSString *copyFolder, NSString *pristine) {
     NSFileManager *files = NSFileManager.defaultManager;
@@ -273,13 +343,10 @@ static NSString *applicationsCopyIn(NSString *copyFolder, NSString *pristine) {
     if (stat([pristine stringByAppendingPathComponent:@"Contents/MacOS/Dia"].fileSystemRepresentation, &original) != 0) return nil;
     if (![files createDirectoryAtPath:copyFolder withIntermediateDirectories:YES attributes:nil error:nil]) return nil;
 
-    int lock = open([copyFolder stringByAppendingPathComponent:@".lock"].fileSystemRepresentation, O_CREAT | O_RDWR | O_CLOEXEC, 0600);
+    int lock = lockFolder(copyFolder);
     if (lock < 0) return nil;
-    while (flock(lock, LOCK_EX) != 0) {
-        if (errno != EINTR) return close(lock), nil;
-    }
 
-    // Sweep orphaned temp staging bundles from previously killed copies while holding LOCK_EX.
+    // Sweep staging bundles left by killed copies.
     for (NSString *entry in [files contentsOfDirectoryAtPath:copyFolder error:nil])
         if ([entry hasPrefix:@"Dia.app."]) [files removeItemAtPath:[copyFolder stringByAppendingPathComponent:entry] error:nil];
 
@@ -289,21 +356,7 @@ static NSString *applicationsCopyIn(NSString *copyFolder, NSString *pristine) {
         [files removeItemAtPath:fresh error:nil];
         BOOL cloned = cloneBundle(pristine, fresh);
         if (cloned) stripQuarantine(fresh);
-        const char *src = fresh.fileSystemRepresentation, *dst = clone.fileSystemRepresentation;
-        BOOL placed = NO;
-        if (cloned) {
-            struct stat dstInfo;
-            if (lstat(dst, &dstInfo) == 0) {
-                if (S_ISDIR(dstInfo.st_mode)) {
-                    placed = renamex_np(src, dst, RENAME_SWAP) == 0
-                        || (errno == ENOTSUP && [files removeItemAtPath:clone error:nil] && rename(src, dst) == 0);
-                } else {
-                    placed = unlink(dst) == 0 && rename(src, dst) == 0;
-                }
-            } else {
-                placed = rename(src, dst) == 0;
-            }
-        }
+        BOOL placed = cloned && swapIntoPlace(fresh, clone);
         [files removeItemAtPath:fresh error:nil];
         if (!placed) result = nil;
     }
@@ -312,22 +365,24 @@ static NSString *applicationsCopyIn(NSString *copyFolder, NSString *pristine) {
     return result;
 }
 
-static NSString *applicationsCopy(NSString *pristine) { return applicationsCopyIn(DPCopyFolder, pristine); }
-
 pid_t DPStartHelperThroughOriginal(NSString *home, NSString *helperPath, BOOL checksBrowser, int argc, const char *argv[]) {
     NSString *launches = [home stringByAppendingPathComponent:@"passwords-launch"];
     NSString *folder = [launches stringByAppendingPathComponent:@(getpid()).stringValue], *problem = nil;
     NSString *socket = socketPath(folder, &problem);
     NSString *pristine = [home stringByAppendingPathComponent:@"pristine/Dia.app"];
-    NSString *app = checksBrowser ? applicationsCopy(pristine) : pristine;
+    NSString *app = checksBrowser ? applicationsCopyIn(DPCopyFolder, pristine) : pristine;
+    NSString *headless = app ? headlessApp(app) : nil;
     [NSFileManager.defaultManager createDirectoryAtPath:folder withIntermediateDirectories:YES attributes:@{ NSFilePosixPermissions : @0700 } error:nil];
     chmod(launches.fileSystemRepresentation, 0700);
     NSDate *start = NSDate.date;
     int listener = socket ? listenAt(socket) : -1;
     if (listener < 0) logLine(home, problem ?: [NSString stringWithFormat:@"couldn't listen at %@", socket]);
-    pid_t dia = listener >= 0 && app ? launchOriginal(app, folder, socket) : 0, peer = 0, helper = 0;
+    pid_t dia = listener >= 0 && app ? launchOriginal(headless ?: app, folder, socket) : 0, peer = 0, helper = 0;
     int client = dia ? acceptSubprocess(listener, &dia, &peer) : -1;
-    if (listener >= 0) close(listener), unlink(socket.fileSystemRepresentation);
+    if (listener >= 0) {
+        close(listener);
+        unlink(socket.fileSystemRepresentation);
+    }
     if (client >= 0 && handOver(client, helperPath, argc, argv) && becameHelper(client, peer, helperPath)) helper = peer;
     if (client >= 0) close(client);
     if (!helper && peer > 0) kill(peer, SIGKILL);
@@ -335,8 +390,9 @@ pid_t DPStartHelperThroughOriginal(NSString *home, NSString *helperPath, BOOL ch
     if (dia) {
         kill(dia, SIGKILL);
         while (waitpid(dia, NULL, 0) < 0 && errno == EINTR) {}
+        DPForgetApp(app);
+        if (headless) DPForgetApp(headless);
     }
-    if (dia) DPForgetApp(app);
     [NSFileManager.defaultManager removeItemAtPath:folder error:nil];
     logLine(home, [NSString stringWithFormat:helper ? @"the original Dia started %@ in %.2f s" : @"the original Dia didn't start %@ (%.2f s)",
                                              helperPath.lastPathComponent, -start.timeIntervalSinceNow]);

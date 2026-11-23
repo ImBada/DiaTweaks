@@ -1,5 +1,20 @@
 #import "EdgeToEdge.h"
 
+static int DPPointCount(CGPathElementType type) {
+    switch (type) {
+        case kCGPathElementAddCurveToPoint: return 3;
+        case kCGPathElementAddQuadCurveToPoint: return 2;
+        case kCGPathElementCloseSubpath: return 0;
+        default: return 1;
+    }
+}
+
+static CGFloat DPCornerEdge(CGFloat value, CGFloat low, CGFloat high, CGFloat extent) {
+    if (value - low < extent) return low;
+    if (high - value < extent) return high;
+    return NAN;
+}
+
 // Keeps the same path elements so Dia's animations still interpolate.
 CGPathRef DPReshapeCorners(CGPathRef path, CGFloat extent, CGFloat rightScale, CGFloat leftScale) {
     if (!path) return NULL;
@@ -7,17 +22,15 @@ CGPathRef DPReshapeCorners(CGPathRef path, CGFloat extent, CGFloat rightScale, C
     __block int subpath = 0;
     CGPathApplyWithBlock(path, ^(const CGPathElement *element) {
         if (element->type == kCGPathElementMoveToPoint && !CGRectIsNull(box)) subpath++;
-        int count = element->type == kCGPathElementAddCurveToPoint ? 3 : element->type == kCGPathElementAddQuadCurveToPoint ? 2
-                  : element->type == kCGPathElementCloseSubpath ? 0 : 1;
-        for (int i = 0; i < count && subpath == 0; i++) box = CGRectUnion(box, (CGRect){element->points[i], CGSizeZero});
+        for (int i = 0, count = DPPointCount(element->type); i < count && subpath == 0; i++) box = CGRectUnion(box, (CGRect){element->points[i], CGSizeZero});
     });
     CGMutablePathRef reshaped = CGPathCreateMutable();
     subpath = 0;
     __block BOOL started = NO;
     CGPoint (^move)(CGPoint) = ^CGPoint(CGPoint p) {
         if (subpath > 0) return p;
-        CGFloat cx = p.x - CGRectGetMinX(box) < extent ? CGRectGetMinX(box) : CGRectGetMaxX(box) - p.x < extent ? CGRectGetMaxX(box) : NAN;
-        CGFloat cy = p.y - CGRectGetMinY(box) < extent ? CGRectGetMinY(box) : CGRectGetMaxY(box) - p.y < extent ? CGRectGetMaxY(box) : NAN;
+        CGFloat cx = DPCornerEdge(p.x, CGRectGetMinX(box), CGRectGetMaxX(box), extent);
+        CGFloat cy = DPCornerEdge(p.y, CGRectGetMinY(box), CGRectGetMaxY(box), extent);
         if (isnan(cx) || isnan(cy)) return p;
         CGFloat scale = cx == CGRectGetMinX(box) ? leftScale : rightScale;
         return CGPointMake(cx + (p.x - cx) * scale, cy + (p.y - cy) * scale);

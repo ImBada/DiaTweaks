@@ -20,85 +20,107 @@ body:
         - Edge-to-Edge Web Pages
         - Only in Full Screen
         - Square Corners Next to Sidebar
+        - Save Page As
+        - Mouse Back and Forward Buttons
         - Hide Toolbar
         - Show Toolbar on Hover
-        - Toggle toolbar visibility
+        - Toggle Toolbar Visibility
         - Show Toolbar on New Tabs
         - Show Toolbar with Sidebar
+        - Show Toolbar with Tabs at the Top
+        - Keep Bookmarks Bar
         - Show Loading Progress
         - Hide Site Color in Tab Bar
         - Always Show Address Field
+        - Search Engine Name in Chat Toggle
         - Hide Sidebar Button
+        - Don’t Open Downloads List
         - Extensions Shortcut
-        - Tidy Tabs
-        - Profile Emoji
-        - Profile Color Picker
-        - Switch Profiles with ⌘1–9
+        - Hide Site Not Working Prompt
+        - Sidebar Grain
+        - Window Material
+        - Compact Tab Rows
+        - Narrower Sidebar
+        - Keep Folders Open
         - Translucent Sidebar
         - Compact Sidebar Header
-        - Hide Pinned Tab Border
-        - Hide Pinned Tab Card
-        - Collapse Pinned Tabs
+        - Open Sidebar Instantly
+        - Show Repo on Pull Requests
         - Hide Group Background
+        - Hide Vertical Tab Glow
         - Hide Recent Tabs Button
-        - Don’t Open Downloads List
-        - Hide Site Not Working Prompt
-        - Close Tabs from Tab Switcher
-        - Unload Tabs
-        - Unload Pinned Splits
-        - Undo Closing a Tab
+        - Collapse Pinned Tabs
+        - Hide Pinned Tab Card
+        - Hide Pinned Tab Border
         - Pin Tab Shortcut
-        - Save Page As
-        - Hide Sleeping Tabs
+        - Open ⌘-Clicked Links as Regular Tabs
+        - Unload Pinned Splits
+        - Close Button on Pinned Tabs
+        - Minus Button on Open Pinned Tabs
+        - Profile Emoji
+        - Profile Color Picker
+        - Private Window Theme
+        - Switch Profiles with ⌘1–9
+        - Tidy Tabs
+        - Unload Tabs
         - Clean Tab Titles
+        - Undo Closing a Tab
+        - Group Tabs by Domain
+        - Merge Subdomains
+        - Close Tabs from Tab Switcher
+        - Open New Tabs Next to Current
+        - Hide Sleeping Tabs
+        - Open New Tabs in Command Bar
         - Compact Command Bar
         - Compact with Chat Usage Too
-        - Open New Tabs in Command Bar
+        - Hide New Tab Until Opened
+        - Open the Bar Instantly
+        - Scroll Page Behind
+        - Remember What You Typed
         - Blur Page Behind
         - Darken Page Behind
         - Shadow Behind Bar
-        - Scroll Page Behind
-        - Remember What You Typed
-        - Hide New Tab Until Opened
+        - Hide Setup Suggestions
         - Hide History Suggestions
         - Hide New Tab Logo
+        - Hide Default Browser Banner
         - Chat Model
         - Fall Back to Dia Default
         - Turn Off AI
         - Morning Brief Language
+        - Exclude Sites from AI History Search
         - Hide Chat Button
         - Hide Chats Button
+        - Hide Trial Button
         - Hide Upgrade Banner
         - Hide Personalize Button
         - Hide Skills Suggestions
         - Hide Connect App Prompt
-        - Exclude Sites from AI History Search
-        - Window Material
-        - Keep Windows Active
-        - Drag Window from Page
-        - Zoom on Double-Click
         - Window Corners
-        - App Icon
+        - Keep Windows Active
+        - Zoom on Double-Click
+        - Drag Window from Page
         - Hide Window Controls
-        - Private Window Theme
+        - App Icon
+        - Local Tweaks
         - Skip Account
         - Launch Flags
+        - Dock Click Shows Existing Window
         - Allow 1Password
         - Allow Bitwarden
         - Allow Proton Pass
         - Allow iCloud Passkeys
         - Allow iCloud Passwords
-        - Group Tabs by Domain
-        - Merge Subdomains
-        - Peek on Shift-Click
-        - Peek from Pinned Tabs
-        - Drag Links to Peek
-        - Hide Link Address
         - Little Dia
         - Close with Escape
         - Follow Link Rules
         - Remember Size and Position
         - Open Links from Tabs
+        - Ask Where to Go First
+        - Peek on Shift-Click
+        - Peek from Pinned Tabs
+        - Drag Links to Peek
+        - Hide Link Address
         - Split TLS ClientHello
         - Patches pane in Settings
         - Installing, updating or restoring

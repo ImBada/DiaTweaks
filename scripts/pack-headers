@@ -1,0 +1,44 @@
+#!/usr/bin/env python3
+"""Pack every header under src/dylib into one blob for __TEXT,__dp_headers.
+
+Mach-O section names are capped at 16 characters, so the header tree goes in as one blob:
+
+    uint32 count
+    count * (uint16 pathLength, path, uint32 contentLength, content)
+
+Paths are relative to src/dylib and sorted, so the same sources always produce the same bytes.
+"""
+
+import os
+import struct
+import sys
+
+
+def main():
+    if len(sys.argv) != 3:
+        sys.exit("usage: pack-headers <src/dylib> <out.bin>")
+    root, out = sys.argv[1], sys.argv[2]
+    relatives = sorted(
+        os.path.relpath(os.path.join(folder, name), root)
+        for folder, _, names in os.walk(root)
+        for name in names
+        if name.endswith(".h")
+    )
+
+    blob = bytearray(struct.pack("<I", len(relatives)))
+    for relative in relatives:
+        with open(os.path.join(root, relative), "rb") as handle:
+            data = handle.read()
+        name = relative.encode("utf-8")
+        if len(name) > 0xFFFF:
+            sys.exit(f"{relative} has a path too long to pack")
+        blob += struct.pack("<H", len(name)) + name
+        blob += struct.pack("<I", len(data)) + data
+
+    os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
+    with open(out, "wb") as handle:
+        handle.write(blob)
+
+
+if __name__ == "__main__":
+    main()

@@ -12,6 +12,10 @@ static const CGFloat DPFindWidth = 260, DPFindHeight = 30, DPFindMargin = 8, DPF
 @property (nonatomic, strong) NSArray<NSButton *> *buttons;
 @end
 
+static void DPPeekStopFind(id page) {
+    if ([page respondsToSelector:@selector(stopFind)]) [page performSelector:@selector(stopFind)];
+}
+
 @implementation DPPeekFind
 - (BOOL)wantsUpdateLayer { return YES; }
 - (BOOL)acceptsFirstMouse:(NSEvent *)event { return YES; }
@@ -64,12 +68,12 @@ static const CGFloat DPFindWidth = 260, DPFindHeight = 30, DPFindMargin = 8, DPF
 }
 
 - (void)step:(BOOL)forward {
-    NSObject *page = (NSObject *)self.peek.page;
+    id page = self.peek.page;
     SEL find = @selector(find:forward:matchCase:findMatch:completion:);
     NSString *text = self.field.stringValue;
     if (!text.length) {
         self.count.stringValue = @"";
-        return (void)([page respondsToSelector:@selector(stopFind)] ? [page performSelector:@selector(stopFind)] : nil);
+        return DPPeekStopFind(page);
     }
     if (![page respondsToSelector:find]) return;
     __weak DPPeekFind *weak = self;
@@ -115,8 +119,7 @@ BOOL DPPeekHideFind(DPPeekCard *peek) {
     DPPeekFind *bar = DPGet(peek, DPPeekFindKey);
     if (!bar) return NO;
     DPSet(peek, DPPeekFindKey, nil);
-    NSObject *page = (NSObject *)peek.page;
-    if ([page respondsToSelector:@selector(stopFind)]) [page performSelector:@selector(stopFind)];
+    DPPeekStopFind(peek.page);
     NSResponder *focus = peek.window.firstResponder;
     BOOL inBar = [focus isKindOfClass:NSView.class] && [(NSView *)focus isDescendantOf:bar];
     [bar removeFromSuperview];

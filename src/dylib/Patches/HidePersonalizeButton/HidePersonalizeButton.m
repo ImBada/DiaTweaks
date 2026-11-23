@@ -10,6 +10,7 @@ DP_PATCH(DPHidePersonalizeButton) {
     .symbol = @"person.crop.circle.fill",
     .tint = @"systemPurpleColor",
     .section = @"AI",
+    .group = @"aiPrompts",
     .classes = DPClasses(DPDiaToolbar, DPDiaPersonalizeButton),
     .disabledBy = @"hideToolbar",
     .hides = DPIsPersonalizeButton,

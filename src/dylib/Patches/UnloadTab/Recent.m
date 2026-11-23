@@ -16,7 +16,8 @@ id DPTabBefore(NSWindow *window) {
     }
     NSUInteger i = active ? [ids indexOfObject:active] : NSNotFound;
     if (i == NSNotFound) return tabs.firstObject;
-    return i + 1 < tabs.count ? tabs[i + 1] : i > 0 ? tabs[i - 1] : nil;
+    if (i + 1 < tabs.count) return tabs[i + 1];
+    return i > 0 ? tabs[i - 1] : nil;
 }
 
 void DPForgetFrontTab(NSWindow *window) {

@@ -17,7 +17,7 @@ BOOL DPHiding(void) { return gHiding; }
 void DPExpectNewTab(NSWindow *window) {}
 void DPStopExpecting(void) { gOpenAttempts++; }
 void DPHideTabRow(NSString *tabID, NSWindow *window) {}
-static NSMutableArray<NSArray *> *gShownRows, *gNotedSpares;
+static NSMutableArray<NSArray *> *gShownRows, *gNotedSpares, *gNotedOpenTabs;
 void DPShowTabRow(NSString *tabID, BOOL closing) { [gShownRows addObject:@[ tabID ?: @"", @(closing) ]]; }
 BOOL DPHidesTab(NSString *tabID) { return NO; }
 void DPParkTab(NSString *tabID, BOOL parked) {}
@@ -49,6 +49,7 @@ void DPUpdateSpareTimer(void) { gUpdateSpareTimerCalls++; }
 static DPCommandBarOverlay *gSpare;
 DPCommandBarOverlay *DPSpareIn(NSWindow *window) { return gSpare.host == window ? gSpare : nil; }
 void DPNoteSpare(NSString *tabID, BOOL parked) { [gNotedSpares addObject:@[ tabID ?: @"", @(parked) ]]; }
+void DPNoteOpenTab(NSString *tabID, BOOL open) { [gNotedOpenTabs addObject:@[ tabID ?: @"", @(open) ]]; }
 BOOL DPAdoptSpare(NSWindow *window, NSView *page) { return NO; }
 void DPNotMakingSpare(void) {}
 NSView *DPCommandBarPart(NSView *commandBar, const char *className) { return nil; }
@@ -105,7 +106,6 @@ NSView *DPGoButton(NSView *toolbar) { return nil; }
 @end
 
 static NSArray<NSWindow *> *DPApp_windows(NSApplication *self, SEL _cmd) { return gWindows; }
-
 
 @interface DPFakeTab : NSObject
 @property(copy) NSString *tabId, *URL;
@@ -172,7 +172,6 @@ static DPFakeAppDelegate *gDelegate;
 static BOOL DPLast(NSArray<NSArray *> *rows, NSString *tabID, BOOL flag) { return [rows.lastObject isEqual:@[ tabID, @(flag) ]]; }
 static BOOL DPHas(NSArray<NSArray *> *rows, NSString *tabID, BOOL flag) { return [rows containsObject:@[ tabID, @(flag) ]]; }
 
-// A window with the bar open over a new tab in its old space, and another space ready to come forward.
 @interface DPScene : NSObject
 @property(strong) NSWindow *window;
 @property(strong) DPFakeScriptWindow *script;
@@ -225,6 +224,7 @@ int main(void) {
         [NSApplication sharedApplication];
         gShownRows = [NSMutableArray array];
         gNotedSpares = [NSMutableArray array];
+        gNotedOpenTabs = [NSMutableArray array];
         DPHookClass(NSApp.class, @selector(windows), (IMP)DPApp_windows);
 
         Class ntpCls = objc_allocateClassPair(DPFakeNewTabPage.class, DPDiaNewTabPage, 0);
@@ -241,7 +241,6 @@ int main(void) {
 
         DPCommandBar.on = YES;
 
-        // 1. Regression: DPCommandBarKey ignores non-DPDiaWindow (Little Dia / Settings) and sheet-attached browser windows.
         _TtC5Popup19PlatformPopupWindow *littleDia = [[_TtC5Popup19PlatformPopupWindow alloc] initWithContentRect:NSMakeRect(-30000, -30000, 400, 300)
                                                                                                         styleMask:NSWindowStyleMaskTitled
                                                                                                           backing:NSBackingStoreBuffered defer:NO];
@@ -257,7 +256,6 @@ int main(void) {
         CHECK(DPCommandBarKey(sheetL) == sheetL, "DPCommandBarKey passes through when browser window has an attached sheet");
         browser.fakeSheet = nil;
 
-        // 2. Regression: DPCommandBarOverlay -dealloc invalidates watch timer.
         __weak NSTimer *weakTimer = nil;
         @autoreleasepool {
             DPCommandBarOverlay *temp = [[DPCommandBarOverlay alloc] initWithFrame:NSMakeRect(0, 0, 100, 100)];
@@ -268,7 +266,6 @@ int main(void) {
         }
         CHECK(weakTimer == nil || !weakTimer.valid, "DPCommandBarOverlay -dealloc invalidates watch timer");
 
-        // 3. Regression: DPApplyCommandBar repositions open overlay on Position choice change, and toggling sub-patch doesn't close popover.
         gWindows = @[ browser ];
         NSView *page = [[ntpCls alloc] initWithFrame:browser.contentView.bounds];
         [browser.contentView addSubview:page];
@@ -301,7 +298,6 @@ int main(void) {
         CHECK(overlay.needsLayout && gCancelPopoverCalls == 0,
               "DPApplyCommandBar marks overlay needsLayout and sub-patch toggle does not close Cmd+L popover");
 
-        // 4. Regression: Turning CommandBar OFF clears invisible window blanks, cleans HideTab, stops spare timer, and clears swap state.
         DPSet(page, &DPBlankKey, @YES);
         page.hidden = YES;
         gCleanHideTabCalls = gUpdateSpareTimerCalls = gDropSpareCalls = gClearCatchUpCalls = gFinishHandOverCalls = 0;
@@ -311,7 +307,6 @@ int main(void) {
         CHECK(gCleanHideTabCalls == 1 && gUpdateSpareTimerCalls == 1 && gDropSpareCalls == 1 && gClearCatchUpCalls == 1 && gFinishHandOverCalls == 1,
               "turning CommandBar off cleans HideTab, spare timer, spares, catch-up, and hand-over");
 
-        // 5. Regression: NSWindowWillCloseNotification tears down overlay, handed-over overlay, and spare without DPCloseTab.
         DPInstallCommandBar();
         DPCommandBar.on = YES;
         DPCommandBarOverlay *openOverlay = [[DPCommandBarOverlay alloc] initWithFrame:browser.contentView.bounds];
@@ -325,8 +320,6 @@ int main(void) {
         CHECK(DPGet(browser, &DPOverlayKey) == nil && !openOverlay.watch.valid && gHandedOver == nil && gForgetSpareCalls == 1 && gClearCatchUpCalls == 1,
               "NSWindowWillCloseNotification cleans up open overlay, handed-over overlay, spare, and catch-up");
 
-        // 6. Regression: Cmd+L over a visible Peek card with toolbar passes straight to Peek without arming DPHandToDia,
-        // while Cmd+T and Cmd+L from Side Chat still go through DPHandToDia.
         DPPeekCard *peekCard = [[DPPeekCard alloc] initWithFrame:browser.contentView.bounds];
         peekCard.toolbar = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 400, 38)];
         [browser.contentView addSubview:peekCard];
@@ -348,7 +341,6 @@ int main(void) {
         [sideChat removeFromSuperview];
         [peekCard removeFromSuperview];
 
-        // 7. Regression: typing on a blank tab opens the bar, but typing in another field (rename, Find, Side Chat, Peek) is left alone.
         NSView *blankPage = [[ntpCls alloc] initWithFrame:browser.contentView.bounds];
         [browser.contentView addSubview:blankPage];
         DPSet(blankPage, &DPBlankKey, @YES);
@@ -437,7 +429,6 @@ int main(void) {
         [DPBlanks(browser) removeAllObjects];
         gHiding = NO;
 
-        // 8. Regression: another space coming forward closes the bar's unused new tab, in the window that switched only.
         gHiding = YES;
         browser.identifier = @"window-a";
         _TtC6Window14PlatformWindow *browserB = [[_TtC6Window14PlatformWindow alloc] initWithContentRect:NSMakeRect(-30000, -30000, 600, 400)
@@ -535,7 +526,6 @@ int main(void) {
         [first watch];
         CHECK(!first.overlay.host && first.bar.closed, "the other window's bar closes on its own switch");
 
-        // Escaping a bar left in another space judges it by its own space, so a one-tab space in front doesn't strand it.
         NSView *barPage = [[ntpCls alloc] initWithFrame:browser.contentView.bounds];
         [browser.contentView addSubview:barPage];
         scene = [[DPScene alloc] initIn:browser];
@@ -555,6 +545,38 @@ int main(void) {
         DPCancelCommandBar(scene.overlay);
         CHECK(!scene.overlay.host && scene.bar.closed, "cancelling a bar in the space in front still closes its tab");
         [barPage removeFromSuperview];
+        gHiding = NO;
+
+        gHiding = YES;
+        DPCommandBar.on = YES;
+        _TtC6Window14PlatformWindow *noteWindow = [[_TtC6Window14PlatformWindow alloc] initWithContentRect:NSMakeRect(-30000, -30000, 600, 400)
+                                                                                                  styleMask:NSWindowStyleMaskTitled
+                                                                                                    backing:NSBackingStoreBuffered defer:NO];
+        noteWindow.identifier = @"window-note";
+        gWindows = @[ noteWindow ];
+        NSView *notePage = [[ntpCls alloc] initWithFrame:noteWindow.contentView.bounds];
+        [noteWindow.contentView addSubview:notePage];
+        _TtC20AssistantPanelUIBase22AssistantPanelRootView *notePanel =
+            [[_TtC20AssistantPanelUIBase22AssistantPanelRootView alloc] initWithFrame:NSMakeRect(0, 0, 400, 60)];
+        [notePage addSubview:notePanel];
+        DPFakeTab *noteBack = DPTab(@"note-back", @"https://example.org"), *noteBar = DPTab(@"note-bar", @"");
+        DPFakeSpace *noteSpace = DPSpace(@[ noteBack, noteBar ]);
+        DPFakeScriptWindow *noteScript = [DPFakeScriptWindow new];
+        noteScript.windowId = @"window-note";
+        noteScript.appleScriptProfiles = @[ noteSpace ];
+        noteScript.front = noteSpace;
+        noteScript.activeTab = noteBar;
+        gDelegate.appleScriptWindows = @[ noteScript ];
+        DPSet(noteWindow, &DPRecentKey, @[ @"note-back", @"note-bar" ]);
+        [gNotedOpenTabs removeAllObjects];
+        DPPresentCommandBar(notePage, NO);
+        CHECK(DPHas(gNotedOpenTabs, @"note-bar", YES), "opening the bar over a new tab notes it as an open bar tab");
+        DPCommandBarOverlay *noteOverlay = DPGet(noteWindow, &DPOverlayKey);
+        CHECK(noteOverlay != nil, "the bar opens over the new tab");
+        [gNotedSpares removeAllObjects];
+        DPDismiss(noteOverlay, NO);
+        CHECK(DPHas(gNotedSpares, @"note-bar", NO), "dismissing the bar stops noting its open bar tab");
+        [notePage removeFromSuperview];
         gHiding = NO;
 
         if (failures) return 1;

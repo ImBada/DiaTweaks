@@ -143,7 +143,6 @@ int main(void) {
         [late layout];
         Check(![Part(late, 0) isHidden] && ![Part(late, 2) isHidden], @"a detached tab is restored at its next layout");
 
-        // Minimized window: styled while visible, then absent from DPFindViews when toggled off.
         visibleShapes = @[late];
         Toggle(YES);
         Check([Part(late, 0) isHidden] && [Part(late, 2) isHidden], @"tab styled before window minimizes");

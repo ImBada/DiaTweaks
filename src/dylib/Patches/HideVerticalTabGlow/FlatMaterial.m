@@ -32,14 +32,13 @@ NSString *DPVerifyFlatTabMaterial(NSView *shape, BOOL on) {
 static void DPGlass_viewDidMoveToSuperview(NSView *self, SEL _cmd) {
     DPCallOriginal(DPGlass_viewDidMoveToSuperview, self);
     if (!DPHideVerticalTabGlow.on && !DPHasTabOverride(self)) return;
-    [CATransaction begin];
-    [CATransaction setDisableActions:YES];
-    NSView *shape = nil;
-    for (NSView *up = self.superview; up; up = up.superview)
-        if (DPIsKind(up, DPDiaTabShape)) { shape = up; break; }
-    if (shape) DPHideTabDecoration(self, shape);
-    else DPRestoreTabDecoration(self);
-    [CATransaction commit];
+    DPWithoutAnimation(^{
+        NSView *shape = nil;
+        for (NSView *up = self.superview; up; up = up.superview)
+            if (DPIsKind(up, DPDiaTabShape)) { shape = up; break; }
+        if (shape) DPHideTabDecoration(self, shape);
+        else DPRestoreTabDecoration(self);
+    });
 }
 
 void DPInstallFlatTabMaterial(void) {

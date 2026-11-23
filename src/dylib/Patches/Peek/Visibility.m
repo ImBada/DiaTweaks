@@ -64,17 +64,16 @@ void DPPeekWatchPane(DPPeekCard *peek, NSView *pane) {
         }
         DPPeekResetControlHints(self.controls);
         self.parkedFrame = rootFrame;
-        [CATransaction begin];
-        [CATransaction setDisableActions:YES];
-        self.hidden = YES;
-        // Keep the hosted view mounted in the window even if Dia removes the old tab's container.
-        if (previous != root) {
-            self.reparenting = YES;
-            [root addSubview:self positioned:NSWindowBelow relativeTo:nil];
-            self.reparenting = NO;
-        }
-        self.frame = rootFrame;
-        [CATransaction commit];
+        DPWithoutAnimation(^{
+            self.hidden = YES;
+            // Keep the hosted view mounted in the window even if Dia removes the old tab's container.
+            if (previous != root) {
+                self.reparenting = YES;
+                [root addSubview:self positioned:NSWindowBelow relativeTo:nil];
+                self.reparenting = NO;
+            }
+            self.frame = rootFrame;
+        });
         if (hadFocus) [window makeFirstResponder:nil];
         [window resetCursorRects];
         return;
@@ -84,23 +83,22 @@ void DPPeekWatchPane(DPPeekCard *peek, NSView *pane) {
     if (pane.window != window || pane.isHiddenOrHasHiddenAncestor)
         pane = DPPeekPane(window, [window convertRectToScreen:[root convertRect:rootFrame toView:nil]]);
     NSView *holder = DPPeekHolder(window, pane);
-    [CATransaction begin];
-    [CATransaction setDisableActions:YES];
-    if (holder != previous || self.window != window) {
-        self.reparenting = YES;
-        [holder addSubview:self positioned:NSWindowAbove relativeTo:nil];
-        self.reparenting = NO;
-    }
-    NSRect frame = pane ? NSIntersectionRect([holder convertRect:pane.bounds fromView:pane], holder.bounds) : holder.bounds;
-    self.frame = NSIsEmptyRect(frame) ? holder.bounds : frame;
-    self.autoresizingMask = pane ? NSViewNotSizable : NSViewWidthSizable | NSViewHeightSizable;
-    DPPeekWatchPane(self, pane);
-    [self stopMotion];
-    if (self.card.alphaValue == 0) self.card.alphaValue = self.dim.alphaValue = self.controls.alphaValue = 1;
-    self.needsLayout = YES;
-    [self layoutSubtreeIfNeeded];
-    self.hidden = NO;
-    [CATransaction commit];
+    DPWithoutAnimation(^{
+        if (holder != previous || self.window != window) {
+            self.reparenting = YES;
+            [holder addSubview:self positioned:NSWindowAbove relativeTo:nil];
+            self.reparenting = NO;
+        }
+        NSRect frame = pane ? NSIntersectionRect([holder convertRect:pane.bounds fromView:pane], holder.bounds) : holder.bounds;
+        self.frame = NSIsEmptyRect(frame) ? holder.bounds : frame;
+        self.autoresizingMask = pane ? NSViewNotSizable : NSViewWidthSizable | NSViewHeightSizable;
+        DPPeekWatchPane(self, pane);
+        [self stopMotion];
+        if (self.card.alphaValue == 0) self.card.alphaValue = self.dim.alphaValue = self.controls.alphaValue = 1;
+        self.needsLayout = YES;
+        [self layoutSubtreeIfNeeded];
+        self.hidden = NO;
+    });
     [window resetCursorRects];
 
     __weak DPPeekCard *weak = self;

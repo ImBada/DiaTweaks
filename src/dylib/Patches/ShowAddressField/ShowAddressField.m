@@ -68,7 +68,16 @@ static void DPTracker_mouseExited(id self, SEL _cmd, NSEvent *event) {
     if (!DPKeepsHover(self)) DPCallOriginal(DPTracker_mouseExited, self, event);
 }
 
-static BOOL DPPointerOver(NSView *field);
+// Hide Toolbar lifts the invisible bar above the pane, where a bounds check still catches a pointer outside the pane.
+static BOOL DPPointerOver(NSView *field) {
+    NSWindow *window = field.window;
+    NSView *content = window.contentView;
+    if (!window.isKeyWindow || !content || field.hiddenOrHasHiddenAncestor) return NO;
+    for (NSView *view = field; view; view = view.superview) if (view.alphaValue <= 0.01) return NO;
+    NSPoint point = content.superview ? [content.superview convertPoint:window.mouseLocationOutsideOfEventStream fromView:nil]
+                                      : window.mouseLocationOutsideOfEventStream;
+    return [[content hitTest:point] isDescendantOf:field];
+}
 
 static void DPField_layout(NSView *self, SEL _cmd) {
     DPCallOriginal(DPField_layout, self);
@@ -81,17 +90,6 @@ static void DPField_layout(NSView *self, SEL _cmd) {
         DPSet(self, &DPForcedKey, nil);
         DPSetHover(self, DPPointerOver(self));
     }
-}
-
-// Hide Toolbar lifts the invisible bar above the pane, where a bounds check still catches a pointer outside the pane.
-static BOOL DPPointerOver(NSView *field) {
-    NSWindow *window = field.window;
-    NSView *content = window.contentView;
-    if (!window.isKeyWindow || !content || field.hiddenOrHasHiddenAncestor) return NO;
-    for (NSView *view = field; view; view = view.superview) if (view.alphaValue <= 0.01) return NO;
-    NSPoint point = content.superview ? [content.superview convertPoint:window.mouseLocationOutsideOfEventStream fromView:nil]
-                                      : window.mouseLocationOutsideOfEventStream;
-    return [[content hitTest:point] isDescendantOf:field];
 }
 
 static void DPApplyShowAddressField(DPPatch *patch) {

@@ -164,7 +164,6 @@ int main(void) {
         *(NSEdgeInsets *)DPIvar(tab, "horizontalShadowOutsets") = NSEdgeInsetsMake(0, 6, 0, 6);
         foundShapes = @[ tab ];
 
-        // 1. Small row (27 pt pill): all five path consumers fit 27 pt without 30 pt clipping.
         DPCompactTabRows.on = YES;
         currentChoice = @"small";
         for (int i = 0; i < 4; i++) [tab layout];
@@ -183,37 +182,31 @@ int main(void) {
         Check(Near(CGRectGetHeight(CGPathGetPathBoundingBox(rimShape.path)), 27), @"RimHighlightView.layout keeps fitted 27 pt path");
         Check(!DPVerifyCompactTabRows(&DPCompactTabRows), @"verify passes when 27 pt Small shape is fitted");
 
-        // 2. Grouped child row narrower width (204x27).
         tab.frame = NSMakeRect(0, 0, 204, 27);
         [tab layout];
         sb = CGPathGetPathBoundingBox(shapeLayer.path);
         Check(Near(CGRectGetWidth(sb), 204) && Near(CGRectGetHeight(sb), 27), @"grouped child 204x27 fits cleanly");
 
-        // 3. Compact row (34 pt pill) passes through untouched.
         currentChoice = @"compact";
         tab.frame = NSMakeRect(0, 0, 220, 34);
         [tab layout];
         Check(Near(CGRectGetHeight(CGPathGetPathBoundingBox(shapeLayer.path)), 34), @"34 pt Compact pill stays 34 pt");
 
-        // 4. Top tab bar (shape == 1) stays untouched even below 30 pt.
         currentChoice = @"small";
         tab.frame = NSMakeRect(0, 0, 220, 27);
         *(uint8_t *)DPIvar(tab, "shape") = 1;
         [tab layout];
         Check(Near(CGRectGetHeight(CGPathGetPathBoundingBox(shapeLayer.path)), 30), @"top tab bar shape == 1 is untouched");
 
-        // 5. Patch OFF: early exit leaves Dia's path untouched; verify ignores when off.
         *(uint8_t *)DPIvar(tab, "shape") = 0;
         DPCompactTabRows.on = NO;
         [tab layout];
         Check(Near(CGRectGetHeight(CGPathGetPathBoundingBox(shapeLayer.path)), 30), @"patch off leaves Dia's path untouched");
         Check(!DPVerifyCompactTabRows(&DPCompactTabRows), @"verify passes when patch is off");
 
-        // 6. Verify catches an un-fitted 30 pt path when patch is on.
         DPCompactTabRows.on = YES;
         Check(DPVerifyCompactTabRows(&DPCompactTabRows) != nil, @"verify detects clipped 30 pt path inside 27 pt view");
 
-        // 7. Extreme collapse height (12 pt) and degenerate zero height.
         tab.frame = NSMakeRect(0, 0, 220, 12);
         [tab layout];
         Check(Near(CGRectGetHeight(CGPathGetPathBoundingBox(shapeLayer.path)), 12), @"collapse animation 12 pt falls back to valid 12 pt path");

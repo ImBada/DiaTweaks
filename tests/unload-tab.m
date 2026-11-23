@@ -6,7 +6,6 @@
 #import <objc/message.h>
 #import "watchdog.h"
 
-// Minimal StdPatch & Swift runtime stubs for standalone ASan/UBSan testing.
 void *swift_unknownObjectWeakLoadStrong(void *ref) {
     return ref && *(__unsafe_unretained id *)ref ? (__bridge_retained void *)*(__unsafe_unretained id *)ref : NULL;
 }
@@ -48,7 +47,6 @@ static void Check(BOOL ok, NSString *msg) {
     printf("FAIL: %s\n", msg.UTF8String);
 }
 
-// --- Test window (visible to DPFindViews without showing on screen) ---
 @interface DPTestWindow : NSWindow
 @property (nonatomic) BOOL mockVisible;
 @end
@@ -56,7 +54,6 @@ static void Check(BOOL ok, NSString *msg) {
 - (BOOL)isVisible { return self.mockVisible; }
 @end
 
-// --- Mock Dia WebContent / ContentPane / AppleScript classes ---
 @interface _TtC11ContentPane15ContentPaneView : NSView
 @property (nonatomic, copy) NSString *contentPaneID;
 @end
@@ -119,7 +116,6 @@ static void Check(BOOL ok, NSString *msg) {
 @implementation DPTestAppDelegate
 @end
 
-// --- Mock Dia TabUI classes (matching ivar names used by PinnedTabs.m and UnloadTab.m) ---
 @interface DPTestSubject : NSObject
 @property (nonatomic, strong) id currentValue;
 @end
@@ -314,7 +310,6 @@ static void Check(BOOL ok, NSString *msg) {
 }
 @end
 
-// --- Fixture helpers ---
 static DPTestWindow *MakeWindow(NSString *windowId) {
     DPTestWindow *win = [[DPTestWindow alloc] initWithContentRect:NSMakeRect(0, 0, 800, 600)
                                                         styleMask:NSWindowStyleMaskTitled
@@ -417,7 +412,6 @@ static DPTestScriptTab *MakeScriptTab(NSString *tabID, NSString *url) {
     return st;
 }
 
-// --- Test suites ---
 static void TestRegularAndSidebarPinnedTabs(_TtC3ADK18WebContentChromium *chromium) {
     DPTestWindow *win = MakeWindow(@"WIN-1");
     NSString *regTabID = @"11111111-1111-1111-1111-111111111111";
@@ -435,7 +429,6 @@ static void TestRegularAndSidebarPinnedTabs(_TtC3ADK18WebContentChromium *chromi
     _TtC5TabUI7TabView *regTab = MakeTabView(win, regTabID, regPaneID, @"https://reg.test/", NO, NO, @"primary", nil);
     _TtC5TabUI7TabView *pinHomeTab = MakeTabView(win, pinHomeTabID, pinHomePaneID, @"https://pinhome.test/", YES, YES, @"none", &pinHomePane);
     _TtC5TabUI7TabView *pinNavTab = MakeTabView(win, pinNavTabID, pinNavPaneID, @"https://pinnav.test/subpage", YES, YES, @"none", &pinNavPane);
-    // Closed pinned tab sharing regTab's exact URL must NOT offer Unload Tab.
     _TtC5TabUI7TabView *pinClosedTab = MakeTabView(win, pinClosedTabID, pinClosedPaneID, @"https://reg.test/", YES, NO, @"none", nil);
     _TtC5TabUI7TabView *pinFallbackTab = MakeTabView(win, pinFallbackTabID, pinFallbackPaneID, @"https://fallback.test/", YES, YES, @"none", &pinFallbackPane);
 
@@ -459,11 +452,9 @@ static void TestRegularAndSidebarPinnedTabs(_TtC3ADK18WebContentChromium *chromi
     ArcWebContents *pinHomePage = MakePage(win, pinHomePaneID, @"https://pinhome.test/", 0, nil);
     ArcWebContents *pinNavPage = MakePage(win, pinNavPaneID, @"https://pinnav.test/subpage", 0, nil);
 
-    // 1. Closed pinned tab sharing URL with loaded regular tab -> NO Unload Tab.
     NSMenu *closedMenu = DPTabContextMenu(pinClosedTab);
     Check([closedMenu itemWithTitle:@"Unload Tab"] == nil, @"sidebar closed pinned tab never offers Unload Tab even when sharing URL");
 
-    // 2. Loaded sidebar pinned tab at home URL -> offers Unload Tab before Close, discards in place without unpinning/UndoCloseTab.
     NSMenu *homeMenu = DPTabContextMenu(pinHomeTab);
     NSMenuItem *homeItem = [homeMenu itemWithTitle:@"Unload Tab"];
     Check(homeItem != nil && homeItem.enabled, @"sidebar pinned tab at home URL offers enabled Unload Tab");
@@ -473,18 +464,14 @@ static void TestRegularAndSidebarPinnedTabs(_TtC3ADK18WebContentChromium *chromi
     Check(pinHomePage.discardCount == 1, @"sidebar pinned tab at home URL unloads via discard");
     Check(pinHomePane.closeClicks == 0, @"sidebar pinned tab discard does not call closeButtonClicked");
     Check(!DPTakeOwnClose(), @"discarding pinned tab does not arm own-close");
-    // Already discarded pinned tab must NOT offer Unload Tab (must not fall through to DPCloseKeepingTab!).
     Check([DPTabContextMenu(pinHomeTab) itemWithTitle:@"Unload Tab"] == nil, @"discarded sidebar pinned tab hides Unload Tab without falling through to close");
-    // Reopening restores Unload Tab.
     [pinHomePage setVisibility:2];
     [pinHomePage setVisibility:0];
     Check([DPTabContextMenu(pinHomeTab) itemWithTitle:@"Unload Tab"] != nil, @"reopened sidebar pinned tab restores Unload Tab");
 
-    // 3. Loaded sidebar pinned tab navigated away -> matched by contentPaneID, discards in place preserving navigated URL.
     NSMenu *navMenu = DPTabContextMenu(pinNavTab);
     NSMenuItem *navItem = [navMenu itemWithTitle:@"Unload Tab"];
     Check(navItem != nil && navItem.enabled, @"navigated sidebar pinned tab offers Unload Tab via contentPaneID");
-    // Declined discard (e.g. audio) keeps Unload Tab visible.
     pinNavPage.onDiscard = ^(ArcWebContents *p) { [chromium webContents:p finalizeDiscardRequest:NO]; };
     Trigger(navItem);
     Check(pinNavPage.discardCount == 1, @"navigated sidebar pinned tab calls discard");
@@ -493,14 +480,12 @@ static void TestRegularAndSidebarPinnedTabs(_TtC3ADK18WebContentChromium *chromi
     Trigger([DPTabContextMenu(pinNavTab) itemWithTitle:@"Unload Tab"]);
     Check([DPTabContextMenu(pinNavTab) itemWithTitle:@"Unload Tab"] == nil, @"finalized discard hides Unload Tab on navigated pinned tab");
 
-    // 4. Open pinned tab with no tracked ArcWebContents -> falls back to DPCloseKeepingTab with own-close mark.
     NSMenuItem *fbItem = [DPTabContextMenu(pinFallbackTab) itemWithTitle:@"Unload Tab"];
     Check(fbItem != nil && fbItem.enabled, @"untracked open pinned tab falls back to keep-pinned close");
     Trigger(fbItem);
     Check(pinFallbackPane.closeClicks == 1 && pinFallbackPane.styleAtClose == 1, @"fallback uses DPCloseKeepingTabStyle (1)");
     Check(DPTakeOwnClose(), @"fallback marks own-close so UndoCloseTab ignores it");
 
-    // 5. Front regular tab -> switches to before, then discards on hide.
     __block BOOL focusedBefore = NO;
     stPinHome.onFocus = ^(DPTestScriptTab *t) {
         focusedBefore = YES;
@@ -515,11 +500,9 @@ static void TestRegularAndSidebarPinnedTabs(_TtC3ADK18WebContentChromium *chromi
     Check(focusedBefore, @"front tab focuses another tab before discarding");
     Check(regPage.discardCount == 1, @"front tab discards after visibility leaves visible");
 
-    // 6. Split tab skipped.
     regTab.contentViews = @{ @"a" : [[NSView alloc] init], @"b" : [[NSView alloc] init] };
     Check([DPTabContextMenu(regTab) itemWithTitle:@"Unload Tab"] == nil, @"split TabView never offers Unload Tab");
 
-    // 7. TabView without contentViews falls back to viewModel.stateSubject.currentValue.contentIDs.
     NSString *rowTabID = @"66666666-6666-6666-6666-666666666661";
     NSString *rowPaneID = @"66666666-6666-6666-6666-666666666662";
     DPTestTabState *rowState = [DPTestTabState new];
@@ -538,7 +521,6 @@ static void TestRegularAndSidebarPinnedTabs(_TtC3ADK18WebContentChromium *chromi
     Trigger(rowItem);
     Check(rowPage.discardCount == 1, @"TabView contentIDs fallback discards page");
 
-    // Cleanup tracked pages.
     [chromium webContents:rowPage didCloseWithSessionID:@4];
     [chromium webContents:regPage didCloseWithSessionID:@1];
     [chromium webContents:pinHomePage didCloseWithSessionID:@2];
@@ -567,18 +549,14 @@ static void TestDockAndTopTabPinnedTabs(_TtC3ADK18WebContentChromium *chromium) 
 
     _TtC5TabUI15TabDockItemView *coldDock = MakeDockItem(win, [NSString stringWithFormat:@"tab(%@)", dockColdTabID],
                                                          @{ dockColdPaneID : @"ContentController" }, nil, @"favicon");
-    // Background loaded at home URL (tested with URL fallback before ever attaching to ContentPaneView!).
     _TtC5TabUI15TabDockItemView *homeDock = MakeDockItem(win, [NSString stringWithFormat:@"tab(%@)", dockHomeTabID],
                                                          @{ dockHomePaneID : @"ContentController" }, nil, @"favicon");
-    // Navigated away from home URL, tested with unbridged Swift-like contentControllers description!
     DPTestUnbridgedDict *unbridged = [DPTestUnbridgedDict new];
     unbridged.rawDescription = [NSString stringWithFormat:@"[ContentPaneID(%@): TabUI.ContentController]", dockNavPaneID];
     _TtC5TabUI15TabDockItemView *navDock = MakeDockItem(win, [NSString stringWithFormat:@"tab(%@)", dockNavTabID],
                                                         unbridged, nil, @"favicon");
-    // Front top-tab pinned tab with nil selectionStyle (tests DPActiveTabID fallback!).
     _TtC5TabUI15TabDockItemView *frontDock = MakeDockItem(win, [NSString stringWithFormat:@"tab(%@)", dockFrontTabID],
                                                           @{ dockFrontPaneID : @"ContentController" }, nil, @"favicon");
-    // Group dock item & split dock item must be skipped.
     _TtC5TabUI15TabDockItemView *groupDock = MakeDockItem(win, [NSString stringWithFormat:@"group(%@)", dockGroupID],
                                                           @{}, nil, @"folder");
     DPTestUnbridgedDict *splitControllers = [DPTestUnbridgedDict new];
@@ -600,22 +578,17 @@ static void TestDockAndTopTabPinnedTabs(_TtC3ADK18WebContentChromium *chromium) 
     appDel.appleScriptWindows = @[sw];
     NSApp.delegate = appDel;
 
-    // Background page never attached to a ContentPaneView (tests URL fallback on TabDockItemView).
     ArcWebContents *homePage = MakePage(nil, nil, @"https://dockhome.test/", 0, nil);
     // Navigated page attached to navPaneID; appleScriptTab still says https://docknav.test/ while page is at https://cold.test/!
     // This ALSO tests shared-URL safety: coldDock's saved URL is https://cold.test/, so coldDock must NOT steal navPage!
     ArcWebContents *navPage = MakePage(win, dockNavPaneID, @"https://cold.test/", 0, nil);
-    // Front pinned page visible in window.
     ArcWebContents *frontPage = MakePage(win, dockFrontPaneID, @"https://dockfront.test/", 2, nil);
 
-    // 1. Cold dock tile does NOT steal navPage even though navPage navigated to coldDock's saved URL!
     Check([DPTabContextMenu(coldDock) itemWithTitle:@"Unload Tab"] == nil, @"cold dock tile never steals another pane's navigated page");
 
-    // 2. Group and split dock tiles skipped.
     Check([DPTabContextMenu(groupDock) itemWithTitle:@"Unload Tab"] == nil, @"group dock tile skipped");
     Check([DPTabContextMenu(splitDock) itemWithTitle:@"Unload Tab"] == nil, @"split dock tile skipped");
 
-    // 3. Background dock tile found via URL fallback, inserted before Delete, discards cleanly.
     NSMenu *homeMenu = DPTabContextMenu(homeDock);
     NSMenuItem *homeItem = [homeMenu itemWithTitle:@"Unload Tab"];
     Check(homeItem != nil && homeItem.enabled, @"background dock tile offers enabled Unload Tab via URL fallback");
@@ -628,7 +601,6 @@ static void TestDockAndTopTabPinnedTabs(_TtC3ADK18WebContentChromium *chromium) 
     [homePage setVisibility:0];
     Check([DPTabContextMenu(homeDock) itemWithTitle:@"Unload Tab"] != nil, @"reopened dock tile restores Unload Tab");
 
-    // 4. Navigated dock tile with unbridged contentControllers found via contentPaneID -> discards cleanly.
     NSMenuItem *navItem = [DPTabContextMenu(navDock) itemWithTitle:@"Unload Tab"];
     Check(navItem != nil && navItem.enabled, @"navigated dock tile with unbridged contentControllers offers Unload Tab");
     navPage.onDiscard = ^(ArcWebContents *p) { [chromium webContents:p finalizeDiscardRequest:YES]; };
@@ -636,7 +608,6 @@ static void TestDockAndTopTabPinnedTabs(_TtC3ADK18WebContentChromium *chromium) 
     Check(navPage.discardCount == 1, @"navigated dock tile discards its own page");
     Check([DPTabContextMenu(navDock) itemWithTitle:@"Unload Tab"] == nil, @"discarded navigated dock tile hides Unload Tab");
 
-    // 5. Front top-tab pinned tile: switches to before and discards on hide!
     __block BOOL switchedAway = NO;
     stNav.onFocus = ^(DPTestScriptTab *t) {
         switchedAway = YES;
@@ -652,18 +623,15 @@ static void TestDockAndTopTabPinnedTabs(_TtC3ADK18WebContentChromium *chromium) 
     DrainMainQueue();
     Check(switchedAway && frontPage.discardCount == 1, @"front dock tile switches to before and discards on hide");
 
-    // 6. Single-tab window disables Unload Tab on front dock tile.
     [frontPage setVisibility:2];
     sw.appleScriptTabs = @[stFront];
     sw.activeTab = stFront;
     NSMenuItem *onlyItem = [DPTabContextMenu(frontDock) itemWithTitle:@"Unload Tab"];
     Check(onlyItem != nil && !onlyItem.enabled, @"front dock tile disables Unload Tab when it is the only tab");
 
-    // 7. DPVerifyUnloadTab passes on dock tiles (cold, discarded, loaded, single-tab front).
     NSString *err = DPUnloadTab.verify(&DPUnloadTab);
     Check(err == nil, [NSString stringWithFormat:@"DPVerifyUnloadTab passes with dock tiles (got: %@)", err]);
 
-    // 8. Regression: cold tab must never steal or discard a live Peek or Little Dia page sharing its URL.
     ArcWebContents *peekPage = [ArcWebContents new];
     peekPage.url = [NSURL URLWithString:@"https://cold.test/"];
     DPPeekCard *peekCard = [[DPPeekCard alloc] initWithFrame:NSMakeRect(0, 0, 400, 400)];
@@ -714,7 +682,6 @@ static void TestMultiWindowSyncedAndSharedURL(_TtC3ADK18WebContentChromium *chro
                                                       @{ syncPaneID : @"C" }, @"primary", @"favicon");
     _TtC5TabUI15TabDockItemView *dock2 = MakeDockItem(win2, [NSString stringWithFormat:@"tab(%@)", syncTabID],
                                                       @{ syncPaneID : @"C" }, nil, @"favicon");
-    // Two distinct loaded tabs sharing the exact same URL -> both unload independently via contentPaneID!
     _TtC5TabUI15TabDockItemView *dup1 = MakeDockItem(win1, [NSString stringWithFormat:@"tab(%@)", dup1TabID],
                                                      @{ dup1PaneID : @"C" }, nil, @"favicon");
     _TtC5TabUI15TabDockItemView *dup2 = MakeDockItem(win1, [NSString stringWithFormat:@"tab(%@)", dup2TabID],
@@ -746,14 +713,12 @@ static void TestMultiWindowSyncedAndSharedURL(_TtC3ADK18WebContentChromium *chro
     appDel.appleScriptWindows = @[sw1, sw2];
     NSApp.delegate = appDel;
 
-    // 1. Background-loaded synced pinned tab present in 2 windows (same tabID) -> DPPageByURL deduplicates tabID!
     ArcWebContents *bgSynced = MakePage(nil, nil, @"https://synced.test/", 0, nil);
     NSMenuItem *dedupItem = [DPTabContextMenu(dock2) itemWithTitle:@"Unload Tab"];
     Check(dedupItem != nil && dedupItem.enabled, @"synced pinned tab across 2 windows deduplicates tabID in DPPageByURL");
     [chromium webContents:bgSynced didCloseWithSessionID:@20];
     Check([DPTabContextMenu(dock2) itemWithTitle:@"Unload Tab"] == nil, @"didCloseWithSessionID clears closed page immediately");
 
-    // 2. Shared ArcWebContents visible in win1 -> disabled in win2, enabled once hidden in win1.
     ArcWebContents *sharedPage = MakePage(win1, syncPaneID, @"https://synced.test/", 2, nil);
     NSMenuItem *inWin2Visible = [DPTabContextMenu(dock2) itemWithTitle:@"Unload Tab"];
     Check(inWin2Visible != nil && !inWin2Visible.enabled, @"synced page visible in win1 disables Unload Tab in win2");
@@ -763,14 +728,12 @@ static void TestMultiWindowSyncedAndSharedURL(_TtC3ADK18WebContentChromium *chro
     NSMenuItem *inWin2Hidden = [DPTabContextMenu(dock2) itemWithTitle:@"Unload Tab"];
     Check(inWin2Hidden != nil && inWin2Hidden.enabled, @"synced page hidden in win1 enables Unload Tab in win2");
 
-    // 3. Separate ArcWebContents per window for same contentPaneID -> each window unloads only its own page.
     ArcWebContents *pageWin2 = MakePage(win2, syncPaneID, @"https://synced.test/", 0, nil);
     Trigger([DPTabContextMenu(dock1) itemWithTitle:@"Unload Tab"]);
     Check(sharedPage.discardCount == 1 && pageWin2.discardCount == 0, @"per-window pages unload independently for win1");
     Trigger([DPTabContextMenu(dock2) itemWithTitle:@"Unload Tab"]);
     Check(pageWin2.discardCount == 1, @"per-window pages unload independently for win2");
 
-    // 4. Two loaded tabs sharing exact same URL unload independently via contentPaneID.
     ArcWebContents *dupPage1 = MakePage(win1, dup1PaneID, @"https://dup.test/", 0, nil);
     ArcWebContents *dupPage2 = MakePage(win1, dup2PaneID, @"https://dup.test/", 0, nil);
     Trigger([DPTabContextMenu(dup1) itemWithTitle:@"Unload Tab"]);
@@ -813,7 +776,6 @@ static void TestOffPausedAndVerify(_TtC3ADK18WebContentChromium *chromium) {
     ArcWebContents *page1 = MakePage(win, pane1ID, @"https://off1.test/", 2, nil);
     ArcWebContents *page2 = MakePage(win, pane2ID, @"https://off2.test/", 0, nil);
 
-    // Queue unload-on-hide while ON, then turn OFF before visibility drops -> must NOT discard!
     st2.onFocus = ^(DPTestScriptTab *t) {
         DPUnloadTab.on = NO;
         [page1 setVisibility:0];
@@ -822,13 +784,11 @@ static void TestOffPausedAndVerify(_TtC3ADK18WebContentChromium *chromium) {
     DrainMainQueue();
     Check(page1.discardCount == 0, @"turning tweak off prevents queued unload-on-hide from discarding");
 
-    // While OFF, neither TabView nor TabDockItemView offers Unload Tab, and verify passes.
     Check([DPTabContextMenu(tab1) itemWithTitle:@"Unload Tab"] == nil, @"off state adds no Unload Tab to TabView");
     Check([DPTabContextMenu(dock2) itemWithTitle:@"Unload Tab"] == nil, @"off state adds no Unload Tab to TabDockItemView");
     NSString *offErr = DPUnloadTab.verify(&DPUnloadTab);
     Check(offErr == nil, [NSString stringWithFormat:@"verify passes when off (%@)", offErr]);
 
-    // Turn back ON, verify passes with 0 pinned tabs when dock2 is removed too.
     DPUnloadTab.on = YES;
     [dock2 removeFromSuperview];
     [page1 setVisibility:2];
@@ -869,7 +829,6 @@ static void TestNonTabIsolationAndEdgeCases(_TtC3ADK18WebContentChromium *chromi
     appDel.appleScriptWindows = @[sw];
     NSApp.delegate = appDel;
 
-    // 1. Peek card nested inside a ContentPaneView (plus dp_nonTabWebContents marker) is NEVER tracked or matched.
     _TtC11ContentPane15ContentPaneView *frontPane = nil;
     ArcWebContents *frontPage = MakePage(win, frontPaneID, @"https://front.test/", 2, &frontPane);
     DPPeekCard *peekCard = [[DPPeekCard alloc] initWithFrame:frontPane.bounds];
@@ -881,14 +840,12 @@ static void TestNonTabIsolationAndEdgeCases(_TtC3ADK18WebContentChromium *chromi
     [peekPage setVisibility:2];
     Check(!DPPageIsTracked(peekPage), @"Peek card WebContents inside ContentPaneView is excluded from tracking");
 
-    // Marked non-tab WebContents (before view attaches) is excluded too.
     ArcWebContents *markedPeek = [ArcWebContents new];
     markedPeek.url = [NSURL URLWithString:@"https://shared-bg.test/"];
     objc_setAssociatedObject(markedPeek, NSSelectorFromString(@"dp_nonTabWebContents"), @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     [markedPeek setVisibility:2];
     Check(!DPPageIsTracked(markedPeek), @"dp_nonTabWebContents marker excludes WebContents before mounting");
 
-    // 2. Popup / Little Dia WebContents (mounted in window without ContentPaneView) and Side Chat / Extension panel views.
     ArcWebContents *popupPage = [ArcWebContents new];
     popupPage.url = [NSURL URLWithString:@"https://shared-peek.test/"];
     popupPage.nativeView = [[NSView alloc] initWithFrame:popupWin.contentView.bounds];
@@ -911,11 +868,9 @@ static void TestNonTabIsolationAndEdgeCases(_TtC3ADK18WebContentChromium *chromi
     [chatPanel addSubview:chatPage.nativeView];
     [chatPage setVisibility:2];
 
-    // Cold pinned tab sharing exact URL with Peek/popup/chat must NOT offer Unload Tab or discard them.
     Check([DPTabContextMenu(coldDock) itemWithTitle:@"Unload Tab"] == nil,
           @"cold pinned tab never matches Peek, popup, or Side Chat WebContents at same URL");
 
-    // Unvisited background tab sharing URL with marked Peek + ExtensionSidePanel MUST still match via DPPageByURL without false ambiguity!
     ArcWebContents *realBgPage = MakePage(nil, nil, @"https://shared-bg.test/", 0, nil);
     NSMenuItem *bgItem = [DPTabContextMenu(bgDock) itemWithTitle:@"Unload Tab"];
     Check(bgItem != nil && bgItem.enabled, @"real background tab matches cleanly despite non-tab WebContents at same URL");
@@ -923,7 +878,6 @@ static void TestNonTabIsolationAndEdgeCases(_TtC3ADK18WebContentChromium *chromi
     Check(realBgPage.discardCount == 1 && markedPeek.discardCount == 0 && extPage.discardCount == 0 && peekPage.discardCount == 0 && popupPage.discardCount == 0,
           @"only real tab page is discarded; Peek, ExtensionSidePanel, and popup pages remain untouched");
 
-    // 3. Unload-on-hide switch-back race: becoming visible again before main queue drains must NOT discard.
     __block BOOL raceSwitched = NO;
     stCold.onFocus = ^(DPTestScriptTab *t) {
         raceSwitched = YES;
@@ -936,7 +890,6 @@ static void TestNonTabIsolationAndEdgeCases(_TtC3ADK18WebContentChromium *chromi
     DrainMainQueue();
     Check(raceSwitched && frontPage.discardCount == 0, @"switching back to visible before async discard prevents unloading visible tab");
 
-    // 4. Stale menu item safety: already discarded, closed, or tweak off -> safe no-op.
     [realBgPage setVisibility:2];
     [realBgPage setVisibility:0];
     NSMenuItem *staleDiscardItem = [DPTabContextMenu(bgDock) itemWithTitle:@"Unload Tab"];
@@ -952,11 +905,9 @@ static void TestNonTabIsolationAndEdgeCases(_TtC3ADK18WebContentChromium *chromi
     Trigger(staleCloseItem);
     Check(realBgPage.discardCount == beforeDiscard, @"clicking stale menu item after didCloseWithSessionID is a no-op");
 
-    // 5. DPTabBefore fallback when active tab is missing from appleScriptTabs returns firstObject.
     sw.activeTab = MakeScriptTab(@"MISSING-ID", @"https://missing.test/");
     Check(DPTabBefore(win) == stCold, @"DPTabBefore falls back to first tab when active tab is not in appleScriptTabs");
 
-    // 6. Ephemeral AppleScript wrapper objects survive autoreleasepool drain between menu build and click.
     DPEphemeralScriptWindow *eph = [DPEphemeralScriptWindow new];
     eph.windowId = @"WIN-NONTAB";
     eph.tabIDs = @[ coldTabID, frontTabID ];

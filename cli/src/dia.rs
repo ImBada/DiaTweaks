@@ -50,6 +50,10 @@ impl Diapatch {
         Ok(Self(path))
     }
 
+    pub fn path(&self) -> &Path {
+        &self.0
+    }
+
     pub fn run(
         &self,
         args: &[&str],
@@ -187,6 +191,14 @@ pub fn is_patched(app: &Path) -> bool {
         .unwrap_or(false)
 }
 
+pub fn tweaks_active(env: &Env) -> bool {
+    is_patched(&env.app) && safe_mode(&env.support) == SafeMode::Off
+}
+
+pub fn is_live(env: &Env) -> bool {
+    tweaks_active(env) && is_running(&env.app)
+}
+
 pub fn safe_mode(support: &Path) -> SafeMode {
     let Some(state) = dictionary(support.join("safe-mode.plist")) else {
         return SafeMode::Off;
@@ -198,17 +210,10 @@ pub fn safe_mode(support: &Path) -> SafeMode {
     match level {
         ..=0 => SafeMode::Off,
         1 => SafeMode::TweaksOff,
-        _ => {
-            let parked = state
-                .get("steppedDown")
-                .and_then(plist::Value::as_boolean)
-                .unwrap_or(false);
-            if parked {
-                SafeMode::Parked
-            } else {
-                SafeMode::Disabled
-            }
+        _ if state.get("steppedDown").and_then(plist::Value::as_boolean) == Some(true) => {
+            SafeMode::Parked
         }
+        _ => SafeMode::Disabled,
     }
 }
 
@@ -230,15 +235,17 @@ pub fn has_linked_icon_catalog(app: &Path) -> bool {
     let is_symlink = fs::symlink_metadata(app.join("Contents/Resources/Assets.car"))
         .is_ok_and(|meta| meta.file_type().is_symlink());
     is_symlink
-        && dictionary(app.join("Contents/Info.plist"))
-            .and_then(|info| info.get("CFBundleIconName")?.as_string().map(str::to_owned))
-            .is_some_and(|name| name == "DiaChosenIcon")
+        && dictionary(app.join("Contents/Info.plist")).is_some_and(|info| {
+            info.get("CFBundleIconName")
+                .and_then(plist::Value::as_string)
+                == Some("DiaChosenIcon")
+        })
 }
 
 pub fn has_brief_language(app: &Path) -> bool {
-    fs::read_to_string(
-        app.join("Contents/Resources/agent-server-resources/dist/prompts/skills/morning-brief/SKILL.md"),
-    )
+    fs::read_to_string(app.join(
+        "Contents/Resources/agent-server-resources/dist/prompts/skills/morning-brief/SKILL.md",
+    ))
     .is_ok_and(|text| text.contains("## Output language: "))
 }
 
@@ -366,14 +373,12 @@ mod tests {
             .unwrap();
         };
 
-        // Regular Assets.car with default or alias name is not linked.
         fs::write(&car, b"car").unwrap();
         write_icon("AppIcon");
         assert!(!has_linked_icon_catalog(&app));
         write_icon("DiaChosenIcon");
         assert!(!has_linked_icon_catalog(&app));
 
-        // Symlinked Assets.car requires CFBundleIconName == DiaChosenIcon.
         fs::remove_file(&car).unwrap();
         symlink(&target, &car).unwrap();
         assert!(has_linked_icon_catalog(&app));

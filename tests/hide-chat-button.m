@@ -10,6 +10,7 @@ void DPHandOffAndQuit(NSArray<NSString *> *args) {}
 void DPInstallAIRows(void) {}
 void DPApplyAIRows(void) {}
 void DPDismissConnectAppPrompts(void) {}
+BOOL DPIsSingleAppUpsellBar(NSView *view) { return NO; }
 BOOL DPShortcutRecording(void) { return NO; }
 BOOL DPSavedOn(DPPatch *patch) { return NO; }
 void DPOnLaunch(void (^block)(void)) {}
@@ -91,9 +92,7 @@ int main(void) {
         _TtC13NavigationBar26NavigationBarCapsuleButton *askByIconOnly = makeAskCapsule(NO, YES, nil, @"Ask");
         // 1.58.1+/1.59.0 "Ask" capsule button matched by didClickAskButton: action (e.g. Split View tooltip)
         _TtC13NavigationBar26NavigationBarCapsuleButton *askByAction = makeAskCapsule(YES, NO, @"Chat with these tabs", @"Chat with Tabs");
-        // Capsule button matched by tooltip only
         _TtC13NavigationBar26NavigationBarCapsuleButton *askByTooltip = makeAskCapsule(NO, NO, @"Chat with this tab", @"Chat about…");
-        // Already hidden by Dia before tweak turns on (e.g. New Tab Page)
         _TtC13NavigationBar26NavigationBarCapsuleButton *diaHiddenAsk = makeAskCapsule(YES, YES, nil, @"Ask");
         diaHiddenAsk.hidden = YES;
 
@@ -109,13 +108,11 @@ int main(void) {
             [toolbar addSubview:v];
         [window.contentView addSubview:toolbar];
 
-        // Tab hover card action button for Turn Off AI
         _TtC5TabUI21TabPopoverActionsView *popoverActions = [[_TtC5TabUI21TabPopoverActionsView alloc] initWithFrame:NSMakeRect(0, 0, 120, 30)];
         NSButton *cardChat = [[NSButton alloc] initWithFrame:NSMakeRect(0, 0, 24, 24)];
         cardChat.accessibilityLabel = @"Chat with this tab";
         [popoverActions addSubview:cardChat];
 
-        // Direct predicate checks
         check("DPIsChatButton matches legacy label button", DPIsChatButton(legacyChat));
         check("DPIsChatButton matches Ask capsule by chat fill subview", DPIsChatButton(askByIconOnly));
         check("DPIsChatButton matches Ask capsule by didClickAskButton: action", DPIsChatButton(askByAction));
@@ -127,7 +124,6 @@ int main(void) {
         check("DPIsAIView matches TabPopoverActionsView chat button", DPIsAIView(cardChat));
         check("DPIsAIView ignores non-chat capsules", !DPIsAIView(shareCapsule) && !DPIsAIView(exportCapsule) && !DPIsAIView(popupCapsule));
 
-        // Off-tweak invariant: layout does nothing while both tweaks are off
         [toolbar layout];
         check("off at launch keeps visible chat buttons visible",
               !legacyChat.hidden && !askByIconOnly.hidden && !askByAction.hidden && !askByTooltip.hidden);
@@ -135,7 +131,6 @@ int main(void) {
         check("off at launch keeps DPSuppressed empty", DPSuppressed.count == 0);
         check("off at launch verifies clean", !DPVerifyHides(&DPHideChatButton) && !DPVerifyHides(&DPTurnOffAI));
 
-        // Hide Chat Button ON
         DPHideChatButton.on = YES;
         DPApplyHides(&DPHideChatButton);
         check("Hide Chat Button hides legacy + all Ask capsule variants",
@@ -156,7 +151,6 @@ int main(void) {
         }));
         check("Hide Chat Button verifies clean while on", !DPVerifyHides(&DPHideChatButton));
 
-        // Turn Off AI ON while Hide Chat Button turns OFF -> buttons stay hidden
         DPTurnOffAI.on = YES;
         DPApplyHides(&DPTurnOffAI);
         DPHideChatButton.on = NO;
@@ -165,7 +159,6 @@ int main(void) {
               legacyChat.hidden && askByIconOnly.hidden && askByAction.hidden && askByTooltip.hidden);
         check("Turn Off AI verifies clean while on", !DPVerifyHides(&DPTurnOffAI));
 
-        // Turn Off AI OFF -> restores ONLY buttons we hid, leaving Dia-hidden button hidden
         DPTurnOffAI.on = NO;
         DPApplyHides(&DPTurnOffAI);
         check("turning both off restores all visible chat/Ask buttons",
@@ -174,7 +167,6 @@ int main(void) {
         check("turning both off clears DPSuppressed", DPSuppressed.count == 0);
         check("turning both off verifies clean", !DPVerifyHides(&DPHideChatButton) && !DPVerifyHides(&DPTurnOffAI));
 
-        // Turn Off AI alone ON -> hides all chat/Ask buttons and TabPopoverActionsView button
         DPTurnOffAI.on = YES;
         DPApplyHides(&DPTurnOffAI);
         DPEnforceHides(popoverActions);

@@ -93,12 +93,13 @@ static NSString *DPVerifyPinTabShortcut(DPPatch *patch) {
 
 DP_PATCH(DPPinTabShortcut) {
     .key = @"pinTabShortcut",
-    .order = 86,
+    .order = 83,
     .title = @"Pin Tab Shortcut",
     .detail = @"Press a shortcut, ⌘D unless you set another, to move the tab you’re on to the bottom of your pinned tabs, as in Arc. Press it on a pinned tab to unpin it.",
     .symbol = @"pin.fill",
-    .tint = @"systemPinkColor",
-    .section = @"Tabs",
+    .tint = @"systemTealColor",
+    .section = @"Sidebar & Tab Bar",
+    .group = @"pinnedTabs",
     .classes = DPClasses(DPDiaTabView),
     .shortcut = @"pinTabShortcutKey",
     .defaultShortcut = DPDefaultPinShortcut,

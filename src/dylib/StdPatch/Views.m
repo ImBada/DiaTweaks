@@ -1,5 +1,19 @@
 #import "StdPatch/StdPatch.h"
 #import <os/log.h>
+#import <stdatomic.h>
+
+// Hot hooks look Dia's classes up by name on every call; the slot is only a hint, checked against the class's own name.
+static Class DPClassNamed(const char *name) {
+    static _Atomic(void *) cache[256];
+    uint32_t hash = 2166136261u;
+    for (const unsigned char *p = (const unsigned char *)name; *p; p++) hash = (hash ^ *p) * 16777619u;
+    _Atomic(void *) *slot = &cache[hash & 255];
+    Class cls = (__bridge Class)atomic_load_explicit(slot, memory_order_relaxed);
+    if (cls && !strcmp(class_getName(cls), name)) return cls;
+    cls = objc_getClass(name);
+    if (cls) atomic_store_explicit(slot, (__bridge void *)cls, memory_order_relaxed);
+    return cls;
+}
 
 NSView *DPFindView(NSView *root, BOOL (^match)(NSView *)) {
     if (!root || match(root)) return root;
@@ -16,7 +30,7 @@ static void DPCollectViews(NSView *view, Class cls, NSMutableArray<NSView *> *vi
 }
 
 NSArray<NSView *> *DPFindViews(const char *className) {
-    Class cls = className ? objc_getClass(className) : Nil;
+    Class cls = className ? DPClassNamed(className) : Nil;
     if (!cls) return @[];
     NSMutableArray<NSView *> *views = [NSMutableArray new];
     for (NSWindow *window in NSApp.windows)
@@ -25,7 +39,7 @@ NSArray<NSView *> *DPFindViews(const char *className) {
 }
 
 NSString *DPTabLayout(void) {
-    Class cls = objc_getClass(DPDiaSidebarFooter);
+    Class cls = DPClassNamed(DPDiaSidebarFooter);
     if (cls)
         for (NSWindow *window in NSApp.windows)
             if (window.isVisible && DPFindView(window.contentView, ^BOOL(NSView *v) { return [v isKindOfClass:cls]; })) return @"vertical";
@@ -33,7 +47,7 @@ NSString *DPTabLayout(void) {
 }
 
 NSView *DPSubview(NSView *parent, const char *className) {
-    Class cls = parent && className ? objc_getClass(className) : Nil;
+    Class cls = parent && className ? DPClassNamed(className) : Nil;
     if (!cls) return nil;
     for (NSView *sub in parent.subviews) if ([sub isKindOfClass:cls]) return sub;
     return nil;
@@ -41,12 +55,12 @@ NSView *DPSubview(NSView *parent, const char *className) {
 
 BOOL DPIsKind(id object, const char *className) {
     if (!object || !className) return NO;
-    Class cls = objc_getClass(className);
+    Class cls = DPClassNamed(className);
     return cls && [object isKindOfClass:cls];
 }
 
 BOOL DPIsFloatingChat(NSView *popover) {
-    Class cls = popover ? objc_getClass(DPDiaChatHeader) : Nil;
+    Class cls = popover ? DPClassNamed(DPDiaChatHeader) : Nil;
     return cls && DPFindView(popover, ^BOOL(NSView *view) { return [view isKindOfClass:cls]; }) != nil;
 }
 
@@ -127,7 +141,7 @@ NSArray<NSString *> *DPUUIDsIn(NSString *text) {
 }
 
 NSWindowController *DPOpenTabSwitcher(void) {
-    Class cls = objc_getClass(DPDiaTabSwitcher);
+    Class cls = DPClassNamed(DPDiaTabSwitcher);
     if (!cls) return nil;
     for (NSWindow *window in NSApp.windows)
         if (window.visible && [window.windowController isKindOfClass:cls]) return window.windowController;

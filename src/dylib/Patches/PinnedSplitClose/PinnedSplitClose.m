@@ -4,8 +4,6 @@
 
 extern DPPatch DPPinnedSplitClose;
 
-// --- view helpers ---
-
 static void DPGatherViews(NSView *view, Class cls, NSMutableArray<NSView *> *out) {
     if ([view isKindOfClass:cls]) [out addObject:view];
     for (NSView *sub in view.subviews) DPGatherViews(sub, cls, out);
@@ -18,13 +16,18 @@ static NSArray<NSView *> *DPViewsIn(NSView *root, const char *className) {
     return out;
 }
 
+static NSUInteger DPCountViews(NSView *view, Class cls) {
+    NSUInteger count = [view isKindOfClass:cls] ? 1 : 0;
+    for (NSView *sub in view.subviews) count += DPCountViews(sub, cls);
+    return count;
+}
+
 static id DPObjectIvar(id object, const char *name) {
     void **slot = DPIvar(object, name);
     return slot ? (__bridge id)*slot : nil;
 }
 
-// A Swift Dictionary or Array keeps its element count at +16 of its storage; the empty
-// singleton reports 0 there, so an empty collection reads as 0 rather than as a split.
+// A Swift Dictionary or Array keeps its count at +16 of its storage and the empty singleton reports 0 there, so empty never reads as a split.
 static NSUInteger DPStoredCount(id object, const char *name) {
     void **slot = DPIvar(object, name);
     uintptr_t storage = slot ? (uintptr_t)*slot : 0;
@@ -33,8 +36,7 @@ static NSUInteger DPStoredCount(id object, const char *name) {
     return count > 0 && count < 1024 ? (NSUInteger)count : 0;
 }
 
-// A multi-payload enum with a 16-byte payload keeps the payload first and its tag in the
-// trailing byte, so the first 16 bytes are the UUID whatever the case.
+// A multi-payload enum with a 16-byte payload keeps the payload first and its tag last, so the first 16 bytes are the UUID in every case.
 static NSString *DPUUIDIvar(id object, const char *name) {
     uint8_t *bytes = DPIvar(object, name);
     if (!bytes) return nil;
@@ -42,8 +44,6 @@ static NSString *DPUUIDIvar(id object, const char *name) {
             bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
             bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15]];
 }
-
-// --- the focused pinned or favorite Split View ---
 
 static BOOL DPPaneIsPinned(NSView *pane) {
     __attribute__((objc_precise_lifetime)) id attributes = DPAttributes(pane);
@@ -59,11 +59,11 @@ static BOOL DPSameID(NSString *one, NSString *other) {
 
 static BOOL DPPaneIsSplit(NSView *pane) {
     NSView *tab = DPEnclosingTab(pane);
-    return tab && DPViewsIn(tab, DPDiaTabContentView).count > 1;
+    Class content = tab ? objc_getClass(DPDiaTabContentView) : Nil;
+    return content && DPCountViews(tab, content) > 1;
 }
 
-// A pinned row or top tab holds one TabContentView per pane; a favorite or pinned tile holds one controller per pane.
-// Only the item holding the tab in front is the one ⌘W means, so a split open in another window is left alone.
+// Rows and top tabs hold one TabContentView per pane, tiles one controller per pane; only the item holding the front tab is what ⌘W means.
 static NSView *DPFocusedPinnedSplit(NSWindow *window) {
     if (!window) return nil;
     NSString *active = DPActiveTabID(window);
@@ -107,7 +107,6 @@ static BOOL DPCloseItem(NSView *item) {
     return YES;
 }
 
-// Sheets, the Command Bar, and Peek cards own ⌘W before the window does.
 static BOOL DPOverlayOnTop(NSWindow *window) {
     if (window.attachedSheet) return YES;
     Class overlay = NSClassFromString(@"DPCommandBarOverlay");
@@ -131,15 +130,14 @@ static void DPWindowController_closeFocusedContent(id self, SEL _cmd, id sender)
     DPCallOriginal(DPWindowController_closeFocusedContent, self, sender);
 }
 
-// --- the split icon Dia leaves off a pinned Split View ---
-
 static char DPOriginalIconKey;
 
 static NSImageView *DPIconView(NSView *content) {
     id standard = DPObjectIvar(content, "$__lazy_storage_$_standardIconView");
     if ([standard isKindOfClass:NSImageView.class]) return standard;
-    for (NSString *name in @[ @"$__lazy_storage_$_iconView", @"$__lazy_storage_$_iconContainerView" ]) {
-        NSView *container = DPObjectIvar(content, name.UTF8String);
+    static const char *const containers[] = {"$__lazy_storage_$_iconView", "$__lazy_storage_$_iconContainerView"};
+    for (size_t i = 0; i < sizeof containers / sizeof *containers; i++) {
+        NSView *container = DPObjectIvar(content, containers[i]);
         NSImageView *found = (NSImageView *)DPFindView(container, ^BOOL(NSView *view) { return [view isKindOfClass:NSImageView.class]; });
         if (found) return found;
     }
@@ -156,8 +154,7 @@ static NSImage *DPSplitIcon(void) {
     return icon;
 }
 
-// Dia leaves a Split View's icon slot empty, and may also hide it, so both are recorded
-// and only what this tweak changed is put back.
+// Dia leaves a Split View's icon slot empty and may hide it, so both are recorded and only what this tweak changed is put back.
 static void DPShowSplitIcon(NSView *content, BOOL on) {
     NSImageView *icon = DPIconView(content);
     if (!icon) return;
@@ -222,12 +219,13 @@ static void DPInstallPinnedSplitClose(void) {
 
 DP_PATCH(DPPinnedSplitClose) {
     .key = @"pinnedSplitClose",
-    .order = 280,
-    .section = @"Tabs",
+    .order = 83,
+    .section = @"Sidebar & Tab Bar",
+    .group = @"pinnedTabs",
     .title = @"Unload Pinned Splits",
     .detail = @"Press ⌘W on a pinned or favorite Split View to unload it in place, keeping both panes, as right-clicking it and choosing Close does. Pinned splits also get a split icon so you can tell them apart.",
     .symbol = @"rectangle.split.2x1",
-    .tint = @"systemPinkColor",
+    .tint = @"systemTealColor",
     .classes = DPClasses(DPDiaWindowController, DPDiaTabView, DPDiaTabContentView, DPDiaPinnedTab),
     .install = DPInstallPinnedSplitClose,
     .apply = DPApplyPinnedSplitClose,

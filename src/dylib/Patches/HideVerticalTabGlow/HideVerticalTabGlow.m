@@ -16,16 +16,15 @@ static void DPStyleTab(NSView *shape) {
     DPSet(shape, &DPTabStyledKey, active ? @YES : nil);
     if (active) DPTrackStyledShape(shape);
     else [DPStyledShapes removeObject:shape];
-    [CATransaction begin];
-    [CATransaction setDisableActions:YES];
-    for (const char *const *name = DPDecorationIvars; *name; name++) {
-        id part = DPTabDecoration(shape, *name);
-        if (active) DPHideTabDecoration(part, shape);
-        else DPRestoreTabDecoration(part);
-    }
-    DPFlattenTabMaterial(shape, shape);
-    DPStyleUniformTabBorder(shape);
-    [CATransaction commit];
+    DPWithoutAnimation(^{
+        for (const char *const *name = DPDecorationIvars; *name; name++) {
+            id part = DPTabDecoration(shape, *name);
+            if (active) DPHideTabDecoration(part, shape);
+            else DPRestoreTabDecoration(part);
+        }
+        DPFlattenTabMaterial(shape, shape);
+        DPStyleUniformTabBorder(shape);
+    });
 }
 
 static void DPTabShape_restyle(NSView *self, SEL _cmd) {
@@ -78,7 +77,7 @@ DP_PATCH(DPHideVerticalTabGlow) {
     .key = @"hideVerticalTabGlow",
     .order = 75,
     .title = @"Hide Vertical Tab Glow",
-    .detail = @"Remove the selected sidebar tab's glow and glass highlights, with a uniform border.",
+    .detail = @"Remove the selected sidebar tab’s glow and glass highlights, with a uniform border.",
     .symbol = @"sun.max",
     .tint = @"systemTealColor",
     .section = @"Sidebar & Tab Bar",

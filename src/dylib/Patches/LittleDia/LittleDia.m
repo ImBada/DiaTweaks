@@ -16,13 +16,14 @@ static void DPInstallLittleDia(void) {
 
 static void DPApplyLittleDia(DPPatch *patch) {
     if (!patch->on) {
+        DPHideLittleDiaLauncher();
         DPUncoverAllLittleDia();
         DPRestoreLittleDiaStack();
     }
     DPRefreshLittleDiaWindows();
     DPRefreshLittleDiaNewWindow();
     if (patch->on && !gLoadedOn) DPWriteLittleDiaExtension(YES);
-    // Skip the relaunch prompt during self-tests, which flip patches without saving.
+    // Self-tests flip patches without saving, so skip the relaunch prompt for them.
     if (!patch->on || gLoadedOn || patch->on != DPSavedOn(patch) || DPLittleDiaExtensionProblem()) return;
     NSAlert *alert = [NSAlert new];
     alert.messageText = @"Relaunch Dia to use Little Dia";

@@ -4,9 +4,8 @@
 extern DPPatch DPTabTitles;
 
 static NSString *DPContents_title(id self, SEL _cmd) {
-    if (!DPTabTitles.on) return DPCallOriginal(DPContents_title, self);
     NSString *title = DPCallOriginal(DPContents_title, self);
-    return title.length ? DPDisplayTitle(title) : title;
+    return DPTabTitles.on && title.length ? DPDisplayTitle(title) : title;
 }
 
 static void DPInstallTabTitles(void) {

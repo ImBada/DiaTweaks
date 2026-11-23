@@ -7,24 +7,11 @@
 #import <Carbon/Carbon.h>
 #import <objc/message.h>
 #import "watchdog.h"
-
-// ASan+UBSan regression suite covering historical regressions & cross-feature invariants:
-// 1. DPPeekToolbar z-order click guard (overlays above Peek: Floating Chat, Command Bar, Find bar)
-// 2. DPPeekBarZone dealloc cleanup (timers + notification observers under ASan)
-// 3. LittleDia Over + Stack full restore on off/Pause Tweaks (#552) and miniaturize
-// 4. Multi-tweak sidebar drag-offset leak (#508) across PullRequestRepo + CollapsePinned + CompactTabRows
+#import "runloop.h"
 
 static int failures;
 #define CHECK(cond, msg) do { if (!(cond)) { printf("FAIL: %s\n", msg); failures++; } } while (0)
 
-// Spins the main run loop until the condition holds, so a slow runner can't end the wait before an animation or timer lands.
-static void PumpUntil(BOOL (^done)(void)) {
-    NSDate *limit = [NSDate dateWithTimeIntervalSinceNow:30];
-    while (!done() && limit.timeIntervalSinceNow > 0)
-        [NSRunLoop.mainRunLoop runMode:NSDefaultRunLoopMode beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
-}
-
-// --- Shared test stubs ---
 DPPatch DPPeek = { .on = YES }, DPLittleDia = { .on = YES }, DPHideToolbar = { .on = NO },
         DPRevealToolbarOnHover = { .on = YES }, DPShowLoadingProgress = { .on = NO };
 NSNotificationName const DPPatchesDidChangeNotification = @"DPPatchesDidChange";
@@ -39,7 +26,6 @@ static void DPApp_removeMonitor(id self, SEL _cmd, id monitor) {
     [gMouseMonitors removeObject:monitor];
 }
 
-// Peek toolbar & rules stubs
 static int gNavBackCalls;
 @interface DPFakePeekPage : NSObject <DPPeekPage>
 @property (nonatomic) BOOL canGoBack, canGoForward, isLoading;
@@ -102,18 +88,15 @@ void DPShowProgressLine(NSView *pane, CGFloat fraction) {}
 void DPFinishProgressLine(NSView *pane) {}
 void DPRemoveProgressLine(NSView *pane) {}
 
-// HideToolbar stubs for LittleDia/Over.m
 NSView *DPBookmarksUnder(NSView *pane, NSView *bar) { return nil; }
 void DPApplyToolbar(NSView *pane) {}
 
 static NSWindow *gLittleMarker;
 BOOL DPIsLittleDiaWindow(NSWindow *window) { return window && window == gLittleMarker; }
 
-// CompactTabRows / CollapsePinned / PullRequestRepo stubs
 NSString *DPChoice(DPPatch *patch) { return patch->defaultChoice; }
 NSString *DPText(id value) { return [value isKindOfClass:NSString.class] ? value : nil; }
 
-// Mock Dia classes
 @interface _TtC11ContentPane15ContentPaneView : NSView
 @end
 @implementation _TtC11ContentPane15ContentPaneView
@@ -222,13 +205,11 @@ static void TestPeekToolbarZOrderAndBarZoneDealloc(void) {
     DPPeekPlaceToolbar(peek);
     [peek.toolbar layoutSubtreeIfNeeded];
 
-    // Click center of the Back button inside DPPeekToolbar (in window coordinates).
     NSButton *backBtn = ((DPPeekToolbar *)peek.toolbar).buttons[0];
     NSPoint backInWin = [backBtn convertPoint:NSMakePoint(NSMidX(backBtn.bounds), NSMidY(backBtn.bounds)) toView:nil];
     NSEvent *click = [NSEvent mouseEventWithType:NSEventTypeLeftMouseDown location:backInWin modifierFlags:0 timestamp:1
                                     windowNumber:win.windowNumber context:nil eventNumber:1 clickCount:1 pressure:1];
 
-    // 1. Covering overlay (Floating Chat / Command Bar / Find bar) above Peek must receive clicks, NOT DPPeekToolbar.
     NSView *overlayAbove = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 1000, 700)];
     [win.contentView addSubview:overlayAbove positioned:NSWindowAbove relativeTo:nil];
     NSEvent *(^toolbarMonitor)(NSEvent *) = gMouseMonitors.lastObject;
@@ -238,12 +219,10 @@ static void TestPeekToolbarZOrderAndBarZoneDealloc(void) {
     NSEvent *resCovered = toolbarMonitor ? toolbarMonitor(click) : nil;
     CHECK(resCovered == click && gBarButtonMouseDowns == 0, "covering overlay above Peek prevents DPPeekToolbar from stealing click");
 
-    // 2. When uncovered, DPPeekToolbar claims the click (returns nil).
     [overlayAbove removeFromSuperview];
     NSEvent *resUncovered = toolbarMonitor ? toolbarMonitor(click) : click;
     CHECK(resUncovered == nil && gBarButtonMouseDowns == 1, "uncovered DPPeekToolbar intercepts click and hands it to the Back button");
 
-    // 3. DPPeekBarZone dealloc invalidates timers & removes notification observer cleanly under ASan.
     __weak DPPeekBarZone *weakZone = nil;
     @autoreleasepool {
         DPPeekCard *tempPeek = [[DPPeekCard alloc] initWithFrame:NSMakeRect(0, 0, 600, 400)];
@@ -290,28 +269,25 @@ static void TestLittleDiaOverAndStackRestore(void) {
     gLittleMarker = little;
     gTestWindows = @[ little, mainWin ];
 
-    // 1. Over: DPPutLittleDiaOver fades toolbars; Pause Tweaks / off restores toolbars & clears DPLittleDiaIsOver.
     DPPutLittleDiaOver(little, mainWin);
     CHECK(DPLittleDiaIsOver(mainWin), "DPLittleDiaIsOver is YES while Little Dia is over main window");
     DPLittleDia.on = NO;
     CHECK(!DPLittleDiaIsOver(mainWin), "DPLittleDiaIsOver immediately returns NO when Little Dia is off/paused");
     DPUncoverAllLittleDia();
-    PumpUntil(^BOOL { return fabs(bar.alphaValue - 1.0) < 0.01; });
+    DPPumpUntil(^BOOL { return fabs(bar.alphaValue - 1.0) < 0.01; });
     CHECK(fabs(bar.alphaValue - 1.0) < 0.01, "DPUncoverAllLittleDia restores main window toolbar alpha to 1 on off/pause");
 
-    // 2. Miniaturizing Little Dia restores covered window toolbars immediately.
     DPLittleDia.on = YES;
     DPPutLittleDiaOver(little, mainWin);
-    PumpUntil(^BOOL { return bar.alphaValue < 0.05; });
+    DPPumpUntil(^BOOL { return bar.alphaValue < 0.05; });
     CHECK(bar.alphaValue < 0.05, "toolbar faded to 0 under Little Dia");
     little.fakeMiniaturized = YES;
     CHECK(!DPLittleDiaIsOver(mainWin), "miniaturized Little Dia is not considered over main window");
     [NSNotificationCenter.defaultCenter postNotificationName:NSWindowWillMiniaturizeNotification object:little];
-    PumpUntil(^BOOL { return fabs(bar.alphaValue - 1.0) < 0.01; });
+    DPPumpUntil(^BOOL { return fabs(bar.alphaValue - 1.0) < 0.01; });
     CHECK(fabs(bar.alphaValue - 1.0) < 0.01, "miniaturizing Little Dia restores covered window toolbar alpha to 1");
     little.fakeMiniaturized = NO;
 
-    // 3. Stack: veiled + put-away windows restore completely when Little Dia turns off / pauses.
     [NSNotificationCenter.defaultCenter postNotificationName:NSApplicationWillUnhideNotification object:NSApp];
     [NSNotificationCenter.defaultCenter postNotificationName:NSApplicationDidUnhideNotification object:NSApp];
     CHECK(mainWin.alphaValue < 0.01, "unhide veils main window while Little Dia is on");
@@ -339,7 +315,6 @@ static void TestMultiTweakDragOffsetNoLeak(void) {
     DPCollapsePinned.on = YES;
     DPPullRequestRepo.on = YES;
 
-    // Plain tab list (no moves) + dragging window to detect stale DPDragHandedSet leak (#508).
     NSView *tabList = [[_TtC7TabList11TabListView alloc] initWithFrame:NSMakeRect(0, 0, 200, 400)];
     _TtCC7TabList11TabListView14CollectionView *col = [[_TtCC7TabList11TabListView14CollectionView alloc] initWithFrame:NSMakeRect(0, 0, 200, 400)];
     col.collectionViewLayout = [_TtC7TabList27TabListCollectionViewLayout new];
@@ -358,18 +333,15 @@ static void TestMultiTweakDragOffsetNoLeak(void) {
     raw.draggingLocation = NSMakePoint(50, 100);
     id<NSDraggingInfo> proxied = DPDraggingInfoAt((id<NSDraggingInfo>)raw, NSMakePoint(50, 140));
 
-    // Case A: CollapsePinned/PullRequestRepo prepareForDragOperation clears DPDragHandedSet.
     [(id<NSDraggingDestination>)tabList prepareForDragOperation:proxied];
     DPPlaceDraggedTab();
     CHECK(fabs(NSMinY(dragTab.frame) - 20) < 0.01, "prepareForDragOperation clears proxied drag offset");
 
-    // Case B: performDragOperation clears DPDragHandedSet even when CollapsePinned refuses a drop.
     proxied = DPDraggingInfoAt((id<NSDraggingInfo>)raw, NSMakePoint(50, 140));
     [(id<NSDraggingDestination>)tabList performDragOperation:proxied];
     DPPlaceDraggedTab();
     CHECK(fabs(NSMinY(dragTab.frame) - 20) < 0.01, "performDragOperation clears proxied drag offset");
 
-    // Case C: draggingExited clears DPDragHandedSet.
     proxied = DPDraggingInfoAt((id<NSDraggingInfo>)raw, NSMakePoint(50, 140));
     [(id<NSDraggingDestination>)tabList draggingExited:proxied];
     DPPlaceDraggedTab();

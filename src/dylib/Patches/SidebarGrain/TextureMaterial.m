@@ -1,16 +1,24 @@
 #import "GrainView.h"
 #import "TextureNoise.h"
 
+enum { DPPatternMaterialCount = 4 };
+
 NSArray<NSString *> *DPGrainMaterialKeys(void) {
-    return @[@"grain", @"sand", @"tweed", @"denim", @"matte", @"fine"];
+    static NSArray<NSString *> *keys;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ keys = @[@"grain", @"sand", @"tweed", @"denim", @"matte", @"fine"]; });
+    return keys;
 }
 
 NSArray<NSString *> *DPGrainMaterialTitles(void) {
-    return @[@"Grain", @"Sand", @"Tweed", @"Denim", @"Matte", @"Fine"];
+    static NSArray<NSString *> *titles;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ titles = @[@"Grain", @"Sand", @"Tweed", @"Denim", @"Matte", @"Fine"]; });
+    return titles;
 }
 
 BOOL DPIsPatternGrainMaterial(NSString *material) {
-    return [@[@"grain", @"sand", @"tweed", @"denim"] containsObject:material];
+    return [DPGrainMaterialKeys() indexOfObject:material] < DPPatternMaterialCount;
 }
 
 static CGImageRef DPSoftenPatternTile(CGImageRef image) CF_RETURNS_RETAINED {
@@ -35,7 +43,7 @@ CGImageRef DPPatternGrainTile(NSString *material, BOOL soft) {
     static dispatch_once_t once;
     dispatch_once(&once, ^{
         NSMutableDictionary *sharp = [NSMutableDictionary new], *blurred = [NSMutableDictionary new];
-        for (NSString *key in @[@"grain", @"sand", @"tweed", @"denim"]) {
+        for (NSString *key in [DPGrainMaterialKeys() subarrayWithRange:NSMakeRange(0, DPPatternMaterialCount)]) {
             NSMutableData *data = [NSMutableData dataWithLength:200 * 200 * 4];
             DPFillTexturePattern(key, data.mutableBytes);
             CGColorSpaceRef space = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);

@@ -2,15 +2,8 @@
 #import <objc/message.h>
 
 static void DPCollectPinned(NSMutableSet<NSNumber *> *sessions, NSMutableSet<NSString *> *pinnedURLs, NSMutableSet<NSString *> *openURLs) {
-    id app = NSApp.delegate;
-    if (![app respondsToSelector:@selector(appleScriptWindows)]) return;
-    NSArray *windows = DPMsg(app, @selector(appleScriptWindows));
-    if (![windows isKindOfClass:NSArray.class]) return;
-    for (id window in windows) {
-        if (![window respondsToSelector:@selector(appleScriptTabs)]) continue;
-        NSArray *tabs = DPMsg(window, @selector(appleScriptTabs));
-        if (![tabs isKindOfClass:NSArray.class]) continue;
-        for (id tab in tabs) {
+    for (id window in DPAppleScriptWindows()) {
+        for (id tab in DPAppleScriptTabs(window)) {
             NSString *url = [tab respondsToSelector:@selector(URL)] ? DPText(DPMsg(tab, @selector(URL))) : nil;
             BOOL pinned = [tab respondsToSelector:@selector(isPinned)] && DPMsgBool(tab, @selector(isPinned));
             if (url.length) [pinned ? pinnedURLs : openURLs addObject:url];

@@ -5,7 +5,7 @@ static NSView *DPToolbar_hitTest(NSView *self, SEL _cmd, NSPoint point) {
     if (!DPHideToolbar.on) return DPCallOriginal(DPToolbar_hitTest, self, point);
     DPToolbarHover *hover = [DPToolbarHover forPane:self.superview];
     BOOL hidden = hover.progress == 0 && hover.inPlaceProgress == 0
-        && !DPToolbarHasPermissionRequest(hover) && (self == hover.bar || self == hover.bookmarks);
+        && !DPToolbarHasPermissionRequest(hover) && (self == hover.bar || (self == hover.bookmarks && !DPKeepBookmarksBar.on));
     return hidden ? nil : DPCallOriginal(DPToolbar_hitTest, self, point);
 }
 
@@ -40,7 +40,7 @@ static NSString *DPVerifyHideToolbar(DPPatch *patch) {
         DPToolbarHover *hover = [DPToolbarHover forPane:pane];
         if (hover.progress > 0 || hover.inPlaceProgress > 0) continue;
         NSView *bookmarks = DPBookmarksUnder(pane, bar);
-        NSArray<NSView *> *bars = bookmarks ? @[bar, bookmarks] : @[bar];
+        NSArray<NSView *> *bars = bookmarks && !DPKeepBookmarksBar.on ? @[bar, bookmarks] : @[bar];
         BOOL hidden = patch->on && !DPToolbarHasPermissionRequest(hover), found = NO;
         for (NSView *view in bars) {
             if (fabs(view.alphaValue - (hidden ? 0 : 1)) > 0.01) return hidden ? @"toolbar still shows" : @"toolbar is invisible";

@@ -21,7 +21,7 @@ static BOOL DPPeekWanted(NSInteger disposition) {
     return elsewhere && DPPeekModifiers() == NSEventModifierFlagShift;
 }
 
-// Pages clear status text on mouse-down before decidePolicy runs, so fall back to the hovered link at mouse-down.
+// Pages clear status text on mouse-down before decidePolicy runs, so the link hovered at mouse-down stands in.
 BOOL DPPeekOverLink(id page, NSURL *url) {
     NSString *key = url ? DPPeekLinkKey(url.absoluteString) : nil;
     if (!page || !key) return NO;
@@ -73,7 +73,7 @@ static void DPWebContent_didCreate(id self, SEL _cmd, id webContents, id newWebC
 static BOOL DPPeekLeavesPinnedRow(id webContents, id action, NSInteger disposition, NSInteger policy) {
     BOOL stays = disposition == DPCurrentTab || disposition == DPForegroundTab;
     NSInteger type = [DPValueForKey(action, @"navigationType") integerValue];
-    // navigationType: 0 = link activation, 4 = other (how Dia reports target=_blank clicks).
+    // navigationType 0 is a link activation; 4 is how Dia reports target=_blank clicks.
     BOOL clicked = type == 0 || (type == 4 && disposition == DPForegroundTab);
     if (DPPeekModifiers() || !stays || !clicked || (policy != DPCurrentTab && policy != DPForegroundTab)) return NO;
     NSString *from = DPDomainKey([DPValueForKey(webContents, @"url") absoluteString]), *to = DPDomainKey([DPValueForKey(action, @"url") absoluteString]);
@@ -85,31 +85,31 @@ static NSInteger DPWebContent_decidePolicy(id self, SEL _cmd, id webContents, id
     BOOL little = DPLittleDia.on && DPLittleDiaTabLinks.on;
     if (!DPPeek.on && !little) return DPCallOriginal(DPWebContent_decidePolicy, self, webContents, action);
     NSInteger disposition = [DPValueForKey(action, @"navigationDisposition") integerValue];
-    if (!DPPeekWanted(disposition)) {
-        NSInteger policy = DPCallOriginal(DPWebContent_decidePolicy, self, webContents, action);
-        BOOL peeks = DPPeek.on && DPPeekPinnedLinks.on;
-        if (!peeks && !little) return policy;
+    if (DPPeekWanted(disposition)) {
+        if (DPPeekShows(webContents)) return DPCurrentTab;
         NSURL *url = DPValueForKey(action, @"url");
-        // Script-opened tabs have no link under the pointer and would lose their opener in Little Dia.
-        BOOL clicked = disposition != DPForegroundTab || DPPeekOverLink(webContents, url);
-        BOOL leaves = (peeks || (clicked && policy == DPCurrentTab)) && DPPeekLeavesPinnedRow(webContents, action, disposition, policy);
-        if (!leaves && policy == DPForegroundTab) {
-            // Ask Dia as if the link stayed in the tab: only an icon-only pinned tab turns that into a new tab.
-            leaves = disposition == DPCurrentTab;
-            if (disposition == DPForegroundTab && !(NSEvent.modifierFlags & NSEventModifierFlagCommand)) {
-                DPStayingAction *staying = [DPStayingAction alloc];
-                staying.action = action;
-                leaves = DPCallOriginal(DPWebContent_decidePolicy, self, webContents, staying) == DPForegroundTab;
-            }
-        }
-        if ((policy == DPForegroundTab || leaves) && clicked && DPLittleDiaTakesTabLink(webContents, url, leaves)) return DPIgnoreAction;
-        if (!peeks || !leaves || !DPPeekIsWeb(url) || !DPPeekCanOpen(webContents)) return policy;
+        if (!DPPeekIsWeb(url) || !DPPeekCanOpen(webContents)) return DPCallOriginal(DPWebContent_decidePolicy, self, webContents, action);
         DPPeekOpenLater(self, webContents, url);
         return DPIgnoreAction;
     }
-    if (DPPeekShows(webContents)) return DPCurrentTab;
+    NSInteger policy = DPCallOriginal(DPWebContent_decidePolicy, self, webContents, action);
+    BOOL peeks = DPPeek.on && DPPeekPinnedLinks.on;
+    if (!peeks && !little) return policy;
     NSURL *url = DPValueForKey(action, @"url");
-    if (!DPPeekIsWeb(url) || !DPPeekCanOpen(webContents)) return DPCallOriginal(DPWebContent_decidePolicy, self, webContents, action);
+    // Script-opened tabs have no link under the pointer and would lose their opener in Little Dia.
+    BOOL clicked = disposition != DPForegroundTab || DPPeekOverLink(webContents, url);
+    BOOL leaves = (peeks || (clicked && policy == DPCurrentTab)) && DPPeekLeavesPinnedRow(webContents, action, disposition, policy);
+    if (!leaves && policy == DPForegroundTab) {
+        // Ask Dia as if the link stayed in the tab: only an icon-only pinned tab turns that into a new tab.
+        leaves = disposition == DPCurrentTab;
+        if (disposition == DPForegroundTab && !(NSEvent.modifierFlags & NSEventModifierFlagCommand)) {
+            DPStayingAction *staying = [DPStayingAction alloc];
+            staying.action = action;
+            leaves = DPCallOriginal(DPWebContent_decidePolicy, self, webContents, staying) == DPForegroundTab;
+        }
+    }
+    if ((policy == DPForegroundTab || leaves) && clicked && DPLittleDiaTakesTabLink(webContents, url, leaves)) return DPIgnoreAction;
+    if (!peeks || !leaves || !DPPeekIsWeb(url) || !DPPeekCanOpen(webContents)) return policy;
     DPPeekOpenLater(self, webContents, url);
     return DPIgnoreAction;
 }

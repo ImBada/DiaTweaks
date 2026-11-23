@@ -7,9 +7,13 @@ static NSHashTable<NSMenu *> *DPTaggedMenus;
 
 static NSString *const DPItemTitle = @"Open Link in Little Dia";
 
+static BOOL DPIsOpenLinkItem(NSMenuItem *item) {
+    return [item.title rangeOfString:@"Open Link" options:NSCaseInsensitiveSearch | NSAnchoredSearch].location != NSNotFound;
+}
+
 static BOOL DPPage_willShowMenu(id self, SEL _cmd, id page, id menu, id element) {
     if (!DPLittleDia.on) {
-        if (gLink) gLink = nil;
+        gLink = nil;
         return DPCallOriginal(DPPage_willShowMenu, self, page, menu, element);
     }
     NSURL *url = DPValueForKey(element, @"linkURL");
@@ -23,7 +27,7 @@ static BOOL DPPage_willShowMenu(id self, SEL _cmd, id page, id menu, id element)
 static BOOL DPIsWebLinkMenu(NSMenu *menu, NSView *view) {
     if (!view || DPIsKind(view, "RenderWidgetHostViewCocoa") || DPIsKind(view, "WebContentsViewCocoa")) return YES;
     for (NSMenuItem *item in menu.itemArray)
-        if ([item.title rangeOfString:@"Open Link" options:NSCaseInsensitiveSearch | NSAnchoredSearch].location != NSNotFound) return YES;
+        if (DPIsOpenLinkItem(item)) return YES;
     return NO;
 }
 
@@ -45,7 +49,7 @@ static void DPAddLinkItem(NSMenu *menu, NSView *view) {
     NSInteger at = 0;
     NSArray<NSMenuItem *> *items = menu.itemArray;
     for (NSUInteger i = 0; i < items.count; i++)
-        if ([items[i].title rangeOfString:@"Open Link" options:NSCaseInsensitiveSearch | NSAnchoredSearch].location != NSNotFound) at = (NSInteger)i + 1;
+        if (DPIsOpenLinkItem(items[i])) at = (NSInteger)i + 1;
     [menu insertItem:item atIndex:at];
     [DPTaggedMenus addObject:menu];
 }

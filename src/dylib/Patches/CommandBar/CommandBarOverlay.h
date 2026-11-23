@@ -18,6 +18,32 @@ extern DPPatch DPCommandBar, DPCommandBarKeepText;
 
 extern char DPOverlayKey;
 
+static inline BOOL DPOverPinnedHeader(NSView *tabList, id gesture) {
+    Class headerCls = NSClassFromString(@"DPPinnedHeader");
+    if (!headerCls || ![gesture respondsToSelector:@selector(locationInView:)]) return NO;
+    NSView *header = DPFindView(tabList, ^BOOL(NSView *view) { return [view isKindOfClass:headerCls]; });
+    if (!header || header.isHiddenOrHasHiddenAncestor || !header.superview) return NO;
+    return NSPointInRect([gesture locationInView:header.superview], header.frame);
+}
+
+static inline void DPStopWatching(DPCommandBarOverlay *overlay) {
+    [overlay.watch invalidate];
+    overlay.watch = nil;
+    if (overlay.keyMonitor) [NSEvent removeMonitor:overlay.keyMonitor];
+    overlay.keyMonitor = nil;
+}
+
+static inline void DPRemoveShade(DPCommandBarOverlay *overlay) {
+    [overlay.shade removeFromSuperview];
+    [overlay.windowBlur removeFromSuperview];
+    overlay.shade = overlay.windowBlur = nil;
+}
+
+static inline NSView *DPVisiblePeek(NSWindow *window) {
+    Class card = NSClassFromString(@"DPPeekCard");
+    return card ? DPFindView(window.contentView, ^BOOL(NSView *view) { return [view isKindOfClass:card] && !view.isHiddenOrHasHiddenAncestor; }) : nil;
+}
+
 NSTextView *DPBarText(DPCommandBarOverlay *overlay);
 void DPFocusBar(DPCommandBarOverlay *overlay);
 void DPShowShade(DPCommandBarOverlay *overlay);
@@ -56,7 +82,10 @@ void DPDropUnwantedSpares(void);
 void DPUpdateSpareTimer(void);
 DPCommandBarOverlay *DPSpareIn(NSWindow *window);
 void DPCloseLeftSpares(NSArray<NSString *> *tabIDs, BOOL last);
+void DPCloseLeftOpenTabs(NSArray<NSString *> *tabIDs, BOOL last);
+void DPCloseLeftBarTabs(void);
 void DPNoteSpare(NSString *tabID, BOOL parked);
+void DPNoteOpenTab(NSString *tabID, BOOL open);
 BOOL DPAdoptSpare(NSWindow *window, NSView *page);
 void DPWantSpare(void);
 void DPNotMakingSpare(void);

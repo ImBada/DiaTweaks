@@ -300,7 +300,6 @@ static void TestRelayFilters(void) {
     CHECK([ReadExactly(relay.agent, expected.length) isEqual:expected], "an unfinished frame at the end of the stream is delivered");
     StopRelay(relay, done);
 
-    // A filter that consumes a frame, answers it, throws, or is added between frames.
     DPSetAgentFilters(@"t", ^NSData *(NSData *line, DPAgentReply reply) {
         NSString *text = [[NSString alloc] initWithData:line encoding:NSUTF8StringEncoding];
         if ([text isEqual:@"consume"]) { reply(@{ @"type": @"ACK", @"ok": @YES }); return nil; }
@@ -321,7 +320,6 @@ static void TestRelayFilters(void) {
     StopRelay(relay, done);
     DPSetAgentFilters(@"t", nil, nil);
 
-    // The decision is made at a frame's first byte.
     relay = StartRelay(&done);
     WriteAll(relay.app, Bytes(@"raw-start "));
     CHECK([ReadExactly(relay.agent, 10) isEqual:Bytes(@"raw-start ")], "unfiltered frame start is forwarded at once");
@@ -334,7 +332,6 @@ static void TestRelayFilters(void) {
     CHECK([ReadExactly(relay.agent, 12) isEqual:Bytes(@"back to raw\n")], "removed filter returns to raw forwarding");
     StopRelay(relay, done);
 
-    // A frame beyond the limit isn't buffered or dropped: it goes through as it came.
     NSUInteger limit = DPAgentFrameLimit;
     DPAgentFrameLimit = 64;
     DPSetAgentFilters(@"t", ^NSData *(NSData *line, DPAgentReply reply) { return Upper(line, reply); }, nil);
@@ -380,7 +377,6 @@ static void TestConcurrencyAndLeaks(void) {
             StopRelay(relay, done);
         });
     }
-    // Filters come and go while those connections run.
     DPAgentFilter identity = ^NSData *(NSData *line, DPAgentReply reply) { return line; };
     for (int flip = 0; flip < 400; flip++) {
         DPSetAgentFilters(@"u", flip % 2 ? identity : nil, nil);
@@ -560,7 +556,6 @@ static void TestConcurrentConnections(void) {
     WriteAll(third, Bytes(@"more\n"));
     CHECK([ReadExactly(third, 5) isEqual:Bytes(@"MORE\n")], "the others are unaffected");
 
-    // The agent going away ends every open connection and then removes the private folder.
     StopProcess(agent);
     char byte;
     CHECK(read(first, &byte, 1) <= 0 && read(third, &byte, 1) <= 0 && read(fourth, &byte, 1) <= 0, "open connections end with the agent");

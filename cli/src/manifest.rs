@@ -1,9 +1,9 @@
-use std::{fs, io, path::Path};
+use std::{collections::HashSet, fmt::Write, fs, io, path::Path};
 
 use anyhow::{anyhow, bail, Context, Result};
 use serde::Deserialize;
 
-use crate::prefs::Prefs;
+use crate::{local::LocalState, prefs::Prefs};
 
 #[derive(Deserialize)]
 pub struct Manifest {
@@ -11,7 +11,7 @@ pub struct Manifest {
     pub patches: Vec<Patch>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct Patch {
     pub key: String,
@@ -24,6 +24,8 @@ pub struct Patch {
     pub covered_by: Option<String>,
     #[serde(default)]
     pub relaunch: bool,
+    #[serde(default)]
+    pub local: bool,
 }
 
 impl Manifest {
@@ -67,51 +69,87 @@ impl Manifest {
                 );
             }
         }
-        for index in 0..manifest.patches.len() {
-            let mut seen = vec![false; manifest.patches.len()];
-            let mut cursor = index;
-            while let Some(required) = manifest.requirement(cursor) {
-                if seen[required] || required == index {
-                    bail!(
-                        "{} has a requirement cycle at {}. Run install.sh again.",
-                        path.display(),
-                        manifest.patches[index].key
-                    );
-                }
-                seen[cursor] = true;
-                cursor = required;
-            }
+        if let Some(index) =
+            (0..manifest.patches.len()).find(|&index| manifest.requires_cycle(index))
+        {
+            bail!(
+                "{} has a requirement cycle at {}. Run install.sh again.",
+                path.display(),
+                manifest.patches[index].key
+            );
         }
         Ok(manifest)
+    }
+
+    pub fn load_with_local(path: &Path, local: &Path) -> Result<Self> {
+        let mut manifest = Self::load(path)?;
+        if let Ok(state) = LocalState::load(local) {
+            manifest.merge_local(state.patches());
+        }
+        Ok(manifest)
+    }
+
+    /// Links from a local tweak that dangle or loop are dropped, so one broken local file can't hide the official tweaks.
+    pub fn merge_local(&mut self, local: Vec<Patch>) {
+        let mut keys: HashSet<String> =
+            self.patches.iter().map(|patch| patch.key.clone()).collect();
+        let mut accepted = Vec::new();
+        for mut patch in local {
+            if keys.insert(patch.key.clone()) {
+                patch.local = true;
+                accepted.push(patch);
+            }
+        }
+        for patch in &mut accepted {
+            for link in [
+                &mut patch.requires,
+                &mut patch.disabled_by,
+                &mut patch.covered_by,
+            ] {
+                if link.as_ref().is_some_and(|key| !keys.contains(key)) {
+                    *link = None;
+                }
+            }
+        }
+        let base = self.patches.len();
+        self.patches.extend(accepted);
+        for index in base..self.patches.len() {
+            if self.requires_cycle(index) {
+                self.patches[index].requires = None;
+            }
+        }
+    }
+
+    fn requires_cycle(&self, index: usize) -> bool {
+        let mut cursor = index;
+        for _ in 0..self.patches.len() {
+            match self.requirement(cursor) {
+                Some(required) => cursor = required,
+                None => return false,
+            }
+        }
+        true
     }
 
     pub fn index(&self, key: &str) -> Option<usize> {
         self.patches.iter().position(|patch| patch.key == key)
     }
 
+    fn linked(&self, key: &Option<String>) -> Option<usize> {
+        key.as_deref().and_then(|key| self.index(key))
+    }
+
     pub fn requirement(&self, index: usize) -> Option<usize> {
-        self.patches[index]
-            .requires
-            .as_deref()
-            .and_then(|key| self.index(key))
+        self.linked(&self.patches[index].requires)
     }
 
-    pub fn disabler(&self, index: usize) -> Option<usize> {
-        self.patches[index]
-            .disabled_by
-            .as_deref()
-            .and_then(|key| self.index(key))
-    }
-
-    pub fn cover(&self, index: usize) -> Option<usize> {
-        self.patches[index]
-            .covered_by
-            .as_deref()
-            .and_then(|key| self.index(key))
+    fn disabler(&self, index: usize) -> Option<usize> {
+        self.linked(&self.patches[index].disabled_by)
     }
 
     pub fn covered_by(&self, index: usize, state: &[bool]) -> Option<usize> {
-        self.cover(index).filter(|&cover| state[cover])
+        self.linked(&self.patches[index].covered_by)
+            .filter(|&cover| state[cover])
     }
 
     pub fn hidden_by(&self, index: usize, state: &[bool]) -> Option<usize> {
@@ -125,6 +163,40 @@ impl Manifest {
 
     pub fn title(&self, index: usize) -> &str {
         &self.patches[index].title
+    }
+
+    pub fn label(&self, index: usize, state: &[bool]) -> String {
+        let patch = &self.patches[index];
+        let mut label = patch.title.clone();
+        if patch.local {
+            label.push_str(" (local)");
+        }
+        for note in self.annotations(index, state) {
+            let _ = write!(label, " ({note})");
+        }
+        label
+    }
+
+    pub fn annotations(&self, index: usize, state: &[bool]) -> Vec<String> {
+        let mut notes = Vec::new();
+        if let Some(required) = self
+            .requirement(index)
+            .filter(|&required| state[index] && !state[required])
+        {
+            notes.push(format!(
+                "does nothing while {} is off",
+                self.title(required)
+            ));
+        }
+        if let Some(cover) = self.covered_by(index, state) {
+            notes.push(format!("{} hides this too", self.title(cover)));
+        } else if let Some(disabler) = self.hidden_by(index, state) {
+            notes.push(format!(
+                "no difference while {} is on",
+                self.title(disabler)
+            ));
+        }
+        notes
     }
 
     pub fn state(&self, prefs: &Prefs) -> Vec<bool> {
@@ -186,15 +258,20 @@ fn is_close(wanted: &str, candidate: &str) -> bool {
 }
 
 #[cfg(test)]
+pub fn load_json(json: &str) -> Result<Manifest> {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("patches.json");
+    fs::write(&path, json).unwrap();
+    Manifest::load(&path)
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn rejects_requirement_cycles() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("patches.json");
-        fs::write(
-            &path,
+        let loaded = load_json(
             r#"{
                 "version": 1,
                 "patches": [
@@ -202,17 +279,13 @@ mod tests {
                     {"key": "b", "title": "B", "detail": "B", "defaultOn": false, "requires": "a", "disabledBy": null}
                 ]
             }"#,
-        )
-        .unwrap();
-        assert!(Manifest::load(&path).is_err());
+        );
+        assert!(loaded.is_err());
     }
 
     #[test]
     fn resolves_by_key_and_title_and_suggests() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("patches.json");
-        fs::write(
-            &path,
+        let manifest = load_json(
             r#"{
                 "version": 1,
                 "patches": [
@@ -222,14 +295,16 @@ mod tests {
             }"#,
         )
         .unwrap();
-        let manifest = Manifest::load(&path).unwrap();
         assert_eq!(
             manifest
                 .resolve(&["hide-toolbar".into(), "Show Address Field".into()])
                 .unwrap(),
             vec![0, 1]
         );
-        let err = manifest.resolve(&["hidetoolba".into()]).unwrap_err().to_string();
+        let err = manifest
+            .resolve(&["hidetoolba".into()])
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("hideToolbar"));
         assert_eq!(manifest.hidden_by(1, &[true, false]), Some(0));
         assert_eq!(manifest.hidden_by(1, &[false, true]), None);
@@ -237,10 +312,7 @@ mod tests {
 
     #[test]
     fn loads_and_validates_covered_by() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("patches.json");
-        fs::write(
-            &path,
+        let manifest = load_json(
             r#"{
                 "version": 1,
                 "patches": [
@@ -250,20 +322,17 @@ mod tests {
             }"#,
         )
         .unwrap();
-        let manifest = Manifest::load(&path).unwrap();
         assert_eq!(manifest.covered_by(1, &[true, false]), Some(0));
         assert_eq!(manifest.covered_by(1, &[false, true]), None);
 
-        fs::write(
-            &path,
+        let dangling = load_json(
             r#"{
                 "version": 1,
                 "patches": [
                     {"key": "hideChatButton", "title": "Hide Chat Button", "detail": "C", "defaultOn": false, "requires": null, "disabledBy": null, "coveredBy": "missing"}
                 ]
             }"#,
-        )
-        .unwrap();
-        assert!(Manifest::load(&path).is_err());
+        );
+        assert!(dangling.is_err());
     }
 }

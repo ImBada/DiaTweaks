@@ -9,8 +9,7 @@ static NSString *DPSocketPath(NSDictionary *environment) {
     NSString *prefix = @"/tmp/dia-agent.server.";
     if (![path isKindOfClass:NSString.class] || ![path hasPrefix:prefix] || ![path hasSuffix:@".sock"] ||
         strlen(path.fileSystemRepresentation) >= sizeof(((struct sockaddr_un *)0)->sun_path)) return nil;
-    // Dia names the socket after the profile, and a profile name can hold spaces and other punctuation
-    // ("Profile 2"), so only a path separator would let the name leave /tmp.
+    // Profile names hold spaces ("Profile 2"); only a path separator could leave /tmp.
     NSString *name = [path substringFromIndex:prefix.length];
     return [name rangeOfString:@"/"].location == NSNotFound ? path : nil;
 }

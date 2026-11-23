@@ -8,6 +8,7 @@ extern DPPatch DPPasskeys;
 static NSString *const kExtensionID = @"ljonmeeapeagnkmjklinbocjbjepecce";
 
 static NSString *const kFiles[] = { @"manifest.json", @"page.js", @"bridge.js", @"worker.js" };
+static const int kFileCount = sizeof kFiles / sizeof *kFiles;
 
 static NSString *const kHostFile = @"com.diapatches.passkeys.json";
 
@@ -26,11 +27,20 @@ static BOOL DPWrite(NSData *data, NSString *path) {
     return NO;
 }
 
+static void DPRemoveHostManifests(NSString *keep) {
+    NSFileManager *fm = NSFileManager.defaultManager;
+    for (NSString *dir in DPHostFolders()) {
+        if ([dir isEqualToString:keep]) continue;
+        NSString *path = [dir stringByAppendingPathComponent:kHostFile];
+        if ([fm fileExistsAtPath:path]) [fm removeItemAtPath:path error:nil];
+    }
+}
+
 static BOOL DPSetUpPasskeys(void) {
     gWriteError = nil;
     gWritePath = nil;
     NSString *folder = DPExtensionFolder();
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < kFileCount; i++) {
         NSString *section = [@"__pk_" stringByAppendingString:kFiles[i].stringByDeletingPathExtension];
         unsigned long size = 0;
         uint8_t *bytes = getsectiondata(&_mh_dylib_header, "__TEXT", section.UTF8String, &size);
@@ -53,12 +63,7 @@ static BOOL DPSetUpPasskeys(void) {
     if (!DPWrite([NSJSONSerialization dataWithJSONObject:manifest options:NSJSONWritingPrettyPrinted error:nil],
                  [hostFolder stringByAppendingPathComponent:kHostFile]))
         return NO;
-    NSFileManager *fm = NSFileManager.defaultManager;
-    for (NSString *dir in DPHostFolders()) {
-        if ([dir isEqualToString:hostFolder]) continue;
-        NSString *stale = [dir stringByAppendingPathComponent:kHostFile];
-        if ([fm fileExistsAtPath:stale]) [fm removeItemAtPath:stale error:nil];
-    }
+    DPRemoveHostManifests(hostFolder);
     return YES;
 }
 
@@ -66,7 +71,7 @@ static NSString *DPPasskeysProblem(DPPatch *patch) {
     NSString *folder = DPExtensionFolder();
     if (gWriteError) return DPWriteProblem(gWritePath ?: folder, gWriteError);
     NSFileManager *fm = NSFileManager.defaultManager;
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < kFileCount; i++) {
         NSString *file = [folder stringByAppendingPathComponent:kFiles[i]];
         if (![fm fileExistsAtPath:file]) return [NSString stringWithFormat:@"%@ is missing.", file];
     }
@@ -92,12 +97,8 @@ static void DPShowHelper(NSNotification *note) {
 static void DPInstallPasskeys(void) {
     NSString *folder = DPExtensionFolder();
     if (!DPPasskeys.on) {
-        NSFileManager *fm = NSFileManager.defaultManager;
-        [fm removeItemAtPath:folder error:nil];
-        for (NSString *dir in DPHostFolders()) {
-            NSString *path = [dir stringByAppendingPathComponent:kHostFile];
-            if ([fm fileExistsAtPath:path]) [fm removeItemAtPath:path error:nil];
-        }
+        [NSFileManager.defaultManager removeItemAtPath:folder error:nil];
+        DPRemoveHostManifests(nil);
         DPDropExtension(folder);
         return;
     }
@@ -126,6 +127,7 @@ DP_PATCH(DPPasskeys) {
     .symbol = @"person.badge.key.fill",
     .tint = @"systemGreenColor",
     .section = @"Passwords",
+    .group = @"passwordManagers",
     .relaunch = YES,
     .install = DPInstallPasskeys,
     .apply = DPApplyPasskeys,

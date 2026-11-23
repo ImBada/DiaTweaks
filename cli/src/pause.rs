@@ -3,7 +3,7 @@ use std::{fs, io};
 use anyhow::{Context, Result};
 
 use crate::{
-    dia::{self, SafeMode},
+    dia,
     env::Env,
     lock,
     manifest::Manifest,
@@ -37,9 +37,7 @@ pub fn set(env: &Env, ui: &Ui, paused: bool) -> Result<()> {
         }
     }
     let state = manifest.state(&Prefs::new(&env.domain));
-    let app_icon_on = manifest
-        .index("appIcon")
-        .is_some_and(|index| state[index]);
+    let app_icon_on = manifest.index("appIcon").is_some_and(|index| state[index]);
     if app_icon_on {
         dia::sync_icon(env);
     }
@@ -48,9 +46,8 @@ pub fn set(env: &Env, ui: &Ui, paused: bool) -> Result<()> {
     if !paused {
         ui.success("Tweaks are back on.");
         if app_icon_on
-            && !is_live_dia(env)
-            && dia::is_patched(&env.app)
-            && dia::safe_mode(&env.support) == SafeMode::Off
+            && !dia::is_live(env)
+            && dia::tweaks_active(env)
             && !dia::has_linked_icon_catalog(&env.app)
         {
             ui.warn(
@@ -69,7 +66,7 @@ pub fn set(env: &Env, ui: &Ui, paused: bool) -> Result<()> {
             "Paused {count} tweaks. Their settings are kept."
         )),
     }
-    let waiting: Vec<&str> = if is_live_dia(env) {
+    let waiting: Vec<&str> = if dia::is_live(env) {
         on.iter()
             .filter(|&&index| manifest.patches[index].relaunch)
             .map(|&index| manifest.title(index))
@@ -89,15 +86,9 @@ pub fn set(env: &Env, ui: &Ui, paused: bool) -> Result<()> {
     Ok(())
 }
 
-fn is_live_dia(env: &Env) -> bool {
-    dia::is_running(&env.app)
-        && dia::is_patched(&env.app)
-        && dia::safe_mode(&env.support) == SafeMode::Off
-}
-
 // A Dia launched while paused has no hooks installed, so resuming always needs a relaunch.
 fn where_resumed(env: &Env) -> String {
-    if is_live_dia(env) {
+    if dia::is_live(env) {
         return "Relaunch Dia to finish.".into();
     }
     tweaks::where_it_shows(env)

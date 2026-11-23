@@ -8,3 +8,5 @@ void DPBeginLaunch(void);
 void DPLeaveSafeMode(void);
 BOOL DPPauseSaved(void);
 void DPSetPaused(BOOL paused);
+BOOL DPLocalSafeModeOff(void);
+void DPSetLocalSafeModeOff(BOOL off);

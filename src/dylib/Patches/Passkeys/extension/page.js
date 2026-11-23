@@ -2,8 +2,7 @@
   const credentials = navigator.credentials;
   const proto = typeof CredentialsContainer === 'function' ? CredentialsContainer.prototype : null;
   if (!credentials || !proto || typeof PublicKeyCredential !== 'function') return;
-  // A password manager that keeps its own passkeys, such as Proton Pass, got here first: its prompt is the one wanted.
-  // One that comes after wraps this instead, and hands Apple Passwords what it doesn't take.
+  // A manager with its own passkeys, such as Proton Pass, that got here first keeps its prompt; one that comes later wraps this.
   const native = (fn) => typeof fn === 'function' && /\{\s*\[native code\]\s*\}/.test(Function.prototype.toString.call(fn));
   const untouched = (name) => {
     const descriptor = Object.getOwnPropertyDescriptor(proto, name);

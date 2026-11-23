@@ -17,9 +17,13 @@ static BOOL DPIsFollowerTag(NSInteger tag) {
     return tag >= DPUngroupMenuTag && tag <= DPGroupSelectedMenuTag;
 }
 
+static BOOL DPIsCommandTag(NSInteger tag) {
+    return tag >= DPGroupMenuTag && tag <= DPGroupSelectedMenuTag;
+}
+
 static BOOL DPHasGroupOrFollower(NSMenu *menu) {
     for (NSMenuItem *each in menu.itemArray)
-        if (each.tag >= DPGroupMenuTag && each.tag <= DPGroupSelectedMenuTag) return YES;
+        if (DPIsCommandTag(each.tag)) return YES;
     return NO;
 }
 
@@ -59,7 +63,7 @@ static NSInteger DPFollowersInPlace(NSMenu *menu, NSInteger index) {
 static void DPSyncMenuVisibility(NSMenu *menu) {
     BOOL hidden = !DPGroupTabs.on;
     for (NSMenuItem *item in menu.itemArray)
-        if (item.tag >= DPGroupMenuTag && item.tag <= DPGroupSelectedMenuTag) item.hidden = hidden;
+        if (DPIsCommandTag(item.tag)) item.hidden = hidden;
 }
 
 // Dia removes the tagged copies it added, so keep the last item with a tag: dropping Dia's copy crashes Dia.
@@ -166,8 +170,7 @@ static void DPInstallMenuBarItem(void) {
 }
 
 static void DPMenuAdded(NSMenu *menu, NSMenuItem *item) {
-    if (!DPGroupTabs.on && !DPHasGroupOrFollower(menu)) return;
-    if (DPIsNewGroupTitle(item.title) || DPHasGroupOrFollower(menu)) DPPlaceGroupItem(menu);
+    if ((DPGroupTabs.on && DPIsNewGroupTitle(item.title)) || DPHasGroupOrFollower(menu)) DPPlaceGroupItem(menu);
 }
 
 static void DPMenu_addItem(NSMenu *self, SEL _cmd, NSMenuItem *item) {

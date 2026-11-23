@@ -30,7 +30,7 @@ DP_PATCH(DPPullRequestRepo) {
     .key = @"pullRequestRepo",
     .order = 79,
     .title = @"Show Repo on Pull Requests",
-    .detail = @"In GitHub live folders, show each pull request's repository, number and state under its title instead of the author, with the review status on a line below (beside it with tabs at the top).",
+    .detail = @"In GitHub live folders, show each pull request’s repository, number and state under its title instead of the author, with the review status on a line below (beside it with tabs at the top).",
     .symbol = @"arrow.triangle.pull",
     .tint = @"systemTealColor",
     .section = @"Sidebar & Tab Bar",

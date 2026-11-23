@@ -46,7 +46,7 @@ static BOOL DPAppKitAnswer(NSWindow *window, SEL sel) {
     return ((BOOL (*)(id, SEL))DPDiaIMP(NSWindow.class, sel))(window, sel);
 }
 
-// Autoreleased so the unshown probe window is freed before other checks enumerate NSApp.windows.
+// The pool frees the unshown probe window before other checks enumerate NSApp.windows.
 static NSString *DPProbeProblem(BOOL on) {
     @autoreleasepool {
         NSWindow *probe = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 100, 100) styleMask:NSWindowStyleMaskTitled

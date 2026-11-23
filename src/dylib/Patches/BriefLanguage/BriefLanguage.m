@@ -3,7 +3,7 @@
 
 extern DPPatch DPBriefLanguage;
 
-// Shared with diapatch's BriefLanguage.m.
+// Must match diapatch's BriefLanguage.m.
 static NSString *const DPBriefHeading = @"## Output language: ";
 static BOOL DPBuilding, DPStale, DPBuilt;
 
@@ -62,12 +62,11 @@ static void DPRebuild(void) {
 
 static void DPApplyBriefLanguage(DPPatch *patch) {
     if (DPTesting || !DPBriefPrompt()) return;
-    // Paused turns patches off without saving: Dia keeps the language it was built with rather than rebuilding.
+    // Pause turns patches off without saving: keep the language Dia was built with.
     if (patch->on != DPSavedOn(patch)) return;
-    // diapatch reads only saved settings, so save the language picked from macOS before it builds.
+    // diapatch reads only saved settings, so persist the macOS-derived default before building.
     NSUserDefaults *defaults = [[NSUserDefaults alloc] initWithSuiteName:@"com.diapatches"];
     if (patch->on && ![defaults stringForKey:patch->choice]) [defaults setObject:DPChoice(patch) forKey:patch->choice];
-    // Once a build is staged it has to follow every change, back to this Dia's own language too.
     if (DPBuilt || DPBuilding || !DPSame(DPWantedLanguage(), DPInstalledLanguage())) DPRebuild();
 }
 

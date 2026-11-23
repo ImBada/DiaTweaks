@@ -11,9 +11,9 @@ static BOOL DPIsPrivate(NSWindow *window) {
     return [contextID respondsToSelector:@selector(isIncognito)] && DPMsgBool(contextID, @selector(isIncognito));
 }
 
-static NSView *DPWindowGradient(NSWindow *window) {
-    return DPFindView(window.contentView.superview, ^BOOL(NSView *view) { return DPIsKind(view, DPDiaGradientView) && DPIsKind(view.superview, DPDiaWindowTint); });
-}
+static BOOL DPIsWindowGradient(NSView *view) { return DPIsKind(view, DPDiaGradientView) && DPIsKind(view.superview, DPDiaWindowTint); }
+
+static NSView *DPWindowGradient(NSWindow *window) { return DPFindView(window.contentView.superview, ^BOOL(NSView *view) { return DPIsWindowGradient(view); }); }
 
 static CAGradientLayer *DPGradientLayer(NSView *gradient) {
     for (CALayer *layer in gradient.layer.sublayers) if ([layer isKindOfClass:CAGradientLayer.class]) return (CAGradientLayer *)layer;
@@ -37,17 +37,14 @@ static void DPThemePrivate(NSView *gradient) {
     else DPSet(layer, &DPColorsKey, nil);
     NSArray *target = ours == NSNull.null ? nil : ours;
     if (layer.colors == target || [layer.colors isEqual:target]) return;
-    [CATransaction begin];
-    [CATransaction setDisableActions:YES];
-    layer.colors = target;
-    [CATransaction commit];
+    DPWithoutAnimation(^{ layer.colors = target; });
 }
 
 static void DPThemePrivateWindows(void) {
     for (NSWindow *window in NSApp.windows) {
         if (!DPIsKind(window, DPDiaWindow) || !DPIsPrivate(window)) continue;
         DPFindView(window.contentView.superview, ^BOOL(NSView *view) {
-            if (DPIsKind(view, DPDiaGradientView) && DPIsKind(view.superview, DPDiaWindowTint)) DPThemePrivate(view);
+            if (DPIsWindowGradient(view)) DPThemePrivate(view);
             return NO;
         });
     }
@@ -91,12 +88,12 @@ static void DPInstallPrivateTheme(void) {
 
 DP_PATCH(DPPrivateWindowTheme) {
     .key = @"privateWindowTheme",
-    .order = 100,
+    .order = 85,
     .title = @"Private Window Theme",
     .detail = @"Give private windows the theme of your other windows instead of Dia’s blue. The Incognito label stays. Experimental.",
     .symbol = @"theatermasks.fill",
-    .tint = @"systemBrownColor",
-    .section = @"Window",
+    .tint = @"systemRedColor",
+    .section = @"Profiles",
     .classes = DPClasses(DPDiaWindow, DPDiaWindowTint, DPDiaGradientView),
     .install = DPInstallPrivateTheme,
     .apply = DPApplyPrivateTheme,

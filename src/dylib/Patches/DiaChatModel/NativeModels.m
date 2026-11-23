@@ -41,7 +41,7 @@ static NSArray<NSString *> *DPScanChatModels(void) {
     return @[];
 }
 
-// Dia's catalog is fixed for a build, so a found list is kept. An empty one is looked for again a few times before it's trusted.
+// A found list is kept for the build; an empty one is retried a few times before it's trusted.
 NSArray<NSString *> *DPInstalledChatModels(void) {
     static NSArray<NSString *> *found;
     static NSUInteger misses;

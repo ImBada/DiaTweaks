@@ -6,6 +6,8 @@ extern NSHashTable<NSView *> *DPContainers;
 static const CACornerMask DPLeftCorners = kCALayerMinXMinYCorner | kCALayerMinXMaxYCorner;
 static const CACornerMask DPRightCorners = kCALayerMaxXMinYCorner | kCALayerMaxXMaxYCorner;
 
+static inline BOOL DPEdgeToEdgeActive(void) { return DPEdgeToEdge.on || DPEdgeToEdge.progress > 0 || DPWindowCorners.on; }
+
 NSValue *DPRequestedFrame(NSView *container);
 CGFloat DPEdgeToEdgeAmount(NSView *view);
 BOOL DPWindowFullScreen(NSWindow *window);

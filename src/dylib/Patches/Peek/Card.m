@@ -55,7 +55,6 @@ static NSRect DPPeekCardRect(NSRect area) {
     CGFloat g = self.grown;
     NSRect frame = NSMakeRect(NSMinX(card) + (NSMinX(page) - NSMinX(card)) * g, NSMinY(card) + (NSMinY(page) - NSMinY(card)) * g,
                               NSWidth(card) + (NSWidth(page) - NSWidth(card)) * g, NSHeight(card) + (NSHeight(page) - NSHeight(card)) * g);
-    // Pixel-aligned: fractional placement blurs Chromium's text.
     return [self backingAlignedRect:frame options:NSAlignAllEdgesNearest];
 }
 
@@ -65,12 +64,9 @@ static NSRect DPPeekCardRect(NSRect area) {
     self.dim.frame = self.bounds;
     self.card.frame = NSInsetRect(card, -DPPeekShadowRoom, -DPPeekShadowRoom);
     self.clip.frame = self.shade.frame = NSInsetRect(self.card.bounds, DPPeekShadowRoom, DPPeekShadowRoom);
-    [CATransaction begin];
-    [CATransaction setDisableActions:YES];
-    self.clip.layer.borderColor = [NSColor colorWithWhite:1 alpha:DPPeekEdgeAlpha * (1 - self.grown)].CGColor;
-    [CATransaction commit];
+    DPWithoutAnimation(^{ self.clip.layer.borderColor = [NSColor colorWithWhite:1 alpha:DPPeekEdgeAlpha * (1 - self.grown)].CGColor; });
     self.controls.frame = DPPeekControlsFrame(self, (NSRect){{NSMaxX(card) + 12, NSMinY(card) + 4}, self.controls.frame.size});
-    // Not animated with the sidebar slide: the page redraws at its new size at once, so it must cover both card sizes meanwhile.
+    // The page redraws at its new size at once instead of animating with the sidebar slide, so it covers both card sizes meanwhile.
     CGFloat bar = DPPeekToolbarInset(self);
     NSSize page = NSMakeSize(NSWidth(self.clip.bounds), MAX(0, NSHeight(self.clip.bounds) - bar));
     if (self.paneMoves) page = NSMakeSize(MAX(page.width, NSWidth(self.host.frame)), MAX(page.height, NSHeight(self.host.frame)));
@@ -213,7 +209,7 @@ id DPPeekPageIn(NSWindow *window) { return DPPeekCardIn(window).page; }
 
 NSArray<DPPeekCard *> *DPPeekAllCards(NSWindow *window) {
     NSMutableArray<DPPeekCard *> *cards = [NSMutableArray array];
-    for (DPPeekCard *peek in DPPeekCards.allObjects) {
+    for (DPPeekCard *peek in DPPeekCards) {
         NSWindow *owner = peek.window ?: peek.originWindow;
         if (!window || owner == window) [cards addObject:peek];
     }
@@ -250,8 +246,6 @@ DPPeekCard *DPPeekCardForOrigin(NSWindow *window, NSString *originTabID, id sour
 @implementation DPPeekBacking
 - (BOOL)wantsUpdateLayer { return YES; }
 - (void)viewDidMoveToWindow { [super viewDidMoveToWindow]; [self updateLayer]; }
-
-// Resolve inside effectiveAppearance so windowBackgroundColor isn't stuck on Light in Dark Mode.
 - (void)updateLayer {
     [self.effectiveAppearance performAsCurrentDrawingAppearance:^{ self.layer.backgroundColor = NSColor.windowBackgroundColor.CGColor; }];
 }

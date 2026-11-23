@@ -10,6 +10,8 @@ static BOOL DPIsPrivateWindow(NSWindow *window) {
     return [contextID respondsToSelector:@selector(isIncognito)] && DPMsgBool(contextID, @selector(isIncognito));
 }
 
+static BOOL DPIsTintGradient(NSView *view) { return DPIsKind(view, DPDiaGradientView) && DPIsKind(view.superview, DPDiaWindowTint); }
+
 static CAGradientLayer *DPGradientLayer(NSView *gradient) {
     for (CALayer *layer in gradient.layer.sublayers)
         if ([layer isKindOfClass:CAGradientLayer.class]) return (CAGradientLayer *)layer;
@@ -52,10 +54,7 @@ static double DPTintIntensityOf(NSView *tintView) {
 
 static BOOL DPSetLayerColors(CAGradientLayer *layer, NSArray *colors) {
     if (layer.colors == colors || [layer.colors isEqual:colors]) return NO;
-    [CATransaction begin];
-    [CATransaction setDisableActions:YES];
-    layer.colors = colors;
-    [CATransaction commit];
+    DPWithoutAnimation(^{ layer.colors = colors; });
     return YES;
 }
 
@@ -71,36 +70,38 @@ static void DPNotifyProfileColorChanged(void) {
     [NSNotificationCenter.defaultCenter postNotificationName:@"DPProfileColorDidChange" object:nil];
 }
 
+static BOOL DPRestoreGradient(NSView *gradient, CAGradientLayer *layer, NSString *spaceID) {
+    BOOL changed = NO;
+    NSString *savedSpace = DPGet(gradient, &DPOverrideSpaceKey);
+    BOOL sameSpace = !savedSpace || !spaceID || [savedSpace isEqualToString:spaceID];
+    DPSet(gradient, &DPOverrideSpaceKey, nil);
+    if (DPGet(layer, &DPColorsKey)) {
+        id dia = DPDiaValue(layer, &DPColorsKey, layer.colors ?: NSNull.null);
+        BOOL stillOurs = !sameSpace && [((NSArray *)DPGet(layer, &DPColorsKey))[1] isEqual:(layer.colors ?: NSNull.null)];
+        DPSet(layer, &DPColorsKey, nil);
+        if (sameSpace || stillOurs) changed = DPSetLayerColors(layer, dia == NSNull.null ? nil : dia);
+        if (stillOurs) {
+            gradient.needsDisplay = YES;
+            gradient.superview.needsDisplay = YES;
+        }
+    }
+    if (DPGet(gradient, &DPAlphaKey)) {
+        NSNumber *diaAlpha = DPDiaValue(gradient, &DPAlphaKey, @(gradient.alphaValue));
+        DPSet(gradient, &DPAlphaKey, nil);
+        // Only restore Neutral's 0 alpha on the same space; switching spaces must not wipe another space's tint.
+        if (sameSpace) gradient.alphaValue = diaAlpha.doubleValue;
+        else gradient.superview.needsDisplay = YES;
+    }
+    return changed;
+}
+
 static BOOL DPApplyGradient(NSView *gradient) {
     if (!DPIsKind(gradient.superview, DPDiaWindowTint)) return NO;
     CAGradientLayer *layer = DPGradientLayer(gradient);
     if (!layer) return NO;
     NSString *spaceID = DPProfileColorPicker.on ? DPWindowSpaceID(gradient.window) : nil;
     NSColor *custom = DPColorFromHex(DPProfileHexForSpace(spaceID), NULL);
-    if (!custom) {
-        BOOL changed = NO;
-        NSString *savedSpace = DPGet(gradient, &DPOverrideSpaceKey);
-        BOOL sameSpace = !savedSpace || !spaceID || [savedSpace isEqualToString:spaceID];
-        DPSet(gradient, &DPOverrideSpaceKey, nil);
-        if (DPGet(layer, &DPColorsKey)) {
-            id dia = DPDiaValue(layer, &DPColorsKey, layer.colors ?: NSNull.null);
-            BOOL stillOurs = !sameSpace && [((NSArray *)DPGet(layer, &DPColorsKey))[1] isEqual:(layer.colors ?: NSNull.null)];
-            DPSet(layer, &DPColorsKey, nil);
-            if (sameSpace || stillOurs) changed = DPSetLayerColors(layer, dia == NSNull.null ? nil : dia);
-            if (stillOurs) {
-                gradient.needsDisplay = YES;
-                gradient.superview.needsDisplay = YES;
-            }
-        }
-        if (DPGet(gradient, &DPAlphaKey)) {
-            NSNumber *diaAlpha = DPDiaValue(gradient, &DPAlphaKey, @(gradient.alphaValue));
-            DPSet(gradient, &DPAlphaKey, nil);
-            // Only restore Neutral's 0 alpha on the same space; switching spaces must not wipe another space's tint.
-            if (sameSpace) gradient.alphaValue = diaAlpha.doubleValue;
-            else gradient.superview.needsDisplay = YES;
-        }
-        return changed;
-    }
+    if (!custom) return DPRestoreGradient(gradient, layer, spaceID);
     BOOL dark = [[gradient.effectiveAppearance bestMatchFromAppearancesWithNames:@[ NSAppearanceNameAqua, NSAppearanceNameDarkAqua ]]
         isEqual:NSAppearanceNameDarkAqua];
     double intensity = DPTintIntensityOf(gradient.superview);
@@ -128,7 +129,7 @@ static BOOL DPApplyWindowProfileColor(NSWindow *window) {
     if (!root) return NO;
     __block BOOL changed = NO;
     DPFindView(root, ^BOOL(NSView *view) {
-        if (DPIsKind(view, DPDiaGradientView) && DPIsKind(view.superview, DPDiaWindowTint)) changed = DPApplyGradient(view) || changed;
+        if (DPIsTintGradient(view)) changed = DPApplyGradient(view) || changed;
         return NO;
     });
     return changed;
@@ -149,7 +150,7 @@ void DPRefreshProfileColors(void) {
     if (changed) DPNotifyProfileColorChanged();
     for (NSWindow *window in privateWindows) {
         DPFindView(window.contentView.superview ?: window.contentView, ^BOOL(NSView *view) {
-            if (DPIsKind(view, DPDiaGradientView) && DPIsKind(view.superview, DPDiaWindowTint)) view.needsDisplay = YES;
+            if (DPIsTintGradient(view)) view.needsDisplay = YES;
             return NO;
         });
     }
@@ -219,7 +220,7 @@ NSString *DPVerifyProfileColorTint(DPPatch *patch) {
         BOOL hasCustom = patch->on && DPProfileHexForSpace(DPWindowSpaceID(window)) != nil;
         __block NSString *problem = nil;
         DPFindView(window.contentView.superview ?: window.contentView, ^BOOL(NSView *view) {
-            if (!DPIsKind(view, DPDiaGradientView) || !DPIsKind(view.superview, DPDiaWindowTint)) return NO;
+            if (!DPIsTintGradient(view)) return NO;
             CAGradientLayer *layer = DPGradientLayer(view);
             if ((layer && DPGet(layer, &DPColorsKey) != nil) != hasCustom) {
                 problem = hasCustom ? @"window missed custom profile color" : @"custom profile color stayed applied";

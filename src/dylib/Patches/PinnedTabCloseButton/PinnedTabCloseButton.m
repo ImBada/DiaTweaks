@@ -85,12 +85,13 @@ static void DPInstallPinnedTabCloseButton(void) {
 
 DP_PATCH(DPPinnedTabCloseButton) {
     .key = @"pinnedTabCloseButton",
-    .order = 86,
-    .section = @"Tabs",
+    .order = 83,
+    .section = @"Sidebar & Tab Bar",
+    .group = @"pinnedTabs",
     .title = @"Close Button on Pinned Tabs",
     .detail = @"Show the close button when you point at a pinned tab outside a folder, as Dia does for tabs in a pinned folder.",
     .symbol = @"xmark.circle.fill",
-    .tint = @"systemPinkColor",
+    .tint = @"systemTealColor",
     .classes = DPClasses(DPDiaTabView, DPDiaHoverTracker),
     .install = DPInstallPinnedTabCloseButton,
     .apply = DPApplyPinnedTabCloseButton,

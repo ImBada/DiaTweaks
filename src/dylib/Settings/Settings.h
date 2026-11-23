@@ -16,6 +16,9 @@ NSView *DPIconTile(NSString *symbol, NSColor *color);
 NSView *DPIconTileOfSize(NSString *symbol, NSColor *color, CGFloat size);
 NSImageView *DPSymbol(NSString *symbols, CGFloat size, NSColor *color);
 NSStackView *DPColumn(NSArray<NSView *> *views, CGFloat spacing);
+NSStackView *DPHeading(NSString *symbol, NSString *tint, NSArray<NSView *> *lines);
+NSStackView *DPDisclosure(NSView *leading);
+NSTextField *DPHiddenNote(void);
 void DPFillStack(NSStackView *stack, NSArray<NSView *> *views);
 
 @interface DPFlippedView : NSView
@@ -33,6 +36,8 @@ void DPFillStack(NSStackView *stack, NSArray<NSView *> *views);
 @end
 
 void DPForEachOption(DPPatch *patch, void (^body)(DPPatch *option));
+BOOL DPShownOn(DPPatch *patch);
+NSString *DPActiveSummary(DPPatch *patch);
 NSString *DPWhyDisabled(DPPatch *patch);
 NSString *DPWhyHidden(DPPatch *patch);
 NSString *DPWhyHiddenBy(DPPatch *disabler);
@@ -41,13 +46,26 @@ NSArray<NSString *> *DPRelaunchingOnPause(void);
 void DPSyncPauseRow(NSTextField *label, NSButton *button);
 void DPSetTweaksPaused(BOOL paused, NSWindow *window);
 
+typedef struct DPFolderSpec {
+    __unsafe_unretained NSString *key, *title, *detail, *symbol, *tint, *section;
+} DPFolderSpec;
+
+const DPFolderSpec *DPFolderSpecNamed(NSString *key);
+NSArray<NSValue *> *DPFolderMembers(NSString *key);
+NSColor *DPTintColor(NSString *tint);
+
 @interface DPPreviewView : DPFillView
 - (instancetype)initWithKey:(NSString *)key;
-+ (void)preload;
 @end
 
 @interface DPPageView : NSStackView
 - (instancetype)initWithPatch:(DPPatch *)patch;
+- (void)sync;
+@end
+
+@interface DPFolderView : NSStackView
+- (instancetype)initWithFolder:(const DPFolderSpec *)folder;
+@property (nonatomic, copy) void (^open)(NSString *title, NSView *page);
 - (void)sync;
 @end
 

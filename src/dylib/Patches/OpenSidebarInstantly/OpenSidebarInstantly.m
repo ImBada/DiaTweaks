@@ -7,9 +7,8 @@
 
 extern DPPatch DPOpenSidebarInstantly;
 
-// WindowController opens a hidden sidebar or top tab bar only once an edge region reaches .hasLingered (2) or
-// .hasStopped (3). Lowering those two hidden-state edge checks to > .none (0) opens on first touch without touching
-// ARCUI.MouseListener's shared 0.08 s wait, which also drives pinned-tab cards and folder popovers.
+// Dia opens a hidden sidebar or top bar once an edge reaches .hasLingered (2) or .hasStopped (3); lowering both checks to > .none (0)
+// skips the wait without touching ARCUI.MouseListener's shared 0.08 s delay, which also drives pinned-tab cards and folder popovers.
 static const uint32_t DPWaitInner = 0x7100051f;
 static const uint32_t DPInstantInner = 0x7100011f;
 static const uint32_t DPWaitOuter = 0x7a419922;
@@ -129,17 +128,15 @@ static void DPInstallOpenSidebarInstantly(void) {
 static NSString *DPVerifyOpenSidebarInstantly(DPPatch *patch) {
     if (!patch->on && !DPSite) return nil;
     if (!DPSite) return @"the sidebar hover check isn't where it was";
-    BOOL fine = patch->on
-        ? (DPSite[0] == DPInstantInner && DPSite[1] == DPInstantOuter)
-        : (DPSite[0] == DPWaitInner && DPSite[1] == DPWaitOuter);
-    return fine ? nil : patch->on ? @"the wait is still there" : @"the wait is gone";
+    if (patch->on) return DPSite[0] == DPInstantInner && DPSite[1] == DPInstantOuter ? nil : @"the wait is still there";
+    return DPSite[0] == DPWaitInner && DPSite[1] == DPWaitOuter ? nil : @"the wait is gone";
 }
 
 DP_PATCH(DPOpenSidebarInstantly) {
     .key = @"openSidebarInstantly",
     .order = 116,
     .title = @"Open Sidebar Instantly",
-    .detail = @"With the sidebar hidden, open it the moment the pointer reaches the left edge instead of after Dia's short wait. A hidden tab bar at the top shows sooner too. Dia's animation and how it closes stay as they are. May need an update after some Dia releases.",
+    .detail = @"With the sidebar hidden, open it the moment the pointer reaches the left edge instead of after Dia’s short wait. A hidden tab bar at the top shows sooner too. Dia’s animation and how it closes stay as they are. May need an update after some Dia releases.",
     .symbol = @"arrow.right.to.line.circle.fill arrow.right.to.line",
     .tint = @"systemTealColor",
     .section = @"Sidebar & Tab Bar",

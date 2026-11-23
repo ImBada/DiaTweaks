@@ -3,11 +3,14 @@
 
 extern DPPatch DPHideHistorySuggestions;
 
+static NSString *DPStringValue(id object, NSString *key) {
+    id value = DPValueForKey(object, key);
+    return [value isKindOfClass:NSString.class] ? value : nil;
+}
+
 static BOOL DPFromHistory(id match) {
     if ([DPValueForKey(match, @"hasTabMatch") boolValue]) return NO;
-    id rawProvider = DPValueForKey(match, @"providerType"), rawType = DPValueForKey(match, @"matchType");
-    NSString *provider = [rawProvider isKindOfClass:NSString.class] ? rawProvider : nil;
-    NSString *type = [rawType isKindOfClass:NSString.class] ? rawType : nil;
+    NSString *provider = DPStringValue(match, @"providerType"), *type = DPStringValue(match, @"matchType");
     // Kept: without url-what-you-typed, Return searches instead of navigating.
     if ([type isEqualToString:@"url-what-you-typed"]) return NO;
     return [provider hasPrefix:@"History"] || [provider isEqualToString:@"Shortcuts"] || [type hasPrefix:@"history-"] || [type isEqualToString:@"search-history"];
@@ -48,7 +51,7 @@ DP_PATCH(DPHideHistorySuggestions) {
     .key = @"hideHistorySuggestions",
     .order = 92,
     .title = @"Hide History Suggestions",
-    .detail = @"Leave pages you've visited out of the suggestions in the address field and command bar. Searches and open tabs still show.",
+    .detail = @"Leave pages you’ve visited out of the suggestions in the address field and command bar. Searches and open tabs still show.",
     .symbol = @"clock.badge.xmark.fill clock.fill",
     .tint = @"systemOrangeColor",
     .section = @"Command Bar",

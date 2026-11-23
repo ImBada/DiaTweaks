@@ -6,6 +6,13 @@ NSNotificationName const DPUpdatesDidChangeNotification = @"DPUpdatesDidChange";
 
 NSString *DPPartName(NSString *part) { return [part isEqual:DPDia] ? @"Dia" : @"DiaTweaks"; }
 
+static NSArray<NSString *> *DPParts(void) {
+    static NSArray<NSString *> *parts;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ parts = @[ DPDia, DPTweaks ]; });
+    return parts;
+}
+
 static NSString *DPSupport(NSString *name) {
     return [DPAppSupport(@"DiaPatches") stringByAppendingPathComponent:name];
 }
@@ -131,15 +138,16 @@ void DPHandOffAndQuit(NSArray<NSString *> *args) {
     [self changed];
     DPRunCLI(@[@"check", @"--json"], ^(NSString *output) {
         id raw = output ? [NSJSONSerialization JSONObjectWithData:[output dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil] : nil;
-        NSMutableDictionary *parsed = [raw isKindOfClass:NSDictionary.class] ? [NSMutableDictionary new] : nil;
-        if (parsed) {
-            for (NSString *part in @[DPDia, DPTweaks]) {
-                id entry = ((NSDictionary *)raw)[part];
-                if ([entry isKindOfClass:NSDictionary.class]) parsed[part] = entry;
+        NSMutableDictionary *parsed = nil;
+        if ([raw isKindOfClass:NSDictionary.class]) {
+            parsed = [NSMutableDictionary new];
+            for (NSString *part in DPParts()) {
+                NSDictionary *entry = DPUpdateEntry(raw, part);
+                if (entry) parsed[part] = entry;
             }
         }
         self->_found = parsed;
-        for (NSString *part in @[DPDia, DPTweaks])
+        for (NSString *part in DPParts())
             if ([self staged:part]) [self->_failed removeObjectForKey:part];
         NSString *unpatchable = DPUpdateEntry(self->_found, DPDia)[@"unpatchable"];
         if ([unpatchable isKindOfClass:NSString.class]) {
@@ -181,9 +189,10 @@ void DPHandOffAndQuit(NSArray<NSString *> *args) {
 
 - (NSString *)checkProblem {
     NSMutableArray<NSString *> *names = [NSMutableArray new];
-    for (NSString *part in @[DPDia, DPTweaks])
+    for (NSString *part in DPParts())
         if ([DPUpdateEntry(_found, part)[@"error"] isKindOfClass:NSString.class]) [names addObject:DPPartName(part)];
-    return names.count == 2 ? @"Couldn’t check for updates" : names.count ? [NSString stringWithFormat:@"Couldn’t check for %@ updates", names[0]] : nil;
+    if (names.count == 2) return @"Couldn’t check for updates";
+    return names.count ? [NSString stringWithFormat:@"Couldn’t check for %@ updates", names[0]] : nil;
 }
 
 - (BOOL)available:(NSString *)part { return [DPUpdateEntry(self.found, part)[@"available"] boolValue]; }
@@ -203,7 +212,8 @@ void DPHandOffAndQuit(NSArray<NSString *> *args) {
     id rawSize = DPUpdateEntry(self.found, part)[@"size"];
     double size = [rawSize isKindOfClass:NSNumber.class] ? [rawSize doubleValue] : 0;
     double got = [[NSFileManager.defaultManager attributesOfItemAtPath:file error:nil][NSFileSize] doubleValue];
-    return size > 0 && got < size ? got / size : got > 0 ? -1 : 0;
+    if (size > 0 && got < size) return got / size;
+    return got > 0 ? -1 : 0;
 }
 
 - (void)download:(NSString *)part then:(void (^)(void))done {
@@ -225,13 +235,16 @@ void DPHandOffAndQuit(NSArray<NSString *> *args) {
     });
 }
 
+- (void)stopTickingIfIdle {
+    if (_whenDownloaded.count) return;
+    [_progress invalidate];
+    _progress = nil;
+}
+
 - (void)finishDownload:(NSString *)part {
     NSArray *waiting = _whenDownloaded[part];
     [_whenDownloaded removeObjectForKey:part];
-    if (!_whenDownloaded.count) {
-        [_progress invalidate];
-        _progress = nil;
-    }
+    [self stopTickingIfIdle];
     if (_pretend[part]) {
         _pretend[part] = @"staged";
         [self changed];
@@ -269,10 +282,7 @@ void DPHandOffAndQuit(NSArray<NSString *> *args) {
     for (NSString *part in _pretend.allKeys)
         if ([_pretend[part] isKindOfClass:NSDate.class]) [_whenDownloaded removeObjectForKey:part];
     [_pretend removeAllObjects];
-    if (!_whenDownloaded.count) {
-        [_progress invalidate];
-        _progress = nil;
-    }
+    [self stopTickingIfIdle];
     [self changed];
 }
 @end
@@ -299,7 +309,7 @@ static void DPShowUpdateAlert(void) {
     DPUpdates *updates = DPUpdates.shared;
     [updates check:^{
         NSMutableArray<NSString *> *parts = [NSMutableArray new], *names = [NSMutableArray new];
-        for (NSString *part in @[DPDia, DPTweaks]) {
+        for (NSString *part in DPParts()) {
             BOOL staged = [updates staged:part];
             if (!staged && ![updates available:part]) continue;
             [parts addObject:part];
@@ -314,9 +324,10 @@ static void DPShowUpdateAlert(void) {
         alert.messageText = [[names componentsJoinedByString:@" and "] stringByAppendingString:@" available"];
         BOOL allStaged = YES;
         for (NSString *part in parts) allStaged &= [updates staged:part];
-        alert.informativeText = allStaged ? (parts.count > 1 ? @"Dia relaunches to install them." : @"Dia relaunches to install it.")
-            : parts.count > 1 ? @"Dia relaunches to install them once they’re downloaded."
-                              : @"Dia relaunches to install it once it’s downloaded.";
+        BOOL many = parts.count > 1;
+        NSString *what = many ? @"them" : @"it", *are = many ? @"they’re" : @"it’s";
+        alert.informativeText = allStaged ? [NSString stringWithFormat:@"Dia relaunches to install %@.", what]
+                                          : [NSString stringWithFormat:@"Dia relaunches to install %@ once %@ downloaded.", what, are];
         [alert addButtonWithTitle:@"Update and Relaunch"];
         [alert addButtonWithTitle:@"Later"];
         if ([alert runModal] != NSAlertFirstButtonReturn) return;
@@ -384,7 +395,7 @@ void DPInstallUpdates(void) {
         if (DPAutoLevelOf(DPDia) == DPAutoOff && DPAutoLevelOf(DPTweaks) == DPAutoOff) return;
         DPUpdates *updates = DPUpdates.shared;
         [updates check:^{
-            for (NSString *part in @[DPDia, DPTweaks])
+            for (NSString *part in DPParts())
                 if (DPAutoLevelOf(part) >= DPAutoDownload && !DPIsLocalBuild(part) && [updates available:part] && ![updates failed:part])
                     [updates download:part then:nil];
         }];

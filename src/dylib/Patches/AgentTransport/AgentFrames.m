@@ -2,7 +2,6 @@
 #import "AgentWriter.h"
 #include <sys/socket.h>
 
-// A frame this long isn't buffered for a filter: it goes through as Dia sent it.
 NSUInteger DPAgentFrameLimit = 64 * 1024 * 1024;
 
 static NSData *DPFilterFrame(NSArray *filters, NSData *frame, DPAgentReply reply) {
@@ -15,8 +14,7 @@ static NSData *DPFilterFrame(NSArray *filters, NSData *frame, DPAgentReply reply
     return output;
 }
 
-// Frames are decided at their first byte, so a filter that comes or goes mid-stream never sees half a frame.
-// With none registered for this direction a frame is forwarded as it arrives, with no buffering.
+// A frame is decided at its first byte, so a filter registered mid-stream never sees half a frame.
 static void DPForwardAgent(int source, DPAgentWriter *destination, DPAgentWriter *sender, BOOL requests) {
     NSMutableData *line = [NSMutableData new];
     DPAgentReply reply = ^(NSDictionary *message) {
@@ -66,7 +64,6 @@ static void DPForwardAgent(int source, DPAgentWriter *destination, DPAgentWriter
             part = stop;
         }
     }
-    // An unfinished frame at the end of the stream is delivered rather than lost.
     if (inFrame && !passing && line.length) [destination write:line.bytes length:line.length];
 }
 

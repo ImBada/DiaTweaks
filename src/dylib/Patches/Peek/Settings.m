@@ -32,6 +32,14 @@ BOOL DPPeekShowsToolbar(void) { return DPPeekTuned(DPPeekToolbarKey) != 0; }
 @property NSTextField *field;
 @end
 
+static double DPPeekArrowStep(SEL command) {
+    if (command == @selector(moveUp:)) return 1;
+    if (command == @selector(moveDown:)) return -1;
+    if (command == @selector(moveUpAndModifySelection:)) return 10;
+    if (command == @selector(moveDownAndModifySelection:)) return -10;
+    return 0;
+}
+
 @implementation DPPeekTuneRow
 - (void)tune:(NSControl *)control {
     double shown = [control isKindOfClass:NSSwitch.class] ? ((NSSwitch *)control).state
@@ -44,9 +52,9 @@ BOOL DPPeekShowsToolbar(void) { return DPPeekTuned(DPPeekToolbarKey) != 0; }
 }
 
 - (BOOL)control:(NSControl *)control textView:(NSTextView *)textView doCommandBySelector:(SEL)command {
-    NSNumber *step = @{ @"moveUp:" : @1, @"moveDown:" : @-1, @"moveUpAndModifySelection:" : @10, @"moveDownAndModifySelection:" : @-10 }[NSStringFromSelector(command)];
+    double step = DPPeekArrowStep(command);
     if (!step) return NO;
-    self.field.doubleValue = textView.string.doubleValue + step.doubleValue;
+    self.field.doubleValue = textView.string.doubleValue + step;
     [self tune:self.field];
     [textView selectAll:nil];
     return YES;

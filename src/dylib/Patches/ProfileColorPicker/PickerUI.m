@@ -1,7 +1,7 @@
 #import "ProfileColorPicker.h"
 
 static NSHashTable<NSViewController *> *DPColorPanes;
-static char DPRowViewsKey;
+static char DPCircleKey;
 
 NSString *DPProfilePaneSpaceID(NSViewController *pane) {
     return DPNormalizedSpaceID(DPSwiftValue(pane, @"spaceID"));
@@ -9,9 +9,14 @@ NSString *DPProfilePaneSpaceID(NSViewController *pane) {
 
 static NSViewController *DPOwningPaneForView(NSView *view) {
     if (!view) return nil;
-    for (NSViewController *pane in DPColorPanes.allObjects)
+    for (NSViewController *pane in DPColorPanes)
         if (pane.isViewLoaded && [view isDescendantOf:pane.view]) return pane;
     return nil;
+}
+
+static DPProfileColorCircle *DPCircleForView(NSView *view) {
+    NSViewController *pane = DPOwningPaneForView(view);
+    return pane ? DPGet(pane, &DPCircleKey) : nil;
 }
 
 NSString *DPAnchoredPanelSpaceID(NSWindow *window) {
@@ -20,79 +25,87 @@ NSString *DPAnchoredPanelSpaceID(NSWindow *window) {
     return pane ? DPProfilePaneSpaceID(pane) : nil;
 }
 
-static void DPRemoveColorRow(NSViewController *pane) {
-    NSArray<NSView *> *views = DPGet(pane, &DPRowViewsKey);
-    for (NSView *view in views) {
-        if ([view isKindOfClass:DPProfileColorRow.class]) [(DPProfileColorRow *)view prepareForRemoval];
-        [view removeFromSuperview];
-    }
-    DPSet(pane, &DPRowViewsKey, nil);
+static NSStackView *DPPickerStack(NSView *picker) {
+    return (NSStackView *)DPSubview(picker, "NSStackView");
 }
 
-static void DPMountColorRow(NSViewController *pane) {
-    if (!pane || !pane.isViewLoaded) return;
-    NSView *group = DPFindView(pane.view, ^BOOL(NSView *view) { return DPIsKind(view, DPDiaSettingsFormGroup); });
-    NSStackView *rows = (NSStackView *)DPSubview(group, "NSStackView");
-    NSTextField *title = (NSTextField *)DPFindView(rows.arrangedSubviews.firstObject, ^BOOL(NSView *v) { return [v isKindOfClass:NSTextField.class]; });
-    NSString *spaceID = DPProfilePaneSpaceID(pane);
-    if (!rows || !title || !spaceID) return;
+static uint8_t DPThemeTag(NSView *button) {
+    uint8_t *theme = DPIvar(button, "theme");
+    return theme ? theme[32] : 9;
+}
 
-    NSArray<NSView *> *existing = DPGet(pane, &DPRowViewsKey);
-    if (existing.count == 2 && existing[1].superview == rows) {
-        DPProfileColorRow *row = (DPProfileColorRow *)existing[1];
-        [row switchToSpaceID:spaceID];
+static void DPSetPresetSelection(NSView *picker, BOOL suppress) {
+    uint8_t *name = DPIvar(picker, "selectedThemeName");
+    uint8_t selected = suppress || !name ? 9 : *name;
+    for (NSView *view in DPPickerStack(picker).arrangedSubviews) {
+        if (!DPIsKind(view, DPDiaThemeOption)) continue;
+        BOOL *flag = DPIvar(view, "isSelected");
+        if (flag) *flag = DPThemeTag(view) == selected;
+        view.needsDisplay = YES;
+    }
+}
+
+void DPRefreshPresetRings(NSView *picker) {
+    DPSetPresetSelection(picker, DPProfileColorPicker.on && DPCircleForView(picker).suppressesPresets);
+}
+
+static void DPRemoveCircle(NSViewController *pane) {
+    DPProfileColorCircle *circle = DPGet(pane, &DPCircleKey);
+    if (!circle) return;
+    [circle prepareForRemoval];
+    [circle removeFromSuperview];
+    DPSet(pane, &DPCircleKey, nil);
+}
+
+static void DPMountCircle(NSViewController *pane) {
+    if (!pane || !pane.isViewLoaded) return;
+    NSView *picker = DPFindView(pane.view, ^BOOL(NSView *view) { return DPIsKind(view, DPDiaThemePicker); });
+    NSStackView *stack = DPPickerStack(picker);
+    NSString *spaceID = DPProfilePaneSpaceID(pane);
+    if (!stack || !spaceID) return;
+
+    DPProfileColorCircle *circle = DPGet(pane, &DPCircleKey);
+    if (circle && circle.superview == stack) {
+        [circle switchToSpaceID:spaceID];
         return;
     }
-    if (existing) DPRemoveColorRow(pane);
+    if (circle) DPRemoveCircle(pane);
 
-    NSBox *line = [NSBox new];
-    line.boxType = NSBoxSeparator;
-    DPProfileColorRow *row = [[DPProfileColorRow alloc] initWithSpaceID:spaceID font:title.font textColor:title.textColor];
-
-    __block NSUInteger insertAt = rows.arrangedSubviews.count;
-    [rows.arrangedSubviews enumerateObjectsUsingBlock:^(NSView *sub, NSUInteger idx, BOOL *stop) {
-        if (DPFindView(sub, ^BOOL(NSView *v) { return DPIsKind(v, DPDiaThemePicker); })) {
-            insertAt = idx + 1;
-            *stop = YES;
-        }
-    }];
-    [rows insertArrangedSubview:line atIndex:insertAt];
-    [rows insertArrangedSubview:row atIndex:insertAt + 1];
+    NSNumber *option = DPValueForKey(picker, @"optionDimension");
+    CGFloat dimension = [option isKindOfClass:NSNumber.class] && option.doubleValue > 0 ? option.doubleValue : 24;
+    circle = [[DPProfileColorCircle alloc] initWithSpaceID:spaceID dimension:dimension];
+    circle.picker = picker;
+    [stack addArrangedSubview:circle];
     [NSLayoutConstraint activateConstraints:@[
-        [line.widthAnchor constraintEqualToAnchor:rows.widthAnchor],
-        [row.widthAnchor constraintEqualToAnchor:rows.widthAnchor],
+        [circle.widthAnchor constraintEqualToConstant:dimension],
+        [circle.heightAnchor constraintEqualToConstant:dimension],
     ]];
-    DPSet(pane, &DPRowViewsKey, @[ line, row ]);
+    DPSet(pane, &DPCircleKey, circle);
 }
 
 void DPSyncProfileColorUI(NSString *spaceID) {
     NSString *key = DPNormalizedSpaceID(spaceID);
     for (NSViewController *pane in DPColorPanes.allObjects) {
         if (key && ![DPProfilePaneSpaceID(pane) isEqualToString:key]) continue;
-        NSArray<NSView *> *views = DPGet(pane, &DPRowViewsKey);
-        if (views.count == 2 && [views[1] isKindOfClass:DPProfileColorRow.class]) [(DPProfileColorRow *)views[1] syncFromDefaults:YES];
+        [DPGet(pane, &DPCircleKey) syncFromDefaults];
     }
 }
 
 void DPApplyProfileColorUI(BOOL on) {
     for (NSViewController *pane in DPColorPanes.allObjects) {
-        if (on) DPMountColorRow(pane);
-        else DPRemoveColorRow(pane);
+        if (on) DPMountCircle(pane);
+        else DPRemoveCircle(pane);
     }
 }
 
 static void DPColorPane_viewDidLoad(NSViewController *self, SEL _cmd) {
     DPCallOriginal(DPColorPane_viewDidLoad, self);
     [DPColorPanes addObject:self];
-    if (DPProfileColorPicker.on) DPMountColorRow(self);
+    if (DPProfileColorPicker.on) DPMountCircle(self);
 }
 
 static void DPColorPane_viewWillDisappear(NSViewController *self, SEL _cmd) {
-    NSArray<NSView *> *views = DPGet(self, &DPRowViewsKey);
-    if (views.count == 2 && [views[1] isKindOfClass:DPProfileColorRow.class]) {
-        DPProfileColorWell *well = ((DPProfileColorRow *)views[1]).well;
-        if (well.isActive) [well deactivate];
-    }
+    [DPGet(self, &DPCircleKey) closePopover];
     DPCallOriginal(DPColorPane_viewWillDisappear, self);
 }
 
@@ -100,25 +113,29 @@ static void DPThemePicker_viewDidMoveToWindow(NSView *self, SEL _cmd) {
     DPCallOriginal(DPThemePicker_viewDidMoveToWindow, self);
     if (!DPProfileColorPicker.on || !self.window) return;
     NSViewController *pane = DPOwningPaneForView(self);
-    if (pane) DPMountColorRow(pane);
+    if (pane) DPMountCircle(pane);
+}
+
+// Dia keeps its own preset selected in the model; hiding the ring here leaves that model intact so it returns when the custom color goes.
+static void DPThemeOption_updateLayer(NSView *self, SEL _cmd) {
+    if (DPProfileColorPicker.on && DPCircleForView(self).suppressesPresets) {
+        BOOL *selected = DPIvar(self, "isSelected");
+        if (selected) *selected = NO;
+    }
+    DPCallOriginal(DPThemeOption_updateLayer, self);
 }
 
 static void DPThemePicker_themeClicked(NSView *self, SEL _cmd, id sender) {
-    BOOL openingDial = [DPSwiftValue(sender, @"isSelected") boolValue] && [DPSwiftValue(sender, @"showsEditIcon") boolValue];
-    DPCallOriginal(DPThemePicker_themeClicked, self, sender);
-    if (!DPProfileColorPicker.on || openingDial) return;
-    NSViewController *pane = DPOwningPaneForView(self);
-    NSString *spaceID = pane ? DPProfilePaneSpaceID(pane) : nil;
-    if (!spaceID) return;
-    NSArray<NSView *> *views = DPGet(pane, &DPRowViewsKey);
-    if (views.count == 2 && [views[1] isKindOfClass:DPProfileColorRow.class]) {
-        DPProfileColorWell *well = ((DPProfileColorRow *)views[1]).well;
-        if (well.isActive) [well deactivate];
+    DPProfileColorCircle *circle = DPProfileColorPicker.on ? DPCircleForView(self) : nil;
+    if (circle.suppressesPresets) {
+        [circle closePopover];
+        DPSetProfileHexForSpace(circle.spaceID, nil);
+        [circle syncFromDefaults];
+        DPSetPresetSelection(self, YES);
+        DPRefreshProfileColors();
     }
-    if (!DPSavedProfileHexForSpace(spaceID)) return;
-    DPSetProfileHexForSpace(spaceID, nil);
-    DPSyncProfileColorUI(spaceID);
-    DPRefreshProfileColors();
+    DPCallOriginal(DPThemePicker_themeClicked, self, sender);
+    DPRefreshPresetRings(self);
 }
 
 NSString *DPVerifyProfileColorUI(DPPatch *patch) {
@@ -126,9 +143,10 @@ NSString *DPVerifyProfileColorUI(DPPatch *patch) {
         return @"theme picker hook didn't install";
     for (NSViewController *pane in DPColorPanes.allObjects) {
         if (!pane.isViewLoaded || !pane.view.window.isVisible) continue;
-        NSArray<NSView *> *views = DPGet(pane, &DPRowViewsKey);
-        BOOL mounted = views.count == 2 && views[1].superview != nil;
-        if (mounted != patch->on) return patch->on ? @"custom color row is missing" : @"custom color row stayed mounted";
+        DPProfileColorCircle *circle = DPGet(pane, &DPCircleKey);
+        BOOL mounted = circle != nil && circle.superview != nil;
+        if (mounted != patch->on) return patch->on ? @"custom color circle is missing" : @"custom color circle stayed mounted";
+        if (!patch->on && circle.popoverOpen) return @"custom color popover stayed open";
     }
     return nil;
 }
@@ -139,4 +157,5 @@ void DPInstallProfileColorUI(void) {
     DPHook(DPDiaProfilePane, @selector(viewWillDisappear), (IMP)DPColorPane_viewWillDisappear);
     DPHook(DPDiaThemePicker, @selector(viewDidMoveToWindow), (IMP)DPThemePicker_viewDidMoveToWindow);
     DPHook(DPDiaThemePicker, @selector(themeClicked:), (IMP)DPThemePicker_themeClicked);
+    if (objc_getClass(DPDiaThemeOption)) DPHook(DPDiaThemeOption, @selector(updateLayer), (IMP)DPThemeOption_updateLayer);
 }

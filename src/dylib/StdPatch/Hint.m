@@ -27,12 +27,13 @@ static char DPHintKey;
         [label.bottomAnchor constraintEqualToAnchor:content.bottomAnchor constant:-8],
     ]];
     content.frame = (NSRect){NSZeroPoint, content.fittingSize};
-    self.popover = [NSPopover new];
-    self.popover.contentViewController = [NSViewController new];
-    self.popover.contentViewController.view = content;
-    self.popover.contentViewController.preferredContentSize = content.frame.size;
-    self.popover.behavior = NSPopoverBehaviorTransient;
-    [self.popover showRelativeToRect:view.bounds ofView:view preferredEdge:view.isFlipped ? NSRectEdgeMinY : NSRectEdgeMaxY];
+    NSViewController *controller = [NSViewController new];
+    controller.view = content;
+    controller.preferredContentSize = content.frame.size;
+    NSPopover *popover = self.popover = [NSPopover new];
+    popover.contentViewController = controller;
+    popover.behavior = NSPopoverBehaviorTransient;
+    [popover showRelativeToRect:view.bounds ofView:view preferredEdge:view.isFlipped ? NSRectEdgeMinY : NSRectEdgeMaxY];
 }
 
 - (void)hide {

@@ -81,6 +81,7 @@ BOOL DPProgressColorSlots(NSUInteger slots[2]) { slots[0] = 4; slots[1] = 5; ret
 #import "Patches/HideToolbar/Layout.m"
 #import "Patches/HideToolbar/Hover.m"
 #import "Patches/HideToolbar/Permission.m"
+#import "Patches/HideToolbar/KeepBookmarks.m"
 #import "Patches/HideToolbar/PlainTab.m"
 #import "Patches/HideToolbar/ProgressLine.m"
 #import "Patches/HideToolbar/ProgressColors.m"
@@ -94,7 +95,7 @@ int main(void) {
         [NSApplication sharedApplication];
         DPHideToolbar.on = NO;
         DPHideToolbar.progress = 0;
-        DPShowLoadingProgress.on = YES; // defaultOn = YES!
+        DPShowLoadingProgress.on = YES;
         DPPlainSelectedTab.on = NO;
         DPHideToolbar.install();
         DPPlainSelectedTab.install();
@@ -111,19 +112,16 @@ int main(void) {
         NSView *page = [[NSView alloc] initWithFrame:NSMakeRect(0, 44, 800, 556)];
         NSView *pageChild = [[NSView alloc] initWithFrame:page.bounds];
         [page addSubview:pageChild];
-        // Add bar first (index 0) just like Dia / existing tests.
         [pane addSubview:bar];
         [pane addSubview:page];
         [window.contentView addSubview:pane];
 
-        // 1. Regression: When HideToolbar is OFF, layout attaches NO hover, does NOT reorder subviews, starts NO timer, sets NO associated keys.
         [pane layout];
         CHECK([DPToolbarHover forPane:pane] == nil, "no DPToolbarHover attached when HideToolbar is off");
         CHECK(pane.subviews.firstObject == bar, "subview z-order is untouched when HideToolbar is off");
         CHECK(DPGet(bar, &DPFrameKey) == nil && DPGet(page, &DPFrameKey) == nil && DPGet(pageChild, &DPFillsKey) == nil,
               "no DPFrameKey or DPFillsKey written when HideToolbar is off");
 
-        // 2. Regression: Turning HideToolbar ON then OFF restores frames, z-order, alpha, and clears all state.
         DPHideToolbar.on = YES;
         DPHideToolbar.progress = 1;
         DPShowToolbarWithSidebar.on = NO;
@@ -142,7 +140,6 @@ int main(void) {
         CHECK(DPGet(bar, &DPFrameKey) == nil && DPGet(page, &DPFrameKey) == nil && DPGet(pageChild, &DPFillsKey) == nil,
               "DPFrameKey and DPFillsKey cleared after turning off");
 
-        // 3. Regression: LoadingProgress (defaultOn=YES) must NOT start 10 Hz timer when HideToolbar is OFF!
         ArcWebContents *wc = [ArcWebContents new];
         wc.visibility = DPWebContentsVisible;
         wc.hasFocus = YES;
@@ -152,7 +149,6 @@ int main(void) {
         CHECK(DPProgressTimer == nil && !DPShowsProgressLine(pane),
               "DPShowLoadingProgress does not start timer or add progress line while HideToolbar is off");
 
-        // When HideToolbar turns ON, LoadingProgress starts; when HideToolbar turns OFF + notification posts, it stops immediately.
         DPHideToolbar.on = YES;
         DPHideToolbar.progress = 1;
         [pane layout];
@@ -168,7 +164,6 @@ int main(void) {
         CHECK(DPProgressTimer == nil && !DPShowsProgressLine(pane),
               "turning HideToolbar off immediately stops DPProgressTimer and removes progress line");
 
-        // 4. Regression: ProgressColors TLS isolates concurrent background Metal encoders from main thread drawInMTKView:.
         DPHideToolbar.on = YES;
         DPShowLoadingProgress.on = YES;
         _TtC13NavigationBar20LoadingIndicatorView *indicator = [_TtC13NavigationBar20LoadingIndicatorView new];
@@ -195,7 +190,6 @@ int main(void) {
         CHECK(fabsf(c0.x - 0.1f) < 0.001f && fabsf(c1.x - 0.4f) < 0.001f,
               "background Metal thread does not race or overwrite main thread indicator colors");
 
-        // 5. Regression: PlainTab does not repaint tab fills on DPRepaintTabs when PlainSelectedTab is OFF.
         _TtCC8TabStrip31TabStripContainerViewControllerP33_466228EC43BE4F33691D8E9BB7BFDE208RootView *strip =
             [[_TtCC8TabStrip31TabStripContainerViewControllerP33_466228EC43BE4F33691D8E9BB7BFDE208RootView alloc] initWithFrame:NSMakeRect(0, 0, 200, 40)];
         _TtC5TabUIP33_903BE4B7F5DFD8B21A7A465D1A9EF8E412TabShapeView *shape =

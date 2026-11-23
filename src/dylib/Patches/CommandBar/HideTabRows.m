@@ -12,20 +12,25 @@ NSString *DPTabIn(NSString *rowName) {
     return tab.location == NSNotFound ? nil : DPUUIDsIn([rowName substringFromIndex:tab.location]).firstObject;
 }
 
+static void DPEachRow(NSCollectionView *list, void (^visit)(NSString *name, BOOL *stop)) {
+    BOOL stop = NO;
+    for (NSInteger section = 0; section < list.numberOfSections && !stop; section++)
+        for (NSInteger item = 0, count = [list numberOfItemsInSection:section]; item < count && !stop; item++)
+            visit(DPRowName(list, [NSIndexPath indexPathForItem:item inSection:section]), &stop);
+}
+
 NSArray<NSString *> *DPListedTabs(NSWindow *window) {
     NSMutableArray *tabs = [NSMutableArray array];
     for (NSCollectionView *list in DPFindViews(DPDiaTabListCollection)) {
         if (window && list.window != window) continue;
-        for (NSInteger section = 0; section < list.numberOfSections; section++)
-            for (NSInteger item = 0; item < [list numberOfItemsInSection:section]; item++)
-                [tabs addObject:DPTabIn(DPRowName(list, [NSIndexPath indexPathForItem:item inSection:section])) ?: @""];
+        DPEachRow(list, ^(NSString *name, BOOL *stop) { [tabs addObject:DPTabIn(name) ?: @""]; });
     }
     return tabs;
 }
 
 static char DPListsKey;
 
-// Each space has its own sidebar page, and a swipe between spaces shows two. Only the one listing the tab is its space.
+// A swipe between spaces shows two sidebar pages; only the one listing the tab is its space.
 BOOL DPListsTab(NSView *view, NSString *tabID) {
     NSView *found = view;
     while (found && !DPIsKind(found, DPDiaTabListCollection)) found = found.superview;
@@ -35,10 +40,8 @@ BOOL DPListsTab(NSView *view, NSString *tabID) {
     for (NSInteger section = 0; section < list.numberOfSections; section++) count += [list numberOfItemsInSection:section];
     NSArray *cached = DPGet(list, &DPListsKey);  // Asked for every row on every frame of a swipe.
     if ([cached[0] isEqual:tabID] && [cached[1] integerValue] == count) return [cached[2] boolValue];
-    BOOL listed = NO;
-    for (NSInteger section = 0; section < list.numberOfSections && !listed; section++)
-        for (NSInteger item = 0; item < [list numberOfItemsInSection:section] && !listed; item++)
-            listed = [DPTabIn(DPRowName(list, [NSIndexPath indexPathForItem:item inSection:section])) isEqual:tabID];
+    __block BOOL listed = NO;
+    DPEachRow(list, ^(NSString *name, BOOL *stop) { *stop = listed = [DPTabIn(name) isEqual:tabID]; });
     DPSet(list, &DPListsKey, @[ tabID, @(count), @(listed) ]);
     return listed;
 }
@@ -48,13 +51,11 @@ BOOL DPOnlyListedTab(NSString *tab, NSString *closing, NSWindow *window) {
     NSMutableArray<NSString *> *regular = [NSMutableArray array];
     for (NSCollectionView *list in DPFindViews(DPDiaTabListCollection)) {
         if (list.window != window) continue;
-        for (NSInteger section = 0; section < list.numberOfSections; section++)
-            for (NSInteger item = 0; item < [list numberOfItemsInSection:section]; item++) {
-                NSString *name = DPRowName(list, [NSIndexPath indexPathForItem:item inSection:section]);
-                if ([name containsString:@"SectionID.pinned"]) { [regular removeAllObjects]; continue; }
-                NSString *rowTab = DPTabIn(name);
-                if (rowTab && ![rowTab isEqual:closing]) [regular addObject:rowTab];
-            }
+        DPEachRow(list, ^(NSString *name, BOOL *stop) {
+            if ([name containsString:@"SectionID.pinned"]) return [regular removeAllObjects];
+            NSString *rowTab = DPTabIn(name);
+            if (rowTab && ![rowTab isEqual:closing]) [regular addObject:rowTab];
+        });
     }
     return !regular.count || (regular.count == 1 && [regular.firstObject isEqual:tab]);
 }

@@ -56,18 +56,10 @@ static void DPRemoveOwnHost(NSString *keepDir) {
 }
 
 static void DPRegisterHost(BOOL on) {
-    NSFileManager *files = NSFileManager.defaultManager;
     gWriteError = nil;
     gWritePath = nil;
-    if (!on) {
-        DPRemoveOwnHost(nil);
-        return;
-    }
-    NSString *host = DPHostPath();
-    if (!host) {
-        DPRemoveOwnHost(nil);
-        return;
-    }
+    NSString *host = on ? DPHostPath() : nil;
+    if (!host) return DPRemoveOwnHost(nil);
     NSError *error = nil;
     NSString *hostFolder = DPHostFolder(YES, &error);
     if (!hostFolder) {
@@ -76,8 +68,7 @@ static void DPRegisterHost(BOOL on) {
         return;
     }
     NSString *path = [hostFolder stringByAppendingPathComponent:kHostFile];
-    BOOL ours = DPOwnsHostAt(path);
-    if ([files fileExistsAtPath:path] && !ours) {
+    if ([NSFileManager.defaultManager fileExistsAtPath:path] && !DPOwnsHostAt(path)) {
         DPRemoveOwnHost(hostFolder);
         return;
     }
@@ -123,6 +114,7 @@ DP_PATCH(DPProtonPass) {
     .symbol = @"key.shield.fill key.horizontal.fill",
     .tint = @"systemGreenColor",
     .section = @"Passwords",
+    .group = @"passwordManagers",
     .install = DPInstallProtonPass,
     .apply = DPApplyProtonPass,
     .ready = DPProtonPassProblem,

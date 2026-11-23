@@ -13,7 +13,8 @@ static BOOL DPIsDigitShortcut(NSMenuItem *item, NSEventModifierFlags mods) {
 
 static NSMenuItem *DPFindItem(NSMenu *menu, BOOL (^match)(NSMenuItem *item)) {
     for (NSMenuItem *item in menu.itemArray) {
-        NSMenuItem *found = match(item) ? item : item.submenu ? DPFindItem(item.submenu, match) : nil;
+        if (match(item)) return item;
+        NSMenuItem *found = DPFindItem(item.submenu, match);
         if (found) return found;
     }
     return nil;
@@ -70,7 +71,7 @@ static void DPApplication_sendEvent(NSApplication *self, SEL _cmd, NSEvent *even
     NSString *digit = DPCommandDigit(event);
     NSMenuItem *item = digit ? DPProfileItem(digit) : nil;
     if (!item) return DPCallOriginal(DPApplication_sendEvent, self, event);
-    // Validate via update before performing; update may rebuild items, so re-fetch.
+    // Updating validates the item but may rebuild the menu, so look it up again.
     [item.menu update];
     item = DPProfileItem(digit);
     if (!item.enabled || item.hiddenOrHasHiddenAncestor || !item.action)
@@ -113,12 +114,12 @@ static NSString *DPVerifyProfileShortcuts(DPPatch *patch) {
 
 DP_PATCH(DPProfileShortcuts) {
     .key = @"profileShortcuts",
-    .order = 79,
+    .order = 85,
     .title = @"Switch Profiles with ⌘1–9",
-    .detail = @"Press ⌘ and a number to switch to that profile, like Arc's spaces. The sidebar's items move to ⌃ and a number.",
+    .detail = @"Press ⌘ and a number to switch to that profile, like Arc’s spaces. The sidebar’s items move to ⌃ and a number.",
     .symbol = @"command",
-    .tint = @"systemTealColor",
-    .section = @"Sidebar & Tab Bar",
+    .tint = @"systemRedColor",
+    .section = @"Profiles",
     .install = DPInstallProfileShortcuts,
     .apply = DPApplyProfileShortcuts,
     .verify = DPVerifyProfileShortcuts,

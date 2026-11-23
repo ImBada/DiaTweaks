@@ -2,9 +2,18 @@
 
 NSToolbarItemIdentifier const DPSearchItemIdentifier = @"DiaPatchesSearch";
 
+@interface DPPaneEntry : NSObject
+@property (nonatomic, copy) NSString *title;
+@property (nonatomic, strong) NSView *page;
+@property (nonatomic, strong) NSScrollView *scroll;
+@end
+
+@implementation DPPaneEntry
+@end
+
 @implementation DPPaneView {
-    NSScrollView *_contentScroll, *_pageScroll;
-    NSView *_page;
+    NSScrollView *_contentScroll;
+    NSMutableArray<DPPaneEntry *> *_stack;
 }
 
 - (instancetype)initWithTitle:(NSString *)title content:(NSView<DPPaneContent> *)content {
@@ -12,13 +21,14 @@ NSToolbarItemIdentifier const DPSearchItemIdentifier = @"DiaPatchesSearch";
     self.wantsLayer = YES;
     _title = [title copy];
     _content = content;
+    _stack = [NSMutableArray new];
     if ([content respondsToSelector:@selector(syncWithQuery:)]) {
         _searchItem = [[NSSearchToolbarItem alloc] initWithItemIdentifier:DPSearchItemIdentifier];
         _searchItem.searchField.delegate = self;
         [_searchItem.searchField.widthAnchor constraintEqualToConstant:218].active = YES;
     }
     __weak DPPaneView *weakSelf = self;
-    content.open = ^(NSString *title, NSView *page) { [weakSelf openPage:page title:title]; };
+    content.open = ^(NSString *title, NSView *page) { [weakSelf pushPage:page title:title]; };
     _contentScroll = [self scrollFor:content];
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(patchesDidChange:) name:DPPatchesDidChangeNotification object:nil];
     return self;
@@ -59,28 +69,48 @@ NSToolbarItemIdentifier const DPSearchItemIdentifier = @"DiaPatchesSearch";
     return scroll;
 }
 
-- (void)showPage:(NSView *)page {
-    [_pageScroll removeFromSuperview];
-    _page = page;
-    _pageScroll = page ? [self scrollFor:page] : nil;
-    _contentScroll.hidden = page != nil;
-}
-
-- (void)openPage:(NSView *)page title:(NSString *)title {
-    [self showPage:page];
+- (void)pushPage:(NSView *)page title:(NSString *)title {
+    DPPaneEntry *entry = [DPPaneEntry new];
+    entry.title = title;
+    entry.page = page;
+    entry.scroll = [self scrollFor:page];
+    // A folder page opens tweaks the same way the list does, one level deeper.
+    if ([page respondsToSelector:@selector(setOpen:)]) {
+        __weak DPPaneView *weakSelf = self;
+        [(id)page setOpen:^(NSString *next, NSView *view) { [weakSelf pushPage:view title:next]; }];
+    }
+    _stack.lastObject.scroll.hidden = YES;
+    _contentScroll.hidden = YES;
+    [_stack addObject:entry];
     if (self.titleChanged) self.titleChanged(title, YES);
 }
 
-- (BOOL)showsPage { return _page != nil; }
+- (void)popToRoot {
+    if (!_stack.count) return;
+    for (DPPaneEntry *entry in _stack) [entry.scroll removeFromSuperview];
+    [_stack removeAllObjects];
+    _contentScroll.hidden = NO;
+    if (self.titleChanged) self.titleChanged(self.title, NO);
+}
+
+- (BOOL)showsPage { return _stack.count > 0; }
 
 - (void)goBack {
-    if (!_page) return;
-    [self showPage:nil];
+    if (!_stack.count) return;
+    [_stack.lastObject.scroll removeFromSuperview];
+    [_stack removeLastObject];
+    DPPaneEntry *top = _stack.lastObject;
+    if (top) {
+        top.scroll.hidden = NO;
+        if (self.titleChanged) self.titleChanged(top.title, YES);
+        return;
+    }
+    _contentScroll.hidden = NO;
     if (self.titleChanged) self.titleChanged(self.title, NO);
 }
 
 - (void)reset {
-    [self showPage:nil];
+    [self popToRoot];
     self.searchItem.searchField.stringValue = @"";
     [self search];
 }
@@ -90,7 +120,7 @@ NSToolbarItemIdentifier const DPSearchItemIdentifier = @"DiaPatchesSearch";
 }
 
 - (void)controlTextDidChange:(NSNotification *)notification {
-    if (self.searchItem.searchField.stringValue.length) [self goBack];
+    if (self.searchItem.searchField.stringValue.length) [self popToRoot];
     [self search];
 }
 
@@ -98,7 +128,8 @@ NSToolbarItemIdentifier const DPSearchItemIdentifier = @"DiaPatchesSearch";
     [NSAnimationContext runAnimationGroup:^(NSAnimationContext *context) {
         context.allowsImplicitAnimation = YES;
         [self search];
-        if ([self->_page isKindOfClass:DPPageView.class]) [(DPPageView *)self->_page sync];
+        for (DPPaneEntry *entry in self->_stack)
+            if ([entry.page respondsToSelector:@selector(sync)]) [(id)entry.page sync];
         [self layoutSubtreeIfNeeded];
     }];
 }

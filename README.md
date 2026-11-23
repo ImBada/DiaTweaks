@@ -52,8 +52,13 @@ Run `diatweaks` on its own for a menu, or:
 | `diatweaks update` | Installs the latest DiaTweaks release and patches Dia again |
 | `diatweaks update-dia` | Downloads a newer Dia and patches it |
 | `diatweaks restore` | Puts the original Dia back |
+| `diatweaks local` | Lists, builds and shares tweaks you keep in your own folder |
 
 Tweak names work as keys or titles, like `hideToolbar` or `"Hide Toolbar"`, and `enable` and `disable` take several at once. Add `-y` to skip the questions.
+
+### Local Tweaks
+
+Have a tweak of your own that isn't in DiaTweaks? Drop a `.m` file, a GitHub pull request `.patch`, or a prebuilt `.dylib` into `~/Library/Application Support/DiaPatches/local/` and it runs like any other tweak, with its own switch in Settings. It compiles against the headers inside the installed `DiaPatches.dylib`, so it keeps working across Dia and DiaTweaks updates, and no update or uninstall deletes it. **Settings → Patches → Local Tweaks** has **Add Tweak…**, **New Starter Tweak…** and **Open Folder**; `diatweaks local` does the same from a terminal. See [docs/local-tweaks.md](docs/local-tweaks.md).
 
 ## Updating
 

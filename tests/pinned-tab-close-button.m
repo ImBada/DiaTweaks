@@ -141,14 +141,12 @@ int main(void) {
         visibleTabs = @[tPinned, tUnpinned, tAllowed];
         visibleContents = @[contentPinned, contentUnpinned, contentAllowed];
 
-        // Off-tweak invariant at launch.
         [tPinned layout];
         [tracker mouseEntered:nil];
         CHECK(tPinned->layoutCalls == 1 && tracker->enterCalls == 1, "original hooks run while off");
         CHECK(cPinned->suppressesCloseButton == YES && DPCleared.count == 0, "off tweak leaves suppressesCloseButton untouched");
         CHECK(DPVerifyPinnedTabCloseButton(&DPPinnedTabCloseButton) == nil, "1.58 verifies while off");
 
-        // Turn ON.
         DPPinnedTabCloseButton.on = YES;
         DPApplyPinnedTabCloseButton(&DPPinnedTabCloseButton);
         [tPinned layoutSubtreeIfNeeded];
@@ -162,7 +160,6 @@ int main(void) {
               "1.58 tracks only tabs this tweak changed");
         CHECK(DPVerifyPinnedTabCloseButton(&DPPinnedTabCloseButton) == nil, "1.58 verifies while ON");
 
-        // Layout and hover re-clear if Dia re-suppresses.
         cPinned->suppressesCloseButton = YES;
         CHECK(DPVerifyPinnedTabCloseButton(&DPPinnedTabCloseButton) != nil, "1.58 verify catches suppressed pinned tab while ON");
         [tPinned layout];
@@ -171,7 +168,6 @@ int main(void) {
         [tracker mouseEntered:nil];
         CHECK(!cPinned->suppressesCloseButton, "mouseEntered re-clears suppressesCloseButton while ON");
 
-        // Unpin second tab before turning OFF.
         attrsUnpinned->isInFavoritesOrPinnedContainer = NO;
         DPPinnedTabCloseButton.on = NO;
         DPApplyPinnedTabCloseButton(&DPPinnedTabCloseButton);
@@ -214,7 +210,6 @@ int main(void) {
         CHECK(c159->requestedCloseButtonStyle == 1 && DPCleared.count == 0, "1.59 OFF safely no-ops");
         CHECK(!t159.needsLayout && DPVerifyPinnedTabCloseButton(&DPPinnedTabCloseButton) == nil, "1.59 verifies after OFF");
 
-        // Unknown controller with neither close button ivar still fails verify.
         DPControllerUnknown *cUnknown = [DPControllerUnknown new];
         _TtC5TabUI14TabContentView *contentUnknown = nil;
         _TtC5TabUI7TabView *tUnknown = NewTab(cUnknown, YES, &contentUnknown, NULL);
@@ -228,7 +223,6 @@ int main(void) {
         CHECK(DPVerifyPinnedTabCloseButton(&DPPinnedTabCloseButton) == nil, "pending layout tab is skipped by verify");
         DPPinnedTabCloseButton.on = NO;
 
-        // Hidden/minimized window (omitted by DPFindViews) is still updated on apply.
         visibleTabs = @[];
         visibleContents = @[];
         NSWindow *hidden = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 200, 100)

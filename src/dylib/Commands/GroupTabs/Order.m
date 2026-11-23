@@ -5,16 +5,10 @@
 static NSString *DPURLOf(id tab) { return DPText(DPMsg(tab, @selector(URL))); }
 
 static NSArray *DPWindowTabsMatching(BOOL (^match)(id tab)) {
-    id app = NSApp.delegate;
-    if (![app respondsToSelector:@selector(appleScriptWindows)]) return nil;
-    NSArray *windows = DPMsg(app, @selector(appleScriptWindows));
-    if (![windows isKindOfClass:NSArray.class]) return nil;
     NSArray *best = nil;
     NSUInteger most = 0;
-    for (id window in windows) {
-        if (![window respondsToSelector:@selector(appleScriptTabs)]) continue;
-        NSArray *tabs = DPMsg(window, @selector(appleScriptTabs));
-        if (![tabs isKindOfClass:NSArray.class]) continue;
+    for (id window in DPAppleScriptWindows()) {
+        NSArray *tabs = DPAppleScriptTabs(window);
         NSUInteger count = 0;
         for (id tab in tabs) if (match(tab)) count++;
         if (count > most) { best = tabs; most = count; }

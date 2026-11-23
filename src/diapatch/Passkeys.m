@@ -19,6 +19,10 @@ static pthread_mutex_t gHelperLock = PTHREAD_MUTEX_INITIALIZER;
 static _Atomic pid_t gHelper;
 static _Atomic int gCancelled;
 
+static NSDictionary *asDictionary(id value) { return [value isKindOfClass:NSDictionary.class] ? value : nil; }
+static NSArray *asArray(id value) { return [value isKindOfClass:NSArray.class] ? value : nil; }
+static NSString *asString(id value) { return [value isKindOfClass:NSString.class] ? value : nil; }
+
 static NSDictionary *readFromHelper(void) {
     if (!gFromHelper) return nil;
     NSMutableData *data = [NSMutableData data];
@@ -35,8 +39,7 @@ static NSDictionary *readFromHelper(void) {
         if (data.length >= kMaxHelperMessageLength) return nil;
         [data appendBytes:&(char){ (char)c } length:1];
     }
-    id object = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
-    return [object isKindOfClass:NSDictionary.class] ? object : nil;
+    return asDictionary([NSJSONSerialization JSONObjectWithData:data options:0 error:nil]);
 }
 
 static int writeCDP(NSString *method, NSDictionary *params, NSString *session) {
@@ -72,9 +75,7 @@ static id evaluateWithEvents(NSString *session, NSString *expression, void (^onE
     if (!expression) return nil;
     NSDictionary *params = @{ @"expression" : expression, @"awaitPromise" : @YES, @"returnByValue" : @YES, @"userGesture" : @YES };
     NSDictionary *reply = sendWithEvents(@"Runtime.evaluate", params, session, onEvent);
-    NSDictionary *outer = [reply[@"result"] isKindOfClass:NSDictionary.class] ? reply[@"result"] : nil;
-    NSDictionary *inner = [outer[@"result"] isKindOfClass:NSDictionary.class] ? outer[@"result"] : nil;
-    return inner[@"value"];
+    return asDictionary(asDictionary(reply[@"result"])[@"result"])[@"value"];
 }
 
 static id evaluate(NSString *session, NSString *expression) {
@@ -86,17 +87,14 @@ static NSDictionary *readMessageFrom(FILE *stream) {
     if (!stream || fread(&length, sizeof length, 1, stream) != 1 || !length || length > kMaxMessageLength) return nil;
     NSMutableData *data = [NSMutableData dataWithLength:length];
     if (!data || fread(data.mutableBytes, 1, length, stream) != length) return nil;
-    id object = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
-    return [object isKindOfClass:NSDictionary.class] ? object : nil;
+    return asDictionary([NSJSONSerialization JSONObjectWithData:data options:0 error:nil]);
 }
-
-static NSDictionary *readMessage(void) { return readMessageFrom(stdin); }
 
 static BOOL validRequest(NSDictionary *request) {
     if (![request isKindOfClass:NSDictionary.class]) return NO;
-    id kind = request[@"kind"], origin = request[@"origin"], options = request[@"options"];
+    id kind = request[@"kind"], options = request[@"options"];
     return ([kind isEqual:@"create"] || [kind isEqual:@"get"])
-        && [origin isKindOfClass:NSString.class] && [origin length] > 0
+        && [asString(request[@"origin"]) length] > 0
         && [options isKindOfClass:NSDictionary.class]
         && [NSJSONSerialization isValidJSONObject:options];
 }
@@ -112,6 +110,11 @@ static void writeMessage(NSDictionary *message) {
 }
 
 static NSDictionary *failure(NSString *message) { return @{ @"error" : @{ @"name" : @"NotAllowedError", @"message" : message } }; }
+
+static int bail(NSString *message, int status) {
+    writeMessage(failure(message));
+    return status;
+}
 
 // The extension holds our stdin open until it has the answer, so EOF means the page gave up.
 static void *watchForCancel(void *_) {
@@ -287,16 +290,12 @@ static DPStartup waitForStartupTab(pid_t pid, int seconds, NSString **targetId, 
     for (int tries = 0, tablessWindow = 0; tries < seconds * 4; tries++, usleep(250000)) {
         NSDictionary *targets = send(@"Target.getTargets", nil, nil);
         if (!targets) return DPStartupFailed;
-        NSDictionary *result = [targets[@"result"] isKindOfClass:NSDictionary.class] ? targets[@"result"] : nil;
-        NSArray *infos = [result[@"targetInfos"] isKindOfClass:NSArray.class] ? result[@"targetInfos"] : nil;
-        for (NSDictionary *target in infos) {
+        for (NSDictionary *target in asArray(asDictionary(targets[@"result"])[@"targetInfos"])) {
             if (![target isKindOfClass:NSDictionary.class] || ![target[@"type"] isEqual:@"page"]) continue;
-            NSString *tid = [target[@"targetId"] isKindOfClass:NSString.class] ? target[@"targetId"] : nil;
+            NSString *tid = asString(target[@"targetId"]);
             if (!tid) continue;
-            NSDictionary *reply = send(@"Browser.getWindowForTarget", @{ @"targetId" : tid }, nil);
-            NSDictionary *window = [reply[@"result"] isKindOfClass:NSDictionary.class] ? reply[@"result"] : nil;
-            NSDictionary *bounds = [window[@"bounds"] isKindOfClass:NSDictionary.class] ? window[@"bounds"] : nil;
-            if (![bounds[@"width"] intValue] || !window[@"windowId"]) continue;
+            NSDictionary *window = asDictionary(send(@"Browser.getWindowForTarget", @{ @"targetId" : tid }, nil)[@"result"]);
+            if (![asDictionary(window[@"bounds"])[@"width"] intValue] || !window[@"windowId"]) continue;
             *targetId = tid;
             *windowId = window[@"windowId"];
             return DPStartupReady;
@@ -350,6 +349,8 @@ static BOOL isTLSError(NSString *errorText) {
         && ([errorText containsString:@"ERR_CERT_"] || [errorText containsString:@"ERR_SSL_"]);
 }
 
+static NSString *navigationError(NSDictionary *navigation) { return asString(asDictionary(navigation[@"result"])[@"errorText"]); }
+
 static BOOL atOrigin(NSString *session, NSString *origin, void (^onEvent)(NSDictionary *event)) {
     for (int tries = 0; tries < 50; tries++, usleep(100000)) {
         NSArray *state = evaluateWithEvents(session, @"[location.origin, document.readyState]", onEvent);
@@ -384,11 +385,10 @@ static BOOL openOrigin(NSString *session, NSString *origin, NSString *pagePath) 
 
     void (^onEvent)(NSDictionary *) = ^(NSDictionary *event) {
         if (![event[@"method"] isEqualToString:@"Fetch.requestPaused"]) return;
-        NSDictionary *params = [event[@"params"] isKindOfClass:NSDictionary.class] ? event[@"params"] : nil;
-        NSString *requestId = [params[@"requestId"] isKindOfClass:NSString.class] ? params[@"requestId"] : nil;
-        NSDictionary *req = [params[@"request"] isKindOfClass:NSDictionary.class] ? params[@"request"] : nil;
-        NSString *url = [req[@"url"] isKindOfClass:NSString.class] ? req[@"url"] : nil;
-        NSString *type = [params[@"resourceType"] isKindOfClass:NSString.class] ? params[@"resourceType"] : nil;
+        NSDictionary *params = asDictionary(event[@"params"]);
+        NSString *requestId = asString(params[@"requestId"]);
+        NSString *url = asString(asDictionary(params[@"request"])[@"url"]);
+        NSString *type = asString(params[@"resourceType"]);
         if (!requestId) return;
         if ([type isEqualToString:@"Document"] && [originOfURL(url) isEqualToString:expectedOrigin]) {
             if (synthetic) {
@@ -404,7 +404,7 @@ static BOOL openOrigin(NSString *session, NSString *origin, NSString *pagePath) 
             }
             return;
         }
-        NSString *fromId = [params[@"redirectedRequestId"] isKindOfClass:NSString.class] ? params[@"redirectedRequestId"] : nil;
+        NSString *fromId = asString(params[@"redirectedRequestId"]);
         if ([type isEqualToString:@"Document"] && fromId && [originRequestIds containsObject:fromId])
             sawCrossOriginRedirect = YES;
         writeCDP(@"Fetch.failRequest", @{ @"requestId" : requestId, @"errorReason" : @"Aborted" }, session);
@@ -415,8 +415,7 @@ static BOOL openOrigin(NSString *session, NSString *origin, NSString *pagePath) 
     for (NSString *path in candidatePaths(pagePath)) {
         NSDictionary *nav = sendWithEvents(@"Page.navigate", @{ @"url" : [expectedOrigin stringByAppendingString:path] }, session, onEvent);
         if (!nav) break;
-        NSDictionary *navResult = [nav[@"result"] isKindOfClass:NSDictionary.class] ? nav[@"result"] : nil;
-        NSString *errorText = [navResult[@"errorText"] isKindOfClass:NSString.class] ? navResult[@"errorText"] : nil;
+        NSString *errorText = navigationError(nav);
         if (isTLSError(errorText)) {
             sawTLSError = YES;
             break;
@@ -433,10 +432,7 @@ static BOOL openOrigin(NSString *session, NSString *origin, NSString *pagePath) 
     if (!landed && !sawTLSError && (sawCrossOriginRedirect || sawServerResponse)) {
         synthetic = YES;
         NSDictionary *nav = sendWithEvents(@"Page.navigate", @{ @"url" : [expectedOrigin stringByAppendingString:@"/"] }, session, onEvent);
-        NSDictionary *navResult = [nav[@"result"] isKindOfClass:NSDictionary.class] ? nav[@"result"] : nil;
-        NSString *errorText = [navResult[@"errorText"] isKindOfClass:NSString.class] ? navResult[@"errorText"] : nil;
-        if (nav && !errorText.length)
-            landed = atOrigin(session, expectedOrigin, onEvent);
+        if (nav && !navigationError(nav).length) landed = atOrigin(session, expectedOrigin, onEvent);
     }
 
     if (landed && !synthetic)
@@ -470,11 +466,9 @@ static NSDictionary *runInHelper(pid_t pid, NSString *kind, NSString *origin, NS
 
     send(@"Browser.setWindowBounds", @{ @"windowId" : windowId, @"bounds" : sheetBounds() }, nil);
     NSDictionary *attached = send(@"Target.attachToTarget", @{ @"targetId" : targetId, @"flatten" : @YES }, nil);
-    NSDictionary *attachedResult = [attached[@"result"] isKindOfClass:NSDictionary.class] ? attached[@"result"] : nil;
-    NSString *session = [attachedResult[@"sessionId"] isKindOfClass:NSString.class] ? attachedResult[@"sessionId"] : nil;
+    NSString *session = asString(asDictionary(attached[@"result"])[@"sessionId"]);
     if (!session) return failure(@"Couldn't connect to the passkey copy of Dia.");
-    if (!openOrigin(session, origin, path))
-        return failure(@"Couldn't open the site in the passkey copy of Dia.");
+    if (!openOrigin(session, origin, path)) return failure(@"Couldn't open the site in the passkey copy of Dia.");
     tellDia(@"show", pid);
     // WebAuthn refuses an unfocused page, and focus comes once Dia has brought the copy forward.
     for (int tries = 0; tries < 30; tries++, usleep(100000))
@@ -505,6 +499,20 @@ static void closePair(int fds[2]) {
     }
 }
 
+static void closeHelperStreams(void) {
+    if (gFromHelper) fclose(gFromHelper);
+    if (gToHelper) fclose(gToHelper);
+    gFromHelper = gToHelper = NULL;
+}
+
+static void killHelper(pid_t pid) {
+    pthread_mutex_lock(&gHelperLock);
+    gHelper = 0;
+    kill(pid, SIGKILL);
+    pthread_mutex_unlock(&gHelperLock);
+    while (waitpid(pid, NULL, 0) < 0 && errno == EINTR) {}
+}
+
 static int openPasskeyLock(NSString *home) {
     if (!home.length) return -1;
     if (![NSFileManager.defaultManager createDirectoryAtPath:home withIntermediateDirectories:YES attributes:nil error:nil]) return -1;
@@ -521,17 +529,17 @@ static BOOL lockPasskeyHelper(int lock) {
 }
 
 int DPRunPasskeyHost(NSString *home) {
-    NSDictionary *request = readMessage();
+    NSDictionary *request = readMessageFrom(stdin);
     if (!validRequest(request)) return 1;
     pthread_t watcher;
     if (pthread_create(&watcher, NULL, watchForCancel, NULL) == 0) pthread_detach(watcher);
 
     int lock = openPasskeyLock(home);
-    if (lock < 0) return writeMessage(failure(@"Couldn't open the passkey lock file.")), 1;
+    if (lock < 0) return bail(@"Couldn't open the passkey lock file.", 1);
     if (!lockPasskeyHelper(lock)) {
         close(lock);
-        if (gCancelled) return writeMessage(failure(@"The passkey request was cancelled.")), 0;
-        return writeMessage(failure(@"Couldn't lock the passkey helper.")), 1;
+        if (gCancelled) return bail(@"The passkey request was cancelled.", 0);
+        return bail(@"Couldn't lock the passkey helper.", 1);
     }
 
     int toHelper[2] = { -1, -1 }, fromHelper[2] = { -1, -1 };
@@ -540,57 +548,44 @@ int DPRunPasskeyHost(NSString *home) {
         closePair(toHelper);
         closePair(fromHelper);
         close(lock);
-        return writeMessage(failure(@"Couldn't start the passkey copy of Dia.")), 1;
+        return bail(@"Couldn't start the passkey copy of Dia.", 1);
     }
     pthread_mutex_lock(&gHelperLock);
     gHelper = pid;
     if (gCancelled) kill(pid, SIGTERM);
     pthread_mutex_unlock(&gHelperLock);
-    close(toHelper[0]), toHelper[0] = -1;
-    close(fromHelper[1]), fromHelper[1] = -1;
+    close(toHelper[0]);
+    toHelper[0] = -1;
+    close(fromHelper[1]);
+    fromHelper[1] = -1;
 
     gFromHelper = fdopen(fromHelper[0], "r");
     if (gFromHelper) fromHelper[0] = -1;
     gToHelper = fdopen(toHelper[1], "w");
     if (gToHelper) toHelper[1] = -1;
     if (!gFromHelper || !gToHelper) {
-        if (gFromHelper) fclose(gFromHelper), gFromHelper = NULL;
-        if (gToHelper) fclose(gToHelper), gToHelper = NULL;
+        closeHelperStreams();
         closePair(toHelper);
         closePair(fromHelper);
-        pthread_mutex_lock(&gHelperLock);
-        gHelper = 0;
-        kill(pid, SIGKILL);
-        pthread_mutex_unlock(&gHelperLock);
-        while (waitpid(pid, NULL, 0) < 0 && errno == EINTR) {}
+        killHelper(pid);
         close(lock);
-        return writeMessage(failure(@"Couldn't connect to the passkey copy of Dia.")), 1;
+        return bail(@"Couldn't connect to the passkey copy of Dia.", 1);
     }
 
     NSDictionary *result = runInHelper(pid, request[@"kind"], request[@"origin"], request[@"path"], request[@"options"]);
     // Dia kills this process once it has the answer, so the copy has to quit before then.
     send(@"Browser.close", nil, nil);
     BOOL exited = NO;
-    for (int i = 0; i < 50; i++) {
+    for (int i = 0; i < 50 && !exited; i++) {
         pthread_mutex_lock(&gHelperLock);
         pid_t w = waitpid(pid, NULL, WNOHANG);
-        if (w == pid || (w < 0 && errno == ECHILD)) {
-            gHelper = 0;
-            exited = YES;
-        }
+        exited = w == pid || (w < 0 && errno == ECHILD);
+        if (exited) gHelper = 0;
         pthread_mutex_unlock(&gHelperLock);
-        if (exited) break;
-        usleep(100000);
+        if (!exited) usleep(100000);
     }
-    if (!exited) {
-        pthread_mutex_lock(&gHelperLock);
-        gHelper = 0;
-        kill(pid, SIGKILL);
-        pthread_mutex_unlock(&gHelperLock);
-        while (waitpid(pid, NULL, 0) < 0 && errno == EINTR) {}
-    }
-    fclose(gFromHelper), gFromHelper = NULL;
-    fclose(gToHelper), gToHelper = NULL;
+    if (!exited) killHelper(pid);
+    closeHelperStreams();
     close(lock);
     DPForgetApp([home stringByAppendingPathComponent:@"pristine/Dia.app"]);
     writeMessage(result);

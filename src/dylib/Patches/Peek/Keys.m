@@ -55,7 +55,6 @@ static BOOL DPPeekExternalTextFocus(DPPeekCard *peek, id responder) {
     return NO;
 }
 
-// Sheets, CommandBar overlays, and non-chat Dia popovers sit above Peek and own Escape/window shortcuts first.
 static BOOL DPPeekYieldsToOverlay(NSWindow *window) {
     if (window.attachedSheet || DPPeekCoveredByCommandBar(window)) return YES;
     return DPFindView(window.contentView, ^BOOL(NSView *view) {
@@ -68,10 +67,10 @@ NSEvent *DPPeekHandleKeyEvent(DPPeekCard *peek, NSEvent *event) {
     DPPeekSyncTabs(event.window);
     if (DPPeekCardIn(event.window) != peek) return event;
     NSEventModifierFlags mods = event.modifierFlags & NSEventModifierFlagDeviceIndependentFlagsMask & ~(NSEventModifierFlagCapsLock | NSEventModifierFlagNumericPad);
-    // A page's field is not an NSText; Escape there must cancel an input method's composition, not close the card.
     id responder = peek.window.firstResponder;
     if (DPPeekResponderInChat(responder) || DPPeekExternalTextFocus(peek, responder)) return event;
     BOOL command = mods == NSEventModifierFlagCommand, control = mods == NSEventModifierFlagControl;
+    // A page's field is not an NSText; Escape there must cancel an input method's composition, not close the card.
     BOOL editing = [responder isKindOfClass:NSText.class] || ([responder conformsToProtocol:@protocol(NSTextInputClient)] && [responder hasMarkedText]);
     BOOL onPage = [responder isKindOfClass:NSView.class] && [(NSView *)responder isDescendantOf:peek.host];
     if (DPPeekCopyURL(peek, event) || DPPeekZoomShortcut(peek, event) || DPPeekFindShortcut(peek, event, mods)) return nil;

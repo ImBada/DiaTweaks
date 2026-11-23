@@ -91,7 +91,6 @@ int main(void) {
         NSString *unpatchFile = [temp stringByAppendingPathComponent:@"unpatch.flag"];
         NSString *logFile = [temp stringByAppendingPathComponent:@"invocations.log"];
 
-        // 1. Missing CLI reports a non-nil launch error reason.
         __block BOOL gotMissing = NO;
         __block NSString *missingOut = @"x", *missingReason = nil;
         DPRunCLIReporting(@[@"check"], ^(NSString *output, NSString *reason) {
@@ -102,7 +101,6 @@ int main(void) {
         pumpUntil(^BOOL { return gotMissing; }, 3);
         expect(gotMissing && !missingOut && missingReason.length > 0, @"missing diapatch reports launch error reason");
 
-        // 2. Large stderr (>128 KB) before stdout does not deadlock DPRunCLIReporting.
         writeStubCLI(cli, [NSString stringWithFormat:
             @"#!/bin/sh\n"
             @"echo \"$*\" >> \"%@\"\n"
@@ -145,7 +143,6 @@ int main(void) {
         pumpUntil(^BOOL { return gotNoisy; }, 5);
         expect(gotNoisy && [noisyOut isEqualToString:@"ok\n"], @"large stderr does not deadlock DPRunCLIReporting");
 
-        // 3. Unpatchable failure clears when a newer patchable build appears.
         DPUpdates *updates = DPUpdates.shared;
         [NSData.data writeToFile:unpatchFile atomically:YES];
         __block BOOL checked = NO;
@@ -159,7 +156,6 @@ int main(void) {
         pumpUntil(^BOOL { return checked; }, 5);
         expect(![updates failed:DPDia], @"stale unpatchable error clears on newer patchable build");
 
-        // 4. Post-download recheck race: in-flight check started before download finished must not hide newly staged update.
         [NSData.data writeToFile:gateFile atomically:YES];
         __block BOOL staleCheckDone = NO, downloadDone = NO, stagedOnDownloadDone = NO;
         [updates check:^{ staleCheckDone = YES; }];
@@ -170,19 +166,16 @@ int main(void) {
         pumpUntil(^BOOL { return downloadDone; }, 5);
         expect(staleCheckDone && downloadDone && stagedOnDownloadDone, @"download finishing during in-flight check triggers fresh check seeing staged build");
 
-        // 5. DPSoftwareUpdateView displays staged version (not '<null>') when offline with null latest/size.
         DPSoftwareUpdateView *suView = [[DPSoftwareUpdateView alloc] initWithFrame:NSMakeRect(0, 0, 560, 400)];
         expect(hasLabelText(suView, @"Dia 1.59.0 (200)"), @"Software Update shows staged version when offline");
         expect(!hasLabelText(suView, @"<null>"), @"Software Update never shows <null> for staged version");
 
-        // 6. stopPretending clears pretend download state and invalidates progress timer.
         [updates pretend:DPTweaks];
         [updates download:DPTweaks then:nil];
         expect([updates downloading:DPTweaks], @"pretend download marks downloading");
         [updates stopPretending];
         expect(![updates downloading:DPTweaks], @"stopPretending clears downloading state");
 
-        // 7. DPInstallOnQuit skips unready staged/Dia.app, runs when staged/ready exists, and skips after DPHandOffAndQuit.
         NSString *stagedDia = DPSupport(@"staged/Dia.app");
         NSString *stagedReady = DPSupport(@"staged/ready");
         [NSFileManager.defaultManager createDirectoryAtPath:stagedDia withIntermediateDirectories:YES attributes:nil error:nil];
@@ -212,7 +205,6 @@ int main(void) {
         expect([logAfterHandoff containsString:@"uninstall --wait"] && ![logAfterHandoff containsString:@"apply --wait"],
                @"DPInstallOnQuit and duplicate handoff do not spawn racing apply after DPHandOffAndQuit uninstall");
 
-        // 8. Malformed non-dictionary entries in check JSON and empty releaseNotes never crash or draw broken links.
         writeStubCLI(cli, @"#!/bin/sh\nprintf '{\"dia\":null,\"tweaks\":{\"installed\":\"v1.1.9\",\"latest\":\"v1.2.0\",\"size\":10,\"staged\":null,\"available\":true,\"releaseNotes\":\"\",\"error\":null}}'\n");
         checked = NO;
         [updates check:^{ checked = YES; }];

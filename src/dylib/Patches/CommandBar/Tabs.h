@@ -1,5 +1,10 @@
 #import "StdPatch/StdPatch.h"
 
+static inline NSArray *DPScriptTabs(id scriptSpace) {
+    id tabs = DPValueForKey(scriptSpace, @"appleScriptTabs");
+    return [tabs isKindOfClass:NSArray.class] ? tabs : nil;
+}
+
 id DPScriptWindow(NSWindow *window);
 id DPScriptTab(NSWindow *window, NSString *tabID);
 id DPScriptTabIn(id scriptWindow, NSString *tabID);
@@ -10,6 +15,5 @@ NSString *DPActiveTabID(NSWindow *window);
 NSString *DPActiveTabIDIn(id scriptWindow);
 void DPFocusTab(id tab);
 void DPCloseTab(id tab);
-// Marks our own closes so the closing-page hook ignores them.
 void DPMarkOwnClose(void);
 BOOL DPTakeOwnClose(void);

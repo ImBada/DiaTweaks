@@ -23,23 +23,25 @@ void DPSyncProfileColorUI(NSString *spaceID);
 NSString *DPVerifyProfileColorUI(DPPatch *patch);
 NSString *DPProfilePaneSpaceID(NSViewController *pane);
 NSString *DPAnchoredPanelSpaceID(NSWindow *window);
+void DPRefreshPresetRings(NSView *picker);
 
-@interface DPProfileColorWell : NSColorWell
-@end
+static inline CGFloat DPUnit(CGFloat value) { return MIN(MAX(value, 0.0), 1.0); }
+
+NSImage *DPProfileWheelImage(CGFloat side);
 
 @interface DPProfileHexField : NSTextField <NSTextFieldDelegate>
 @end
 
-@interface DPProfileColorRow : NSView
+@interface DPProfileColorCircle : NSView
 @property (copy) NSString *spaceID;
-@property (strong) DPProfileColorWell *well;
-@property (strong) DPProfileHexField *hexField;
-@property (strong) NSButton *clearButton;
-@property (nonatomic) BOOL suppressCommit;
-- (instancetype)initWithSpaceID:(NSString *)spaceID font:(NSFont *)font textColor:(NSColor *)textColor;
-- (void)syncFromDefaults:(BOOL)forceField;
+@property (nonatomic) BOOL popoverOpen;
+@property (nonatomic, readonly) BOOL suppressesPresets;
+@property (weak) NSView *picker;
+- (instancetype)initWithSpaceID:(NSString *)spaceID dimension:(CGFloat)dimension;
+- (void)syncFromDefaults;
 - (void)switchToSpaceID:(NSString *)spaceID;
 - (void)prepareForRemoval;
+- (void)closePopover;
 - (void)applyHex:(NSString *)canonical fromField:(BOOL)fromField;
 - (void)clearColor;
 @end

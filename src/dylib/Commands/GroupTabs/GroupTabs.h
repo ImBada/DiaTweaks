@@ -17,6 +17,8 @@ long long DPLongID(id value);
 id DPMsg(id object, SEL sel);
 BOOL DPMsgBool(id object, SEL sel);
 NSString *DPText(id value);
+NSArray *DPAppleScriptWindows(void);
+NSArray *DPAppleScriptTabs(id window);
 
 NSString *DPDomainKey(NSString *urlString);
 NSString *DPGroupTitle(NSString *domain);

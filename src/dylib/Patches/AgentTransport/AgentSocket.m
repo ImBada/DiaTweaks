@@ -64,8 +64,6 @@ BOOL DPAgentServerRunning(void) {
     return NO;
 }
 
-// Each connection is relayed on its own, so a chat that is still streaming never holds up the next one.
-// Once the agent is gone nothing new is accepted, and its private folder goes when the last relay ends.
 void DPRelayChatAgent(int listener, NSString *socket, NSString *directory, pid_t child, DPAgentConnected connected) {
     struct stat identity = {0};
     lstat(socket.fileSystemRepresentation, &identity);

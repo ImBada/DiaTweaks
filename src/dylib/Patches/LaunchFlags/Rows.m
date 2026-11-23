@@ -141,22 +141,21 @@ static NSTextView *DPLaunchFlagsEditor(NSFont *font, id<NSTextViewDelegate> dele
     NSArray<NSString *> *launched = DPLaunchFlagsLaunched();
     BOOL pending = _enabled && !unclosed && ![flags isEqual:launched];
 
+    NSString *message = @"One flag per line, or separated by spaces. Lines starting with # are ignored.";
+    NSColor *color = NSColor.secondaryLabelColor;
     if (unclosed) {
-        _status.stringValue = @"Unclosed quote.";
-        _status.textColor = NSColor.systemRedColor;
+        message = @"Unclosed quote.";
+        color = NSColor.systemRedColor;
     } else if (ignored.count) {
-        _status.stringValue = [NSString stringWithFormat:@"Ignored (must start with --): %@", [ignored componentsJoinedByString:@", "]];
-        _status.textColor = NSColor.systemRedColor;
+        message = [NSString stringWithFormat:@"Ignored (must start with --): %@", [ignored componentsJoinedByString:@", "]];
+        color = NSColor.systemRedColor;
     } else if (pending) {
-        _status.stringValue = @"Relaunch Dia to apply these flags.";
-        _status.textColor = NSColor.secondaryLabelColor;
+        message = @"Relaunch Dia to apply these flags.";
     } else if (_enabled && launched.count) {
-        _status.stringValue = @"Active in this session.";
-        _status.textColor = NSColor.secondaryLabelColor;
-    } else {
-        _status.stringValue = @"One flag per line, or separated by spaces. Lines starting with # are ignored.";
-        _status.textColor = NSColor.secondaryLabelColor;
+        message = @"Active in this session.";
     }
+    _status.stringValue = message;
+    _status.textColor = color;
     _relaunch.hidden = !pending;
     _relaunch.enabled = pending;
 }

@@ -26,6 +26,15 @@ BOOL DPMsgBool(id object, SEL sel) {
     return object ? msg(object, sel) : NO;
 }
 
+static NSArray *DPScriptArray(id owner, SEL sel) {
+    NSArray *array = [owner respondsToSelector:sel] ? DPMsg(owner, sel) : nil;
+    return [array isKindOfClass:NSArray.class] ? array : nil;
+}
+
+NSArray *DPAppleScriptWindows(void) { return DPScriptArray(NSApp.delegate, @selector(appleScriptWindows)); }
+
+NSArray *DPAppleScriptTabs(id window) { return DPScriptArray(window, @selector(appleScriptTabs)); }
+
 NSString *DPText(id value) {
     if ([value isKindOfClass:NSString.class]) return value;
     if ([value isKindOfClass:NSURL.class]) return ((NSURL *)value).absoluteString;

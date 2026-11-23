@@ -12,6 +12,26 @@ static NSMutableDictionary *DPState;
 
 BOOL DPPauseSaved(void) { return [NSFileManager.defaultManager fileExistsAtPath:DPPauseURL.path]; }
 
+BOOL DPLocalSafeModeOff(void) { return [DPState[@"localOff"] boolValue]; }
+
+void DPSetLocalSafeModeOff(BOOL off) {
+    if (!DPState) return;
+    if (off) DPState[@"localOff"] = @YES;
+    else [DPState removeObjectForKey:@"localOff"];
+    [DPState writeToURL:DPStateURL error:nil];
+}
+
+// Local.m owns the folder, but this file is linked on its own in tests, so resolve the path here.
+static BOOL DPLocalFolderHasTweaks(void) {
+    const char *home = getenv("DIAPATCH_HOME");
+    NSString *base = home && *home ? @(home)
+                                   : [NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES).firstObject
+                                         stringByAppendingPathComponent:@"DiaPatches"];
+    for (NSString *name in [NSFileManager.defaultManager contentsOfDirectoryAtPath:[base stringByAppendingPathComponent:@"local"] error:NULL])
+        if (![name hasPrefix:@"."] && ![name isEqual:@"README.md"]) return YES;
+    return NO;
+}
+
 void DPSetPaused(BOOL paused) {
     DPPaused = paused;
     if (paused) [NSData.data writeToFile:DPPauseURL.path atomically:YES];
@@ -38,12 +58,12 @@ static NSString *DPBuildUUID(const struct mach_header_64 *header) {
 static BOOL DPCrashed(NSDictionary *state) {
     NSDate *launched = state[@"launched"];
     if (![launched isKindOfClass:NSDate.class]) return YES;
-    NSNumber *pidNum = state[@"pid"];
-    if (![pidNum isKindOfClass:NSNumber.class]) return NO;
+    NSNumber *pid = state[@"pid"];
+    if (![pid isKindOfClass:NSNumber.class]) return NO;
     NSFileManager *files = NSFileManager.defaultManager;
     NSString *prefix = [NSProcessInfo.processInfo.processName stringByAppendingString:@"-"];
-    NSString *pidSpaced = [NSString stringWithFormat:@"\"pid\" : %@,", pidNum];
-    NSString *pidCompact = [NSString stringWithFormat:@"\"pid\":%@,", pidNum];
+    NSString *pidSpaced = [NSString stringWithFormat:@"\"pid\" : %@,", pid];
+    NSString *pidCompact = [NSString stringWithFormat:@"\"pid\":%@,", pid];
     NSURL *reports = [files.homeDirectoryForCurrentUser URLByAppendingPathComponent:@"Library/Logs/DiagnosticReports"];
     for (NSURL *url in [files contentsOfDirectoryAtURL:reports includingPropertiesForKeys:@[NSURLContentModificationDateKey] options:0 error:nil]) {
         if (![url.lastPathComponent hasPrefix:prefix] || ![url.pathExtension isEqual:@"ips"]) continue;
@@ -86,7 +106,16 @@ void DPBeginLaunch(void) {
     NSInteger crashes = [DPState[@"crashes"] integerValue];
     if ([DPState[@"launching"] boolValue]) crashes += DPCrashed(DPState);
     else crashes = 0;
-    if (crashes >= 2 && DPSafeMode < 2) DPSafeMode++, crashes = 0;
+    if (crashes >= 2) {
+        // Try the user's own tweaks alone first: dropping 100 official ones to fix one local file is a bad trade.
+        if (![DPState[@"localOff"] boolValue] && DPLocalFolderHasTweaks()) {
+            DPState[@"localOff"] = @YES;
+            crashes = 0;
+        } else if (DPSafeMode < 2) {
+            DPSafeMode++;
+            crashes = 0;
+        }
+    }
     [DPState addEntriesFromDictionary:@{@"level": @(DPSafeMode), @"crashes": @(crashes), @"launching": @YES, @"launched": NSDate.date, @"pid": @(getpid())}];
     [DPState writeToURL:DPStateURL error:nil];
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, DPSurviveSeconds * NSEC_PER_SEC), dispatch_get_main_queue(), ^{ DPSurvived(); });

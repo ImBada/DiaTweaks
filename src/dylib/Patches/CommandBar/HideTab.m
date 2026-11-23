@@ -10,10 +10,19 @@ static __weak NSWindow *DPExpectWindow;
 static CFTimeInterval DPExpectUntil;
 static NSSet<NSString *> *DPKnown;
 
+// Spares install first, so a launch-time hide can land before DPInstallHideTab runs.
+static void DPEnsureHideSets(void) {
+    if (DPHidden) return;
+    DPHidden = [NSMutableSet set];
+    DPParked = [NSMutableSet set];
+    DPOwner = [NSMapTable strongToWeakObjectsMapTable];
+}
+
 BOOL DPHiding(void) { return DPCommandBar.on && DPCommandBarHideTab.on && !DPCommandBarHideTab.unavailable; }
 static BOOL DPExpecting(void) { return CACurrentMediaTime() < DPExpectUntil; }
 
 static BOOL DPOwned(NSString *tab) {
+    DPEnsureHideSets();
     if ([DPOwner objectForKey:tab]) return YES;
     [DPHidden removeObject:tab];
     [DPParked removeObject:tab];
@@ -37,6 +46,7 @@ BOOL DPParkingAny(void) {
 }
 
 void DPHideBlank(NSString *tabID, BOOL hidden, NSWindow *window) {
+    DPEnsureHideSets();
     if (!tabID || !window || (hidden ? !DPHiding() : ![DPHidden containsObject:tabID])) return;
     if (hidden) {
         [DPHidden addObject:tabID];
@@ -49,6 +59,7 @@ void DPHideBlank(NSString *tabID, BOOL hidden, NSWindow *window) {
 }
 
 void DPParkTab(NSString *tabID, BOOL parked) {
+    DPEnsureHideSets();
     if (!tabID) return;
     if (parked) [DPParked addObject:tabID];
     else [DPParked removeObject:tabID];
@@ -65,15 +76,11 @@ BOOL DPHidesTab(NSString *tab) {
 
 void DPExpectNewTab(NSWindow *window) {
     if (!DPHiding() || (DPExpecting() && DPExpectWindow == window)) return;
-    // Snapshot every window's tabs so another window's existing tabs aren't mistaken for the new one.
     NSMutableSet *known = [NSMutableSet setWithArray:DPListedTabs(nil)];
     id windows = DPValueForKey(NSApp.delegate, @"appleScriptWindows");
     if ([windows isKindOfClass:NSArray.class])
-        for (id scripted in windows) {
-            id tabs = DPValueForKey(scripted, @"appleScriptTabs");
-            if ([tabs isKindOfClass:NSArray.class])
-                for (id tab in tabs) [known addObject:DPTabID(tab) ?: @""];
-        }
+        for (id scripted in windows)
+            for (id tab in DPScriptTabs(scripted)) [known addObject:DPTabID(tab) ?: @""];
     for (NSView *tab in DPFindViews(DPDiaTabView)) [known addObject:DPStripTabID(tab) ?: @""];
     DPKnown = known;
     DPExpectWindow = window;
@@ -93,6 +100,7 @@ void DPStopExpecting(void) {
 }
 
 void DPHideTabRow(NSString *tabID, NSWindow *window) {
+    DPEnsureHideSets();
     if (!tabID || !window || !DPHiding() || !DPExpecting() || DPExpectWindow != window || !DPKnown || [DPKnown containsObject:tabID]) return;
     [DPHidden addObject:tabID];
     [DPOwner setObject:window forKey:tabID];
@@ -166,9 +174,7 @@ static void DPInstallHideTab(void) {
         NSLog(@"DiaPatches: Hide New Tab Until Opened doesn't know how this Dia lays out a tab's selection, so it stays off");
         return;
     }
-    DPHidden = [NSMutableSet set];
-    DPParked = [NSMutableSet set];
-    DPOwner = [NSMapTable strongToWeakObjectsMapTable];
+    DPEnsureHideSets();
     DPInstallFrozenLists();
     NSNotificationCenter *center = NSNotificationCenter.defaultCenter;
     [center addObserverForName:NSMenuWillSendActionNotification object:nil queue:nil usingBlock:^(NSNotification *note) {
@@ -186,13 +192,13 @@ static void DPInstallHideTab(void) {
 
 DP_PATCH(DPCommandBarHideTab) {
     .key = @"commandBarHideTab",
-    .order = 94,
+    .order = 88,
     .title = @"Hide New Tab Until Opened",
     .detail = @"Keep the new tab out of the sidebar and the tab bar while the command bar is open. The New Tab button shows as selected instead, and clicking it again closes the bar. The tab shows once you choose a result. Experimental.",
     .symbol = @"eye.slash.fill",
     .tint = @"systemOrangeColor",
     .requires = @"commandBar",
-    .section = @"Tabs",
+    .section = @"Behavior",
     .classes = DPClasses(DPDiaTabListCollection, DPDiaTabListLayout, DPDiaTabStripTabs, DPDiaTabView, DPDiaTabContentView, DPDiaTabBackground, DPDiaNewTabButton, DPDiaTabSurfaceButton),
     .install = DPInstallHideTab,
     .apply = DPApplyHideTab,

@@ -25,20 +25,23 @@ static NSImage *DPIconFor(id info, NSWindow *window) {
     return icon;
 }
 
+static NSString *DPExtensionName(id info) {
+    id name = DPValueForKey(info, @"name");
+    return [name isKindOfClass:NSString.class] ? name : @"";
+}
+
 static NSMenu *DPExtensionsMenu(id browser, NSWindow *window) {
     NSMenu *menu = [[NSMenu alloc] initWithTitle:@"Extensions"];
     id context = [browser respondsToSelector:@selector(context)] ? [browser performSelector:@selector(context)] : nil;
     id extensions = [context respondsToSelector:@selector(extensions)] ? [context performSelector:@selector(extensions)] : nil;
     id raw = [extensions respondsToSelector:@selector(listExtensions)] ? [extensions performSelector:@selector(listExtensions)] : nil;
     NSArray *all = [raw isKindOfClass:NSArray.class] ? [raw sortedArrayUsingComparator:^NSComparisonResult(id a, id b) {
-        id rawA = DPValueForKey(a, @"name"), rawB = DPValueForKey(b, @"name");
-        return [([rawA isKindOfClass:NSString.class] ? rawA : @"") localizedCaseInsensitiveCompare:([rawB isKindOfClass:NSString.class] ? rawB : @"")];
+        return [DPExtensionName(a) localizedCaseInsensitiveCompare:DPExtensionName(b)];
     }] : @[];
     for (id info in all) {
         if (![DPValueForKey(info, @"enabled") boolValue] || ![DPValueForKey(info, @"hasAction") boolValue]) continue;
         NSString *extensionID = DPValueForKey(info, @"id");
-        id rawName = DPValueForKey(info, @"name");
-        NSMenuItem *item = DPMenuItem([rawName isKindOfClass:NSString.class] ? rawName : @"", ^{
+        NSMenuItem *item = DPMenuItem(DPExtensionName(info), ^{
             if (extensionID && [browser respondsToSelector:@selector(executeExtensionAction:)])
                 [browser performSelector:@selector(executeExtensionAction:) withObject:extensionID];
         });

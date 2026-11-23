@@ -8,6 +8,19 @@ static NSView *DPWebRow(NSString *title, NSString *path) {
                      title, ^{ [NSWorkspace.sharedWorkspace openURL:url]; });
 }
 
+static NSString *DPUpdateSummary(DPUpdates *updates) {
+    NSUInteger available = 0, staged = 0;
+    for (NSString *part in @[DPDia, DPTweaks]) {
+        available += [updates available:part];
+        staged += [updates staged:part];
+    }
+    if (staged) return @"Ready to install";
+    if (available) return [NSString stringWithFormat:@"%lu update%@", available, available == 1 ? @"" : @"s"];
+    if (updates.checking) return @"Checking…";
+    if (updates.checkProblem) return @"Couldn’t check";
+    return updates.found ? @"Up to date" : @"";
+}
+
 @implementation DPHomeView {
     NSTextField *_version, *_updateSummary, *_pauseLabel;
     NSButton *_pauseButton;
@@ -27,10 +40,8 @@ static NSView *DPWebRow(NSString *title, NSString *path) {
         DPLabel(@"Software Update", 13, NSFontWeightRegular, NSColor.labelColor),
     ]];
     leading.spacing = 10;
-    NSStackView *trailing = [NSStackView stackViewWithViews:@[_updateSummary, DPSymbol(@"chevron.right", 11, NSColor.tertiaryLabelColor)]];
-    trailing.spacing = 10;
     __weak DPHomeView *weakSelf = self;
-    NSView *updateRow = DPLinkRow(DPRow(leading, trailing), @"Software Update", ^{
+    NSView *updateRow = DPLinkRow(DPRow(leading, DPDisclosure(_updateSummary)), @"Software Update", ^{
         if (weakSelf.open) weakSelf.open(@"Software Update", [DPSoftwareUpdateView new]);
     });
     _pauseLabel = DPLabel(@"", 13, NSFontWeightRegular, NSColor.labelColor);
@@ -56,23 +67,14 @@ static NSView *DPWebRow(NSString *title, NSString *path) {
 
 - (void)updatesDidChange {
     DPUpdates *updates = DPUpdates.shared;
-    NSUInteger available = 0, staged = 0;
-    for (NSString *part in @[DPDia, DPTweaks]) {
-        available += [updates available:part];
-        staged += [updates staged:part];
-    }
-    _updateSummary.stringValue = staged ? @"Ready to install"
-        : available ? [NSString stringWithFormat:@"%lu update%@", available, available == 1 ? @"" : @"s"]
-        : updates.checking ? @"Checking…"
-        : updates.checkProblem ? @"Couldn’t check"
-        : updates.found ? @"Up to date" : @"";
+    _updateSummary.stringValue = DPUpdateSummary(updates);
 
     static NSCharacterSet *vSet;
     static dispatch_once_t once;
     dispatch_once(&once, ^{ vSet = [NSCharacterSet characterSetWithCharactersInString:@"v"]; });
     id installed = updates.found[DPTweaks][@"installed"];
-    _version.stringValue = [installed isKindOfClass:NSString.class] ? [@"Version " stringByAppendingString:[installed stringByTrimmingCharactersInSet:vSet]]
-        : updates.found ? @"Development build" : @"";
+    if ([installed isKindOfClass:NSString.class]) _version.stringValue = [@"Version " stringByAppendingString:[installed stringByTrimmingCharactersInSet:vSet]];
+    else _version.stringValue = updates.found ? @"Development build" : @"";
     _version.hidden = !_version.stringValue.length;
 }
 

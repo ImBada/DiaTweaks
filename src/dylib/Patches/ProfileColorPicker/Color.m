@@ -48,22 +48,22 @@ NSColor *DPColorFromSixDigitHex(NSString *hex, NSString **canonical) {
     return DPParseHex(hex, NO, canonical);
 }
 
-NSString *DPHexFromColor(NSColor *color) {
-    if (!color) return nil;
+static NSColor *DPSRGB(NSColor *color) {
     NSColor *srgb = [color colorUsingColorSpace:NSColorSpace.sRGBColorSpace];
     if (!srgb && color.CGColor) srgb = [[NSColor colorWithCGColor:color.CGColor] colorUsingColorSpace:NSColorSpace.sRGBColorSpace];
+    return srgb;
+}
+
+NSString *DPHexFromColor(NSColor *color) {
+    NSColor *srgb = DPSRGB(color);
     if (!srgb) return nil;
     CGFloat r = 0, g = 0, b = 0, a = 0;
     [srgb getRed:&r green:&g blue:&b alpha:&a];
-    long ri = lround(MIN(MAX(r, 0.0), 1.0) * 255.0);
-    long gi = lround(MIN(MAX(g, 0.0), 1.0) * 255.0);
-    long bi = lround(MIN(MAX(b, 0.0), 1.0) * 255.0);
-    return [NSString stringWithFormat:@"#%02lX%02lX%02lX", ri, gi, bi];
+    return [NSString stringWithFormat:@"#%02lX%02lX%02lX", lround(DPUnit(r) * 255.0), lround(DPUnit(g) * 255.0), lround(DPUnit(b) * 255.0)];
 }
 
 NSArray *DPProfileGradientColors(NSColor *base, BOOL dark, double intensity) {
-    NSColor *srgb = [base colorUsingColorSpace:NSColorSpace.sRGBColorSpace];
-    if (!srgb && base.CGColor) srgb = [[NSColor colorWithCGColor:base.CGColor] colorUsingColorSpace:NSColorSpace.sRGBColorSpace];
+    NSColor *srgb = DPSRGB(base);
     if (!srgb) return nil;
     if (!isfinite(intensity)) intensity = 0.0;
     intensity = MIN(MAX(intensity, -1.0), 1.1);

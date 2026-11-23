@@ -40,7 +40,6 @@ void DPReleaseStrips(void);
 NSString *DPStripTabID(NSView *tabView);
 
 BOOL DPSelectionLayoutKnown(void);
-// Selection style enum: >= DPFirstFill is a retained NSColor, 0 is translucent fill, others are unselected.
 extern const uintptr_t DPFirstFill;
 BOOL DPStyleSelected(uintptr_t style);
 BOOL DPStyleNone(uintptr_t style);

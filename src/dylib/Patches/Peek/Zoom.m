@@ -1,10 +1,17 @@
 #import "Patches/Peek/Peek.h"
 #import <objc/message.h>
 
-#define DPDiaWindowController "_TtC6Window24PlatformWindowController"
+enum { DPPeekZoomActionCount = 4 };
+
+static SEL DPPeekZoomAction(size_t index) {
+    SEL actions[DPPeekZoomActionCount] = {@selector(zoomIn:), @selector(zoomInAlternate:), @selector(zoomOut:), @selector(resetZoom:)};
+    return actions[index];
+}
 
 static BOOL DPPeekIsZoom(SEL action) {
-    return action == @selector(zoomIn:) || action == @selector(zoomInAlternate:) || action == @selector(zoomOut:) || action == @selector(resetZoom:);
+    for (size_t i = 0; i < DPPeekZoomActionCount; i++)
+        if (action == DPPeekZoomAction(i)) return YES;
+    return NO;
 }
 
 static BOOL DPPeekZoomFrom(id page, SEL action, float *now, float *next) {
@@ -45,23 +52,23 @@ static void DPWindow_zoom(NSWindowController *self, SEL _cmd, id sender) {
 }
 
 static BOOL DPWindow_validate(NSWindowController *self, SEL _cmd, NSMenuItem *item) {
-    if (DPPeek.on && DPPeekIsZoom(item.action) && DPPeekHasCards()) DPPeekSyncTabs(self.window);
-    DPPeekCard *peek = DPPeek.on && DPPeekIsZoom(item.action) ? DPPeekCardIn(self.window) : nil;
-    float now, next;
-    if (!peek || !DPPeekZoomFrom(peek.page, item.action, &now, &next)) return DPCallOriginal(DPWindow_validate, self, item);
-    return fabsf(next - now) > 0.001;
+    if (DPPeek.on && DPPeekIsZoom(item.action)) {
+        if (DPPeekHasCards()) DPPeekSyncTabs(self.window);
+        DPPeekCard *peek = DPPeekCardIn(self.window);
+        float now, next;
+        if (peek && DPPeekZoomFrom(peek.page, item.action, &now, &next)) return fabsf(next - now) > 0.001;
+    }
+    return DPCallOriginal(DPWindow_validate, self, item);
 }
 
 void DPPeekInstallZoom(void) {
-    SEL actions[] = {@selector(zoomIn:), @selector(zoomInAlternate:), @selector(zoomOut:), @selector(resetZoom:)};
-    for (NSUInteger i = 0; i < 4; i++) DPHook(DPDiaWindowController, actions[i], (IMP)DPWindow_zoom);
+    for (size_t i = 0; i < DPPeekZoomActionCount; i++) DPHook(DPDiaWindowController, DPPeekZoomAction(i), (IMP)DPWindow_zoom);
     DPHook(DPDiaWindowController, @selector(validateMenuItem:), (IMP)DPWindow_validate);
 }
 
 NSString *DPPeekZoomProblem(void) {
     Class controller = objc_getClass(DPDiaWindowController);
-    SEL actions[] = {@selector(zoomIn:), @selector(zoomInAlternate:), @selector(zoomOut:), @selector(resetZoom:)};
-    for (NSUInteger i = 0; i < 4; i++)
-        if (!DPIsHooked(controller, actions[i], (IMP)DPWindow_zoom)) return @"zoom doesn't reach Peek";
+    for (size_t i = 0; i < DPPeekZoomActionCount; i++)
+        if (!DPIsHooked(controller, DPPeekZoomAction(i), (IMP)DPWindow_zoom)) return @"zoom doesn't reach Peek";
     return DPIsHooked(controller, @selector(validateMenuItem:), (IMP)DPWindow_validate) ? nil : @"zoom menu items don't reach Peek";
 }

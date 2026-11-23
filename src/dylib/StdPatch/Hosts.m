@@ -16,8 +16,8 @@ NSArray<NSString *> *DPHostFolders(void) {
 }
 
 NSString *DPHostFolder(BOOL create, NSError **error) {
-    NSString *chrome = DPAppSupport(@"Google/Chrome/NativeMessagingHosts");
-    NSString *dia = DPAppSupport(@"Dia/User Data/NativeMessagingHosts");
+    NSArray<NSString *> *folders = DPHostFolders();
+    NSString *chrome = folders[0], *dia = folders[1];
     if (DPDirectoryResolvable(chrome)) return chrome;
     if (!create) return dia;
     NSFileManager *files = NSFileManager.defaultManager;
@@ -38,7 +38,6 @@ NSString *DPRelayProblem(void) {
     return nil;
 }
 
-// Find the highest unwritable directory under Application Support.
 static NSString *DPFolderToRepair(NSString *folder) {
     NSString *support = DPAppSupport(@""), *repair = nil;
     for (NSString *dir = folder; [dir hasPrefix:support]; dir = dir.stringByDeletingLastPathComponent) {

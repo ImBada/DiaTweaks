@@ -22,7 +22,12 @@ static NSString *const DPGlasses[] = {
     @"Sidebar", @"Abutted Sidebar", @"Inspector", @"Control", @"Loupe", @"Slider", @"Camera", @"Cartouche Popover",
 };
 
-static Class DPGlassEffectView(void) { return NSClassFromString(@"NSGlassEffectView"); }
+static Class DPGlassEffectView(void) {
+    static Class cls;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ cls = NSClassFromString(@"NSGlassEffectView"); });
+    return cls;
+}
 
 static NSMenu *DPMaterialChoices(void) {
     NSMenu *menu = [[NSMenu alloc] initWithTitle:@"Material"];
@@ -108,10 +113,11 @@ static void DPApplyMaterialUnder(NSView *tint, BOOL floating) {
     NSMutableArray<NSVisualEffectView *> *effects = [NSMutableArray array];
     for (NSView *view in backgrounds) DPCollectEffects(view, effects);
     NSVisualEffectBlendingMode blending = floating ? NSVisualEffectBlendingModeWithinWindow : NSVisualEffectBlendingModeBehindWindow;
+    BOOL restoring = !translucent || glass;
     for (NSVisualEffectView *effect in effects) {
-        if (!translucent || glass) {
-            if (!DPGet(effect, &DPMaterialKey)) continue;
-            NSArray *dia = DPDiaValue(effect, &DPMaterialKey, @[ @(effect.material), @(effect.blendingMode), @(effect.state) ]);
+        if (restoring && !DPGet(effect, &DPMaterialKey)) continue;
+        NSArray *dia = DPDiaValue(effect, &DPMaterialKey, @[ @(effect.material), @(effect.blendingMode), @(effect.state) ]);
+        if (restoring) {
             DPSet(effect, &DPMaterialKey, nil);
             NSVisualEffectMaterial diaMat = [dia[0] integerValue];
             NSVisualEffectBlendingMode diaBlend = [dia[1] integerValue];
@@ -121,7 +127,6 @@ static void DPApplyMaterialUnder(NSView *tint, BOOL floating) {
             if (effect.state != diaState) effect.state = diaState;
             continue;
         }
-        NSArray *dia = DPDiaValue(effect, &DPMaterialKey, @[ @(effect.material), @(effect.blendingMode), @(effect.state) ]);
         NSVisualEffectMaterial wantMat = choice ? value : DPWindowBackgroundMaterial(tint.window);
         if (effect.material != wantMat) effect.material = wantMat;
         if (effect.blendingMode != blending) effect.blendingMode = blending;
@@ -243,16 +248,17 @@ static void DPInstallWindowMaterial(void) {
 
 DP_PATCH(DPWindowMaterial) {
     .key = @"windowMaterial",
-    .order = 99,
+    .order = 84,
     .title = @"Window Material",
     .detail = @"Show a material or Liquid Glass behind the tabs and sidebar, still tinted with the profile’s color.",
     .symbol = @"circle.on.app.liquid.glass.fill square.2.layers.3d.top.filled",
-    .tint = @"systemBrownColor",
-    .section = @"Window",
+    .tint = @"systemTealColor",
+    .section = @"Sidebar & Tab Bar",
     .classes = DPClasses(DPDiaWindowFrame, DPDiaWindowTint, DPDiaWindowBackgroundTile, DPDiaFloatingSidebar),
     .choice = @"windowMaterialChoice",
     .defaultChoice = @"glass.17",
     .choices = DPMaterialChoices,
+    .installLate = YES,
     .install = DPInstallWindowMaterial,
     .apply = DPApplyWindowMaterial,
     .verify = DPVerifyWindowMaterial,

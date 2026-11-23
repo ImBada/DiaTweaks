@@ -25,11 +25,8 @@ pub fn run(env: &Env, ui: &Ui) -> Result<()> {
     }
 
     let spinner = ui.spinner("Downloading the latest DiaTweaks");
-    let download = spinner.check(diapatch.run(
-        &["self-update"],
-        OnInterrupt::StopDownloads,
-        &spinner,
-    ))?;
+    let download =
+        spinner.check(diapatch.run(&["self-update"], OnInterrupt::StopDownloads, &spinner))?;
     if signals::interrupted() {
         return Err(spinner.fail(Cancelled::nothing_changed().into()));
     }

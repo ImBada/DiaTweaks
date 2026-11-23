@@ -65,7 +65,6 @@ int main(void) {
         check("protect test page RX", kr == KERN_SUCCESS);
         sys_icache_invalidate(code, vm_page_size);
 
-        // 1. Signature search: one sync site, two async sites, and rejection of short, NULL and ambiguous buffers.
         uint32_t *syncSites[1] = {NULL}, *asyncSites[DPAsyncSites] = {NULL, NULL};
         check("DPFindSitesIn finds the sync site", DPFindSitesIn(code, stubWords, DPSyncSignature, DPSyncSignatureCount, syncSites, DPSyncSiteIndex, 1) == 1);
         check("sync site is the absent-site immediate", syncSites[0] == code + syncStart + DPSyncSiteIndex && syncSites[0][0] == DPIncludedSync);
@@ -81,7 +80,6 @@ int main(void) {
         memcpy(dupBuf + 64, code + syncStart, DPSyncSignatureCount * sizeof(uint32_t));
         check("DPFindSitesIn reports an ambiguous duplicate sync match", DPFindSitesIn(dupBuf, 128, DPSyncSignature, DPSyncSignatureCount, syncSites, DPSyncSiteIndex, 1) == 2);
 
-        // 2. Baseline OFF: an unconfigured site is included, which is the bug the tweak fixes.
         DPSyncSite = NULL;
         DPAsyncSiteCount = 0;
         DPSearched = NO;
@@ -92,7 +90,6 @@ int main(void) {
         check("off: unconfigured safe site is included", DPToggleState(DPSitePreference(DPNoEntry, YES, NO), YES) == 0);
         check("off: unconfigured unsafe site is excluded", DPToggleState(DPSitePreference(DPNoEntry, NO, NO), NO) == 2);
 
-        // 3. Turn ON: the sync and both async immediates become .exclude, and an unconfigured site is left out.
         check("re-find the sync site", DPFindSitesIn(code, stubWords, DPSyncSignature, DPSyncSignatureCount, syncSites, DPSyncSiteIndex, 1) == 1);
         check("re-find both async sites", DPFindSitesIn(code, stubWords, DPAsyncSignature, DPAsyncSignatureCount, asyncSites, DPAsyncSiteIndex, DPAsyncSites) == DPAsyncSites);
         DPSyncSite = syncSites[0];
@@ -108,14 +105,12 @@ int main(void) {
         check("on: unconfigured safe site is excluded", DPToggleState(DPSitePreference(DPNoEntry, YES, YES), YES) == 2);
         check("on: unconfigured unsafe site is excluded", DPToggleState(DPSitePreference(DPNoEntry, NO, YES), NO) == 2);
 
-        // 4. Stored preferences are untouched, so manual per-site opt-in still works.
         check("on: stored honorCacheControl stays included", DPToggleState(DPSitePreference(DPHonorCacheControl, YES, YES), YES) == 0);
         check("on: stored alwaysScrape stays included", DPToggleState(DPSitePreference(DPAlwaysScrape, YES, YES), YES) == 0);
         check("on: stored neverScrape stays excluded", DPToggleState(DPSitePreference(DPNeverScrape, YES, YES), YES) == 2);
         check("on: stored inaccessible stays excluded", DPToggleState(DPSitePreference(DPInaccessible, YES, YES), YES) == 2);
         check("on: toggling a site on writes a stored entry that reads back included", DPToggleState(DPSitePreference(DPAlwaysScrape, YES, YES), YES) == 0);
 
-        // 5. Idempotent re-apply, then off / DPPaused() restoration.
         DPApplyExcludeSitesFromAIHistory(&DPExcludeSitesFromAIHistory);
         check("on: repeated apply is idempotent", DPVerifyExcludeSitesFromAIHistory(&DPExcludeSitesFromAIHistory) == nil && code[syncStart + DPSyncSiteIndex] == DPExcludedSync);
 
@@ -133,7 +128,6 @@ int main(void) {
         DPExcludeSitesFromAIHistory.on = NO;
         DPApplyExcludeSitesFromAIHistory(&DPExcludeSitesFromAIHistory);
 
-        // 6. Turn Off AI covers this tweak: it reaches the same instructions while its own switch is off.
         DPTurnOffAI.on = YES;
         DPApplyExcludeSitesFromAIHistory(&DPExcludeSitesFromAIHistory);
         check("turn off AI: excludes unconfigured sites with this switch off", !DPExcludeSitesFromAIHistory.on && code[syncStart + DPSyncSiteIndex] == DPExcludedSync && DPVerifyExcludeSitesFromAIHistory(&DPExcludeSitesFromAIHistory) == nil);
@@ -141,13 +135,11 @@ int main(void) {
         DPApplyExcludeSitesFromAIHistory(&DPExcludeSitesFromAIHistory);
         check("turn off AI off: restores Dia's default", code[syncStart + DPSyncSiteIndex] == DPIncludedSync && DPVerifyExcludeSitesFromAIHistory(&DPExcludeSitesFromAIHistory) == nil);
 
-        // 7. A half-applied state is reported rather than silently accepted.
         check("half-apply the second async site", DPWrite(DPAsyncSite[1], DPIncludedAsync, DPExcludedAsync));
         check("verify reports disagreeing checks", [DPVerifyExcludeSitesFromAIHistory(&DPExcludeSitesFromAIHistory) isEqualToString:@"Dia's AI history search checks disagree"]);
         check("restore the second async site", DPWrite(DPAsyncSite[1], DPExcludedAsync, DPIncludedAsync));
         check("verify recovers once the checks agree", DPVerifyExcludeSitesFromAIHistory(&DPExcludeSitesFromAIHistory) == nil);
 
-        // 8. Page-boundary rewrite safety: put the sync site at the last 4 bytes of page 0.
         mach_vm_address_t twoPages = 0;
         kr = mach_vm_allocate(mach_task_self(), &twoPages, 2 * vm_page_size, VM_FLAGS_ANYWHERE);
         check("allocate 2-page boundary buffer", kr == KERN_SUCCESS);
@@ -164,7 +156,6 @@ int main(void) {
         check("cross-page restore restores the site", boundary[0] == DPIncludedSync && !DPVerifyExcludeSitesFromAIHistory(&DPExcludeSitesFromAIHistory));
         mach_vm_deallocate(mach_task_self(), twoPages, 2 * vm_page_size);
 
-        // 9. Unavailable fallback when Dia's binary doesn't match the signature.
         DPSyncSite = NULL;
         DPAsyncSiteCount = 0;
         DPSearched = YES;

@@ -139,7 +139,6 @@ const __harness = (() => {
   };
 
   const scenarios = {
-    // 1. Untouched Chromium: the tweak intercepts get/create and reports autofill off.
     vanilla: {
       async check(env) {
         const credentials = navigator.credentials;
@@ -170,7 +169,6 @@ const __harness = (() => {
       },
     },
 
-    // 2. Manager before page.js, own properties on navigator.credentials: the tweak steps aside.
     managerBeforeOwnProperty: {
       setup(env) {
         navigator.credentials.get = managerGet;
@@ -189,7 +187,6 @@ const __harness = (() => {
       },
     },
 
-    // 3. Manager before page.js, CredentialsContainer.prototype assigned: the tweak steps aside.
     managerBeforePrototype: {
       setup(env) {
         env.CredentialsContainer.prototype.get = managerGet;
@@ -206,7 +203,6 @@ const __harness = (() => {
       },
     },
 
-    // 4. Same, installed with Object.defineProperty.
     managerBeforePrototypeDefineProperty: {
       setup(env) {
         Object.defineProperty(env.CredentialsContainer.prototype, 'get', { value: managerGet, writable: true, configurable: true });
@@ -219,7 +215,6 @@ const __harness = (() => {
       },
     },
 
-    // 5. Manager before page.js that hooked only create: the tweak still steps aside entirely.
     managerBeforeCreateOnly: {
       setup() {
         navigator.credentials.create = managerCreate;
@@ -232,7 +227,6 @@ const __harness = (() => {
       },
     },
 
-    // 6. Manager after page.js wrapping navigator.credentials: it runs outermost and delegates.
     managerAfterOwnProperty: {
       async check() {
         const credentials = navigator.credentials;
@@ -253,7 +247,6 @@ const __harness = (() => {
       },
     },
 
-    // 7. Manager after page.js patching CredentialsContainer.prototype: not shadowed, it runs.
     managerAfterPrototype: {
       async check(env) {
         const proto = env.CredentialsContainer.prototype;
@@ -275,7 +268,6 @@ const __harness = (() => {
       },
     },
 
-    // 8. Manager after page.js that answers on the prototype itself: its result wins.
     managerAfterPrototypeOwn: {
       async check(env) {
         env.CredentialsContainer.prototype.get = () => Promise.resolve({ id: 'manager-get' });
@@ -285,7 +277,6 @@ const __harness = (() => {
       },
     },
 
-    // 9. Manager after page.js that answers on navigator.credentials itself: its result wins.
     managerAfterOwnPropertyOwn: {
       async check() {
         navigator.credentials.get = () => Promise.resolve({ id: 'manager-get' });
@@ -295,7 +286,6 @@ const __harness = (() => {
       },
     },
 
-    // 10. page.js injected twice: the second run steps aside instead of wrapping itself.
     pageTwice: {
       repeat: 1,
       async check(env) {
@@ -306,7 +296,6 @@ const __harness = (() => {
       },
     },
 
-    // 11. Manager before page.js that only advertises conditional mediation: passkeys still work.
     managerBeforeConditionalOnly: {
       setup() {
         PublicKeyCredential.isConditionalMediationAvailable = () => Promise.resolve(true);
@@ -318,7 +307,6 @@ const __harness = (() => {
       },
     },
 
-    // 12. A prototype page.js cannot write to: it bails without a partial patch.
     frozenPrototype: {
       setup(env) {
         Object.defineProperty(env.CredentialsContainer.prototype, 'get', { value: env.nativeGet, writable: false, configurable: false });
@@ -331,7 +319,6 @@ const __harness = (() => {
       },
     },
 
-    // 13. No CredentialsContainer global: page.js returns quietly.
     missingGlobals: {
       setup() {
         delete globalThis.CredentialsContainer;
@@ -343,7 +330,6 @@ const __harness = (() => {
       },
     },
 
-    // 14. No navigator.credentials (a non-secure context): page.js returns quietly.
     missingCredentials: {
       setup() {
         delete navigator.credentials;

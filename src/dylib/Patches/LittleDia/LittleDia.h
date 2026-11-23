@@ -5,7 +5,7 @@
 #define DPDiaPopupBar      "_TtC5Popup22PopupNavigationBarView"
 #define DPDiaPopupTitle    "_TtC13NavigationBar21AssistantBarTitleView"
 
-extern DPPatch DPLittleDia, DPLittleDiaTabLinks, DPLittleDiaFollowRules, DPLittleDiaRemember;
+extern DPPatch DPLittleDia, DPLittleDiaTabLinks, DPLittleDiaFollowRules, DPLittleDiaRemember, DPLittleDiaLauncher;
 
 BOOL DPLittleDiaTakesTabLink(id page, NSURL *url, BOOL leavesPinned);
 
@@ -34,6 +34,12 @@ NSString *DPLittleDiaLinkMenuProblem(void);
 void DPInstallLittleDiaNewWindow(void);
 void DPRefreshLittleDiaNewWindow(void);
 NSString *DPLittleDiaNewWindowProblem(void);
+
+void DPShowLittleDiaLauncher(void);
+void DPToggleLittleDiaLauncher(void);
+void DPHideLittleDiaLauncher(void);
+BOOL DPLittleDiaLauncherVisible(void);
+NSURL *DPLittleDiaSearchURL(NSString *text);
 
 #define DPLittleDiaWait 3
 void DPExpectLittleDiaWindow(NSRect frame, NSDictionary *noted, void (^missed)(void), void (^claimed)(NSWindow *window));

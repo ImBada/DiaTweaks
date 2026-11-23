@@ -13,11 +13,18 @@ static void DPCacheHidePatches(void) {
         if (DPPatches[i]->hides) DPHidePatches[DPHidePatchCount++] = DPPatches[i];
 }
 
+static BOOL DPAnyHidesOn(void) {
+    DPCacheHidePatches();
+    for (NSUInteger i = 0; i < DPHidePatchCount; i++)
+        if (DPHidePatches[i]->on) return YES;
+    return NO;
+}
+
 // Only a match is cached: some views only match once Dia labels them.
 static NSArray<NSValue *> *DPHiders(NSView *view) {
     NSArray<NSValue *> *cached = DPGet(view, &DPHidersKey);
     if (cached) return cached;
-    if (!DPHidePatches) DPCacheHidePatches();
+    DPCacheHidePatches();
     NSMutableArray<NSValue *> *hiders = nil;
     for (NSUInteger i = 0; i < DPHidePatchCount; i++) {
         DPPatch *patch = DPHidePatches[i];
@@ -67,14 +74,19 @@ static void DPHidden_viewDidMoveToWindow(NSView *self, SEL _cmd) {
     if (patch) DPEnforcePatch(self, patch);
 }
 
-void DPEnforceHides(NSView *root) {
+static void DPEnforceHidesIn(NSView *root) {
     DPPatch *patch = DPHider(root);
     if (!patch) {
-        for (NSView *sub in root.subviews) DPEnforceHides(sub);
+        for (NSView *sub in root.subviews) DPEnforceHidesIn(sub);
         return;
     }
     DPHookClass(root.class, @selector(viewDidMoveToWindow), (IMP)DPHidden_viewDidMoveToWindow);
     DPEnforcePatch(root, patch);
+}
+
+void DPEnforceHides(NSView *root) {
+    if (!DPAnyHidesOn()) return;
+    DPEnforceHidesIn(root);
 }
 
 void DPApplyHides(DPPatch *patch) {

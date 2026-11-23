@@ -21,6 +21,7 @@ DP_PATCH(DPHidePinnedTabBorder) {
     .symbol = @"pin.fill",
     .tint = @"systemTealColor",
     .section = @"Sidebar & Tab Bar",
+    .group = @"pinnedTabs",
     .classes = DPClasses(DPDiaPinnedTab, DPDiaPinnedTabOutline),
     .hides = DPIsPinnedTabOutline,
     .install = DPInstallHidePinnedTabBorder,

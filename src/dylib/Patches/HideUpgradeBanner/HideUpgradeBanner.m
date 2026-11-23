@@ -16,6 +16,7 @@ DP_PATCH(DPHideUpgradeBanner) {
     .key = @"hideUpgradeBanner",
     .order = 95,
     .section = @"AI",
+    .group = @"aiPrompts",
     .title = @"Hide Upgrade Banner",
     .detail = @"Hide the “Looking for chat?” upgrade banner under the command bar.",
     .symbol = @"crown.fill",

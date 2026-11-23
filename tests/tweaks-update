@@ -40,7 +40,6 @@ check "source build on another branch" true "$forked"
 check "source build GitHub doesn't know" true "$unknown"
 check "source build with a malformed commit" true "not-a-commit"
 
-# A release install is offered a release it doesn't have, whatever commit it was built from.
 printf '<plist><dict><key>digest</key><string>sha256:old</string><key>tag</key><string>v1.0.0</string></dict></plist>' > "$temporary/home/release.plist"
 check "release install, newer release" true "$newer"
 printf '<plist><dict><key>digest</key><string>sha256:aaaa</string><key>tag</key><string>v2.0.0</string></dict></plist>' > "$temporary/home/release.plist"
@@ -51,14 +50,12 @@ check "release install, same release" false "$older"
 rmdir "$temporary/home/app-icons"
 check "release install, same release missing a file" true "$older"
 
-# self-update says why it staged nothing.
 rm -f "$temporary/home/release.plist"
 message=$(DIAPATCH_HOME="$temporary/home" DIAPATCH_CACHE="$temporary/cache" DIAPATCH_RELEASES="file://$temporary/release.json" \
     DIAPATCH_COMPARE="file://$temporary/compare" DIAPATCH_COMMIT="$newer" "$diapatch" self-update)
 case $message in *"older than the source build 1111111 "*) echo "ok   self-update names the reason" ;;
     *) echo "FAIL self-update said: $message" >&2; failures=$((failures + 1)) ;; esac
 
-# A Dia download that unpacks but can't be used is remembered for its build, so the launch check doesn't fetch it again.
 dia() {
     DIAPATCH_HOME="$temporary/dia-home" DIAPATCH_CACHE="$temporary/dia-cache" DIAPATCH_APP="$temporary/none.app" \
         DIAPATCH_FEED="file://$temporary/dia.xml" DIAPATCH_RELEASES="file://$temporary/release.json" "$diapatch" "$@"
@@ -98,10 +95,8 @@ offer 200
 dia update > /dev/null 2>&1 || true
 expect "a download that doesn't unpack is not remembered" silent
 
-# Unreachable feed makes `diapatch update` exit non-zero (not 0).
 expect "unreachable feed fails update" sh -c "! DIAPATCH_HOME='$temporary/dia-home' DIAPATCH_CACHE='$temporary/dia-cache' DIAPATCH_APP='$temporary/none.app' DIAPATCH_FEED='file://$temporary/missing.xml' '$diapatch' update >/dev/null 2>&1"
 
-# Malformed release JSON (non-array assets, missing browser_download_url, non-UTF8) never crashes check --json.
 printf '{"tag_name":"v2.0.0","assets":"oops"}\n' > "$temporary/bad-assets.json"
 expect "non-array assets JSON is rejected cleanly" sh -c "DIAPATCH_HOME='$temporary/home' DIAPATCH_CACHE='$temporary/cache' DIAPATCH_FEED='file://$temporary/none.xml' DIAPATCH_RELEASES='file://$temporary/bad-assets.json' '$diapatch' check --json >/dev/null"
 
@@ -111,7 +106,6 @@ expect "missing browser_download_url is rejected cleanly" sh -c "DIAPATCH_HOME='
 printf '\xff\xfe\xfd' > "$temporary/nonutf8.bin"
 expect "non-UTF8 feed and release responses do not crash" sh -c "DIAPATCH_HOME='$temporary/home' DIAPATCH_CACHE='$temporary/cache' DIAPATCH_FEED='file://$temporary/nonutf8.bin' DIAPATCH_RELEASES='file://$temporary/nonutf8.bin' '$diapatch' check --json >/dev/null"
 
-# Missing app with --relaunch fails promptly instead of retrying open for 10 seconds.
 start=$(date +%s)
 DIAPATCH_HOME="$temporary/relaunch-home" DIAPATCH_CACHE="$temporary/relaunch-cache" DIAPATCH_APP="$temporary/missing.app" "$diapatch" install --relaunch >/dev/null 2>&1 || true
 elapsed=$(( $(date +%s) - start ))

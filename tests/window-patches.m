@@ -55,7 +55,6 @@ CAAnimation *DPReshapeDiaAnimation(CALayer *layer, CAAnimation *animation) { ret
 CGPathRef DPReshapeSetPath(CALayer *layer, BOOL shadow, CGPathRef path) { return path; }
 CGFloat DPHiddenSuggestionsHeight(NSView *suggestions) { return gHiddenSuggestionsHeight; }
 
-// Stubs for CommandBar/HideTabParked + HideTabLayout
 BOOL DPHiding(void) { return gHiding; }
 BOOL DPHidesTab(NSString *tabID) { return gHiding && [tabID isEqual:@"parked-1"]; }
 BOOL DPHidingATab(NSWindow *window) { return NO; }
@@ -63,7 +62,6 @@ BOOL DPParkingAny(void) { return gHiding; }
 NSString *DPRowName(NSCollectionView *list, NSIndexPath *path) { return path.item == 0 ? @".tab(parked-1)" : @".tab(real-2)"; }
 NSString *DPTabIn(NSString *rowName) { return [rowName containsString:@"parked-1"] ? @"parked-1" : @"real-2"; }
 
-// Stubs for PrivateWindowTheme
 @interface DPFakeContextID : NSObject
 @property BOOL incognito;
 - (BOOL)isIncognito;
@@ -93,7 +91,6 @@ id DPMsg(id object, SEL sel) {
 }
 BOOL DPMsgBool(id object, SEL sel) { return ((BOOL (*)(id, SEL))objc_msgSend)(object, sel); }
 
-// Fake Dia classes
 @interface _TtC6Window14PlatformWindow : NSWindow
 @property (nonatomic) CGFloat fakeCornerRadius;
 @property (nonatomic) BOOL fakeVisible;
@@ -278,7 +275,6 @@ int main(void) {
         DPCompactCommandBar.install();
         DPInstallFrozenLists();
 
-        // === 1. WindowCorners: radius=0 restores corner items & floating sidebar; NavigationBar_layout is no-op when off ===
         _TtC6Window14PlatformWindow *win = DPMakeBrowserWindow(NO, YES);
         gFakeWindows = @[ win ];
         _TtC10TabSidebar17SidebarHeaderView *header = [[_TtC10TabSidebar17SidebarHeaderView alloc] initWithFrame:NSMakeRect(0, 560, 220, 40)];
@@ -316,8 +312,7 @@ int main(void) {
         [nav layout];
         CHECK(gRoundCornerControlsCalls == 0, "NavigationBar_layout skips DPRoundCornerControls when WindowCorners and EdgeToEdge are off");
 
-        // === 2. WindowMaterial: nil window/backgroundColor safety, untouched NSVisualEffectView, minimized floating sidebar restore ===
-        _TtC6Window14PlatformWindow *matWin = DPMakeBrowserWindow(NO, NO); // invisible/minimized!
+        _TtC6Window14PlatformWindow *matWin = DPMakeBrowserWindow(NO, NO);
         matWin.backgroundColor = nil;
         _TtC6Window28FloatingSidebarContainerView *minFloat = [[_TtC6Window28FloatingSidebarContainerView alloc] initWithFrame:NSMakeRect(0, 0, 200, 500)];
         NSView *floatContent = [[NSView alloc] initWithFrame:minFloat.bounds];
@@ -331,7 +326,6 @@ int main(void) {
         [minFloat addSubview:floatContent];
         [matWin.contentView addSubview:minFloat];
 
-        // Detached frame with tint.window == nil must not crash
         _TtC6Window24PlatformWindowThemeFrame *detachedFrame = [[_TtC6Window24PlatformWindowThemeFrame alloc] initWithFrame:NSMakeRect(0, 0, 400, 300)];
         NSView *dfContent = [[NSView alloc] initWithFrame:detachedFrame.bounds];
         _TtC15WindowTreatment31WindowBackgroundOverlayTintView *dfTint = [[_TtC15WindowTreatment31WindowBackgroundOverlayTintView alloc] initWithFrame:detachedFrame.bounds];
@@ -340,12 +334,11 @@ int main(void) {
 
         gFakeWindows = @[ matWin ];
         DPWindowMaterial.on = YES;
-        [detachedFrame layout]; // would throw NSInvalidArgumentException before fix!
+        [detachedFrame layout];
         DPWindowMaterial.apply(&DPWindowMaterial);
         CHECK(floatWash.hidden && floatEffect.material == NSVisualEffectMaterialSidebar,
               "WindowMaterial applies to floating sidebar even in minimized window");
 
-        // Untouched NSVisualEffectView elsewhere in app must not get hidden-suppressed or modified
         NSVisualEffectView *otherEffect = [[NSVisualEffectView alloc] initWithFrame:NSMakeRect(0, 0, 50, 50)];
         otherEffect.hidden = YES;
         otherEffect.hidden = NO;
@@ -356,7 +349,6 @@ int main(void) {
         CHECK(!floatWash.hidden && floatEffect.material == NSVisualEffectMaterialUnderWindowBackground,
               "WindowMaterial turning off restores minimized floating sidebar wash and material");
 
-        // Regression: WindowCorners KVO watch detaches cleanly on layer swap and off-toggle before async drain, and ignores unknown KVO contexts.
         _TtC6Window28FloatingSidebarContainerView *kvoFloat = [[_TtC6Window28FloatingSidebarContainerView alloc] initWithFrame:NSMakeRect(0, 0, 220, 600)];
         kvoFloat.wantsLayer = YES;
         kvoFloat.layer.cornerRadius = 12;
@@ -373,7 +365,7 @@ int main(void) {
         newLayer.cornerRadius = 12;
         kvoFloat.layer = newLayer;
         [kvoFloat layout];
-        oldLayer.cornerRadius = 5; // Detached watch must not touch or crash on old layer.
+        oldLayer.cornerRadius = 5;
         newLayer.cornerRadius = 8; // Queues async DPRoundFloatingSidebar.
         DPWindowCorners.on = NO;
         DPWindowCorners.apply(&DPWindowCorners);
@@ -382,7 +374,6 @@ int main(void) {
         [kvoFloat removeFromSuperview];
         [gFakeDefaults removeObjectForKey:@"windowCornerRadius"];
 
-        // Regression: WindowMaterial Liquid Glass view handles _variant/cornerRadius safely without thrash-recreating.
         Class glassCls = NSClassFromString(@"NSGlassEffectView");
         if (!glassCls) {
             glassCls = objc_allocateClassPair(NSView.class, "NSGlassEffectView", 0);
@@ -406,7 +397,6 @@ int main(void) {
         CHECK(afterOff == nil, "WindowMaterial removes glass view cleanly when turned off");
         gMaterialChoice = @"material.7";
 
-        // === 3. PrivateWindowTheme: restores BOTH window gradient AND floating sidebar gradient; nil colors untouched ===
         _TtC6Window14PlatformWindow *normalWin = DPMakeBrowserWindow(NO, YES);
         _TtC6Window14PlatformWindow *privWin = DPMakeBrowserWindow(YES, YES);
         gFakeWindows = @[ normalWin, privWin ];
@@ -460,7 +450,6 @@ int main(void) {
         CHECK([privLayer1.colors isEqual:privColors] && [privLayer2.colors isEqual:privColors] && nilLayer.colors == nil,
               "PrivateWindowTheme turning off restores both gradients and restores nil colors as nil");
 
-        // === 4. HideTrafficLights: turning off clears state so fullscreen/future layouts are untouched, safe if lights removed ===
         _TtC10TabSidebar17SidebarHeaderView *tlHeader = [[_TtC10TabSidebar17SidebarHeaderView alloc] initWithFrame:NSMakeRect(0, 0, 220, 40)];
         NSStackView *tlStack = [[NSStackView alloc] initWithFrame:NSMakeRect(16, 4, 200, 32)];
         _TtC5ARCUI21WindowStandardButtons *lights = [[_TtC5ARCUI21WindowStandardButtons alloc] initWithFrame:NSMakeRect(0, 0, 52, 16)];
@@ -480,20 +469,17 @@ int main(void) {
               "HideTrafficLights turning off restores priority and frame");
         CHECK(DPHideTrafficLights.verify(&DPHideTrafficLights) == nil, "HideTrafficLights verify confirms no stale state left");
 
-        // Simulate fullscreen setting NotVisible while tweak is OFF: layout must NOT overwrite it back to MustHold!
         [tlStack setVisibilityPriority:NSStackViewVisibilityPriorityNotVisible forView:lights];
         [tlHeader layout];
         CHECK([tlStack visibilityPriorityForView:lights] == NSStackViewVisibilityPriorityNotVisible,
               "HideTrafficLights off does not override Dia's own fullscreen visibility priority");
 
-        // Simulate lights removed from stack while tweak is ON: must not throw!
         DPHideTrafficLights.on = YES;
         [tlStack removeView:lights];
         [tlHeader layout];
         DPHideTrafficLights.on = NO;
         [tlHeader layout];
 
-        // === 5. HideTabParked & HideTabLayout: turning off clears parked offset and clamps negative height ===
         _TtCC7TabList11TabListView14CollectionView *col = [[_TtCC7TabList11TabListView14CollectionView alloc] initWithFrame:NSMakeRect(0, 0, 200, 200)];
         _TtC7TabList27TabListCollectionViewLayout *layout = [_TtC7TabList27TabListCollectionViewLayout new];
         col.collectionViewLayout = layout;
@@ -502,13 +488,12 @@ int main(void) {
         [layout prepareLayout];
         CHECK(DPParkedHeight(layout) == 30 && layout.collectionViewContentSize.height == 30,
               "parked layout subtracts hidden row height while hiding");
-        gHiding = NO; // Turned off before prepareLayout runs again!
+        gHiding = NO;
         CHECK(DPParkedHeight(layout) == 0 && layout.collectionViewContentSize.height == 60,
               "parked layout immediately stops subtracting height and clears stale rows when hiding turns off");
         NSCollectionViewLayoutAttributes *row1 = [layout layoutAttributesForItemAtIndexPath:[NSIndexPath indexPathForItem:1 inSection:0]];
         CHECK(NSMinY(row1.frame) == 30 && !row1.hidden, "row attributes are untouched immediately when hiding turns off");
 
-        // === 6. CompactCommandBar: chat-locked cache checks full toolbar, skips defaults when off, clears DPFullSizeKey ===
         [gFakeDefaults setBool:NO forKey:@"commandBarChatLocked"];
         _TtC15BoostCommandBar8RootView *barRoot = [[_TtC15BoostCommandBar8RootView alloc] initWithFrame:NSMakeRect(0, 0, 600, 120)];
         _TtC15BoostCommandBar18InputContainerView *inputView = [[_TtC15BoostCommandBar18InputContainerView alloc] initWithFrame:NSMakeRect(0, 0, 600, 40)];
@@ -537,7 +522,6 @@ int main(void) {
         DPCompactCommandBar.apply(&DPCompactCommandBar);
         CHECK(inputView.needsLayout, "DPApplyCompactCommandBar triggers InputContainerView relayout to widen text back");
 
-        // Regression: AssistantPanel setFrameSize restores full size and clears trim/full-size state when off.
         _TtC20AssistantPanelUIBase22AssistantPanelRootView *panel = [[_TtC20AssistantPanelUIBase22AssistantPanelRootView alloc] initWithFrame:NSMakeRect(0, 0, 600, 120)];
         _TtCC14DynamicPopover28DynamicPopoverViewControllerP33_AB0357A1429F4D6D7F128058B713C93F8RootView *pop =
             [[_TtCC14DynamicPopover28DynamicPopoverViewControllerP33_AB0357A1429F4D6D7F128058B713C93F8RootView alloc] initWithFrame:NSMakeRect(0, 0, 600, 120)];
@@ -553,7 +537,6 @@ int main(void) {
         [panel setFrameSize:NSMakeSize(600, 120)];
         CHECK(NSHeight(panel.frame) == 120 && DPTrim(panel) == 0, "AssistantPanel restores full height and clears trim when off");
 
-        // === 7. DragWindowFromPage: borderless popover / child / cross-window drag guards, apply off clears state ===
         DPDragWindowFromPage.on = YES;
         [NSCursor.arrowCursor set];
         NSPanel *popoverWin = [[NSPanel alloc] initWithContentRect:NSMakeRect(-30000, -30000, 300, 300)

@@ -4,7 +4,8 @@ static NSHashTable<NSView *> *DPAccountSections;
 
 static BOOL DPIsAccountHeader(NSView *header) {
     NSTextField *title = (NSTextField *)DPFindView(header, ^BOOL(NSView *view) { return [view isKindOfClass:NSTextField.class]; });
-    return title.stringValue && [@[ @"Account", @"Morning Brief", @"Sync" ] containsObject:title.stringValue];
+    NSString *name = title.stringValue;
+    return [name isEqualToString:@"Account"] || [name isEqualToString:@"Morning Brief"] || [name isEqualToString:@"Sync"];
 }
 
 static void DPSection_setHidden(NSView *self, SEL _cmd, BOOL hidden) {

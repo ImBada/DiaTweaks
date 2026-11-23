@@ -8,6 +8,7 @@ DP_PATCH(DPHideChatButton) {
     .symbol = @"bubble.fill",
     .tint = @"systemPurpleColor",
     .section = @"AI",
+    .group = @"aiPrompts",
     .classes = DPClasses(DPDiaToolbar),
     .disabledBy = @"hideToolbar",
     .hides = DPIsChatButton,

@@ -167,7 +167,6 @@ int main(void) {
         ((uint8_t *)serverHello.mutableBytes)[5] = 0x02;
         NSCAssert(!DPSplitHello(serverHello.bytes, serverHello.length, out, 7), @"leaves other handshake messages alone");
 
-        // Malformed SNI listLength smaller than 3 + nameLength must be rejected.
         NSMutableData *badSni = [hello mutableCopy];
         const uint8_t *found = memmem(badSni.bytes, badSni.length, name.UTF8String, strlen(name.UTF8String));
         NSCAssert(found != NULL, @"finds SNI name in captured hello");

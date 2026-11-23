@@ -10,102 +10,10 @@ static const CGFloat DPHintHeight = 26, DPHintPadX = 10, DPHintPadY = 5, DPHintL
 @property (nonatomic, strong) CALayer *iconLayer;
 @end
 
-static id DPPeekIcon(NSString *name, CGFloat side, CGFloat scale);
-
 CATransform3D DPPeekScaled(NSView *view, CGFloat scale) {
     CGFloat cx = NSWidth(view.bounds) / 2, cy = NSHeight(view.bounds) / 2;
     return CATransform3DTranslate(CATransform3DScale(CATransform3DMakeTranslation(cx, cy, 0), scale, scale, 1), -cx, -cy, 0);
 }
-
-@implementation DPPeekButton
-- (BOOL)acceptsFirstMouse:(NSEvent *)event { return YES; }
-
-- (void)refreshIcon {
-    if (!self.symbolName || !self.iconLayer) return;
-    CGFloat scale = self.window.backingScaleFactor ?: (NSScreen.mainScreen.backingScaleFactor ?: 2);
-    if (self.iconLayer.contents && fabs(self.iconLayer.contentsScale - scale) < 0.01) return;
-    CGFloat side = NSWidth(self.bounds) ?: 28;
-    [CATransaction begin];
-    [CATransaction setDisableActions:YES];
-    self.iconLayer.contents = DPPeekIcon(self.symbolName, side, scale);
-    self.iconLayer.contentsScale = scale;
-    [CATransaction commit];
-}
-
-- (void)viewDidMoveToWindow {
-    [super viewDidMoveToWindow];
-    if (self.window) [self refreshIcon];
-}
-
-- (void)viewDidChangeBackingProperties {
-    [super viewDidChangeBackingProperties];
-    [self refreshIcon];
-}
-
-- (void)layout {
-    [super layout];
-    CGPathRef path = CGPathCreateWithEllipseInRect(self.bounds, NULL);
-    [CATransaction begin];
-    [CATransaction setDisableActions:YES];
-    self.circle.frame = self.bounds;
-    self.circle.path = path;
-    self.iconLayer.frame = self.bounds;
-    [CATransaction commit];
-    CGPathRelease(path);
-}
-
-- (void)setHighlighted:(BOOL)highlighted {
-    [super setHighlighted:highlighted];
-    [CATransaction begin];
-    [CATransaction setDisableActions:YES];
-    self.circle.fillColor = [NSColor colorWithWhite:0.08 alpha:highlighted ? 0.7 : 0.9].CGColor;
-    [CATransaction commit];
-}
-
-- (void)updateTrackingAreas {
-    [super updateTrackingAreas];
-    for (NSTrackingArea *area in self.trackingAreas) [self removeTrackingArea:area];
-    [self addTrackingArea:[[NSTrackingArea alloc] initWithRect:self.bounds
-                                                       options:NSTrackingMouseEnteredAndExited | NSTrackingActiveInKeyWindow | NSTrackingInVisibleRect
-                                                         owner:self userInfo:nil]];
-}
-
-- (void)grow:(BOOL)hovered {
-    [NSAnimationContext runAnimationGroup:^(NSAnimationContext *context) {
-        context.duration = 0.12;
-        context.allowsImplicitAnimation = YES;
-        self.layer.transform = hovered ? DPPeekScaled(self, 1.12) : CATransform3DIdentity;
-    }];
-}
-
-- (void)showHint {
-    if (self.isHiddenOrHasHiddenAncestor) return;
-    [NSAnimationContext runAnimationGroup:^(NSAnimationContext *context) {
-        context.duration = 0.12;
-        self.pill.animator.alphaValue = 1;
-    }];
-}
-
-- (void)resetHover {
-    [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(showHint) object:nil];
-    [CATransaction begin];
-    [CATransaction setDisableActions:YES];
-    self.layer.transform = CATransform3DIdentity;
-    [CATransaction commit];
-    self.pill.alphaValue = 0;
-}
-
-- (void)mouseEntered:(NSEvent *)event {
-    [self grow:YES];
-    [self performSelector:@selector(showHint) withObject:nil afterDelay:1.0];
-}
-
-- (void)mouseExited:(NSEvent *)event {
-    [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(showHint) object:nil];
-    [self grow:NO];
-    self.pill.alphaValue = 0;
-}
-@end
 
 static NSBitmapImageRep *DPPeekDraw(NSSize size, CGFloat scale, void (^draw)(void)) {
     NSBitmapImageRep *bitmap = [[NSBitmapImageRep alloc] initWithBitmapDataPlanes:NULL pixelsWide:size.width * scale pixelsHigh:size.height * scale
@@ -148,6 +56,88 @@ static id DPPeekIcon(NSString *name, CGFloat side, CGFloat scale) {
     });
     return icons[key] = (__bridge id)bitmap.CGImage;
 }
+
+@implementation DPPeekButton
+- (BOOL)acceptsFirstMouse:(NSEvent *)event { return YES; }
+
+- (void)refreshIcon {
+    if (!self.symbolName || !self.iconLayer) return;
+    CGFloat scale = self.window.backingScaleFactor ?: (NSScreen.mainScreen.backingScaleFactor ?: 2);
+    if (self.iconLayer.contents && fabs(self.iconLayer.contentsScale - scale) < 0.01) return;
+    CGFloat side = NSWidth(self.bounds) ?: 28;
+    DPWithoutAnimation(^{
+        self.iconLayer.contents = DPPeekIcon(self.symbolName, side, scale);
+        self.iconLayer.contentsScale = scale;
+    });
+}
+
+- (void)viewDidMoveToWindow {
+    [super viewDidMoveToWindow];
+    if (self.window) [self refreshIcon];
+}
+
+- (void)viewDidChangeBackingProperties {
+    [super viewDidChangeBackingProperties];
+    [self refreshIcon];
+}
+
+- (void)layout {
+    [super layout];
+    CGPathRef path = CGPathCreateWithEllipseInRect(self.bounds, NULL);
+    DPWithoutAnimation(^{
+        self.circle.frame = self.bounds;
+        self.circle.path = path;
+        self.iconLayer.frame = self.bounds;
+    });
+    CGPathRelease(path);
+}
+
+- (void)setHighlighted:(BOOL)highlighted {
+    [super setHighlighted:highlighted];
+    DPWithoutAnimation(^{ self.circle.fillColor = [NSColor colorWithWhite:0.08 alpha:highlighted ? 0.7 : 0.9].CGColor; });
+}
+
+- (void)updateTrackingAreas {
+    [super updateTrackingAreas];
+    for (NSTrackingArea *area in self.trackingAreas) [self removeTrackingArea:area];
+    [self addTrackingArea:[[NSTrackingArea alloc] initWithRect:self.bounds
+                                                       options:NSTrackingMouseEnteredAndExited | NSTrackingActiveInKeyWindow | NSTrackingInVisibleRect
+                                                         owner:self userInfo:nil]];
+}
+
+- (void)grow:(BOOL)hovered {
+    [NSAnimationContext runAnimationGroup:^(NSAnimationContext *context) {
+        context.duration = 0.12;
+        context.allowsImplicitAnimation = YES;
+        self.layer.transform = hovered ? DPPeekScaled(self, 1.12) : CATransform3DIdentity;
+    }];
+}
+
+- (void)showHint {
+    if (self.isHiddenOrHasHiddenAncestor) return;
+    [NSAnimationContext runAnimationGroup:^(NSAnimationContext *context) {
+        context.duration = 0.12;
+        self.pill.animator.alphaValue = 1;
+    }];
+}
+
+- (void)resetHover {
+    [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(showHint) object:nil];
+    DPWithoutAnimation(^{ self.layer.transform = CATransform3DIdentity; });
+    self.pill.alphaValue = 0;
+}
+
+- (void)mouseEntered:(NSEvent *)event {
+    [self grow:YES];
+    [self performSelector:@selector(showHint) withObject:nil afterDelay:1.0];
+}
+
+- (void)mouseExited:(NSEvent *)event {
+    [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(showHint) object:nil];
+    [self grow:NO];
+    self.pill.alphaValue = 0;
+}
+@end
 
 static NSView *DPPeekKeycap(NSString *glyph) {
     static const CGFloat height = 17;

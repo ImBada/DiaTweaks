@@ -64,9 +64,13 @@ static CGFloat DPHidden(DPToolbarHover *hover) {
 }
 
 void DPApplyToolbarOpacity(DPToolbarHover *hover) {
-    CGFloat alpha = DPLittleDiaIsOver(hover.pane.window) ? 0 : 1 - DPHidden(hover) * (1 - hover.progress);
+    BOOL over = DPLittleDiaIsOver(hover.pane.window);
+    CGFloat alpha = over ? 0 : 1 - DPHidden(hover) * (1 - hover.progress);
+    CGFloat bookmarks = alpha;
+    if (over) bookmarks = 0;
+    else if (DPKeepBookmarksBar.on) bookmarks = 1;
     if (hover.bar && hover.bar.alphaValue != alpha) hover.bar.alphaValue = alpha;
-    if (hover.bookmarks && hover.bookmarks.alphaValue != alpha) hover.bookmarks.alphaValue = alpha;
+    if (hover.bookmarks && hover.bookmarks.alphaValue != bookmarks) hover.bookmarks.alphaValue = bookmarks;
     DPRepaintTabs(hover.pane.window);
 }
 
@@ -86,8 +90,9 @@ void DPApplyToolbar(NSView *pane) {
     }
 
     NSView *bookmarks = DPBookmarksUnder(pane, bar);
+    BOOL keep = DPKeepBookmarksBar.on && bookmarks;
     NSView *bars[2] = {bar, bookmarks};
-    NSUInteger barCount = bookmarks ? 2 : 1;
+    NSUInteger barCount = bookmarks && !keep ? 2 : 1;
     hover = [DPToolbarHover attachToPane:pane];
     [hover updateForBar:bar bookmarks:bookmarks];
 
@@ -98,7 +103,9 @@ void DPApplyToolbar(NSView *pane) {
     NSUInteger firstSlot = NSNotFound, lastSlot = NSNotFound;
     for (NSUInteger i = 0; i < subviews.count; i++) {
         NSView *sub = subviews[i];
-        if (sub != bar && sub != bookmarks) { [stack addObject:sub]; continue; }
+        BOOL managed = NO;
+        for (NSUInteger j = 0; j < barCount; j++) if (sub == bars[j]) { managed = YES; break; }
+        if (!managed) { [stack addObject:sub]; continue; }
         if (firstSlot == NSNotFound) firstSlot = i;
         lastSlot = i;
     }
@@ -130,7 +137,8 @@ void DPApplyToolbar(NSView *pane) {
     if (stack.count > 1) {
         [stack sortUsingComparator:^NSComparisonResult(NSView *a, NSView *b) {
             CGFloat at = DPTop(pane, DPLaidOutFrame(a)), bt = DPTop(pane, DPLaidOutFrame(b));
-            return at < bt ? NSOrderedAscending : at > bt ? NSOrderedDescending : NSOrderedSame;
+            if (at == bt) return NSOrderedSame;
+            return at < bt ? NSOrderedAscending : NSOrderedDescending;
         }];
     }
     CGFloat paneHeight = NSHeight(pane.bounds);

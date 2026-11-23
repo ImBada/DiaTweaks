@@ -107,7 +107,6 @@ static void testExtensionsAndDrop(void) {
     expectLaunch(@[], @[ kDia, load(pair(mine, mine)) ], @[ kDia, load(pair(mine, mine)) ], @"the user's own repeats are theirs to keep");
     expectLaunch(@[ little ], @[ kDia, @"--load-extension=" ], @[ kDia, load(little) ], @"empty --load-extension= does not inject a leading comma");
 
-    // Dropping a boolean flag or scalar comma-bearing flag must not mangle unrelated flags.
     DPResetFlags();
     DPDropLaunchFlag(@"--disable-gpu");
     DPDropLaunchFlag(@"--enable-features=Foo");
@@ -118,7 +117,6 @@ static void testExtensionsAndDrop(void) {
     ]);
     NSCAssert([got isEqual:(@[ kDia, @"--user-agent=a, b" ])], @"scalar drop removes exact match and keeps unrelated comma-bearing flag, got %@", got);
 
-    // User --load-extension= merges with DiaPatches extensions and cannot clobber or inject DiaPatches paths.
     DPResetFlags();
     DPLoadExtension(little);
     DPAddLaunchFlag(load(mine));
@@ -170,12 +168,10 @@ static void testParsing(void) {
     parsed = DPParseLaunchFlags(@"   \n# just comments\n\t", &ignored, &unclosed);
     NSCAssert(parsed.count == 0 && !ignored.count && !unclosed, @"empty/comments only");
 
-    // Formatting NSArray round-trips cleanly, including backslashes and quotes.
     NSString *formatted = DPFormatLaunchFlagsArray(@[ @"--disable-gpu", @"--js-flags=--expose-gc --max-old-space-size=4096", @"--regex=a\\\\b" ]);
     parsed = DPParseLaunchFlags(formatted, &ignored, &unclosed);
     NSCAssert([parsed isEqual:(@[ @"--disable-gpu", @"--js-flags=--expose-gc --max-old-space-size=4096", @"--regex=a\\\\b" ])], @"array round-trip, got %@", parsed);
 
-    // Host resolver rules from TurnOffAI and Launch Flags merge cleanly.
     DPResetFlags();
     DPAddLaunchFlag(@"--host-resolver-rules=MAP ai-service.diabrowser.engineering ~NOTFOUND");
     DPAddLaunchFlag(@"--host-resolver-rules=MAP example.test 127.0.0.1");
@@ -189,7 +185,6 @@ static void testLifecycleAndSelfRelaunch(void) {
     [defaults removeObjectForKey:DPArgsKey];
     [defaults removeObjectForKey:DPAppliedKey];
 
-    // Off with no prior applied flags: does nothing.
     DPResetFlags();
     DPLaunchFlags.on = NO;
     DPPaused = NO;
@@ -197,7 +192,6 @@ static void testLifecycleAndSelfRelaunch(void) {
     DPInstallLaunchFlags();
     NSCAssert([DPRunConfig(@[ kDia ]) isEqual:@[ kDia ]] && !DPAddedFlags.count && !DPDroppedFlags.count, @"off tweak does nothing");
 
-    // Launch 1: enable with multiple flags alongside SplitClientHello's feature flag.
     DPResetFlags();
     DPLaunchFlags.on = YES;
     DPLaunchFlagsSaveText(@"--force-renderer-accessibility=complete\n--enable-features=CustomFeat\n--user-agent=\"Foo, Bar\"");
@@ -211,7 +205,6 @@ static void testLifecycleAndSelfRelaunch(void) {
         @"--user-agent=Foo, Bar",
     ])], @"launch 1 injects custom flags and merges features, got %@", launch1);
 
-    // Launch 2 (self-relaunch carrying launch1 argv): edit flags (keep accessibility, swap CustomFeat -> OtherFeat, change user-agent).
     DPResetFlags();
     DPLaunchFlags.on = YES;
     DPLaunchFlagsSaveText(@"--force-renderer-accessibility=complete\n--enable-features=OtherFeat\n--user-agent=\"Foo, Baz\"");
@@ -225,7 +218,6 @@ static void testLifecycleAndSelfRelaunch(void) {
         @"--user-agent=Foo, Baz",
     ])], @"self-relaunch drops old flags without duplicating or mangling new ones, got %@", launch2);
 
-    // Launch 3 (self-relaunch carrying launch2 argv): Pause Tweaks active -> drops stale custom flags and clears applied state!
     DPResetFlags();
     DPPaused = YES;
     DPLaunchFlags.on = NO;
@@ -235,7 +227,6 @@ static void testLifecycleAndSelfRelaunch(void) {
               @"pause strips stale custom flags on self-relaunch without touching other features, got %@", launch3);
     NSCAssert([defaults arrayForKey:DPAppliedKey] == nil, @"stale applied state cleared after pause cleanup");
 
-    // Launch 4: re-enable, then disable -> turns off cleanly on self-relaunch.
     DPResetFlags();
     DPPaused = NO;
     DPLaunchFlags.on = YES;
@@ -251,7 +242,6 @@ static void testLifecycleAndSelfRelaunch(void) {
     NSCAssert([launch5 isEqual:@[ kDia ]], @"disabling strips previously applied flag on self-relaunch, got %@", launch5);
     NSCAssert([defaults arrayForKey:DPAppliedKey] == nil, @"applied key cleared when off");
 
-    // SafeMode: never injects flags and never touches applied state.
     DPResetFlags();
     DPLaunchFlags.on = YES;
     DPSafeMode = 1;
@@ -259,7 +249,6 @@ static void testLifecycleAndSelfRelaunch(void) {
     NSCAssert([DPRunConfig(@[ kDia ]) isEqual:@[ kDia ]] && !DPAddedFlags.count && !DPDroppedFlags.count, @"SafeMode skips launch flags");
     DPSafeMode = 0;
 
-    // NSArray stored in defaults works too.
     [defaults setObject:@[ @"--disable-gpu", @"--js-flags=--expose-gc --max-old-space-size=4096" ] forKey:DPArgsKey];
     DPResetFlags();
     DPLaunchFlags.on = YES;
@@ -288,7 +277,6 @@ static void testSettingsRow(void) {
     NSCAssert(row.relaunch.hidden && [row.status.stringValue isEqual:@"Active in this session."],
               @"shows active status without relaunch button when matching launched flags");
 
-    // Editing flags saves to defaults and shows Relaunch button.
     row.textView.string = @"--force-renderer-accessibility=complete\n--disable-gpu";
     [row textDidChange:[NSNotification notificationWithName:NSTextDidChangeNotification object:row.textView]];
     NSCAssert([DPLaunchFlagsSavedText() isEqual:@"--force-renderer-accessibility=complete\n--disable-gpu"], @"editing persists text");
@@ -297,7 +285,6 @@ static void testSettingsRow(void) {
     [row.relaunch performClick:nil];
     NSCAssert([lastHandOff isEqual:@[ @"apply" ]], @"clicking Relaunch hands off to diapatch apply");
 
-    // Syntax warning hides Relaunch on unclosed quote and flags ignored tokens.
     row.textView.string = @"--user-agent=\"unclosed";
     [row textDidChange:[NSNotification notificationWithName:NSTextDidChangeNotification object:row.textView]];
     NSCAssert(row.relaunch.hidden && [row.status.stringValue isEqual:@"Unclosed quote."], @"warns on unclosed quote");
@@ -306,19 +293,16 @@ static void testSettingsRow(void) {
     [row textDidChange:[NSNotification notificationWithName:NSTextDidChangeNotification object:row.textView]];
     NSCAssert([row.status.stringValue containsString:@"stray"], @"warns on ignored non-flag token");
 
-    // Disabling row (off or paused) disables editor and dims container.
     row.enabled = NO;
     NSCAssert(!row.textView.editable && !row.textView.selectable && row.box.alphaValue < 1 && row.relaunch.hidden,
               @"disabled row locks editor, dims box, and hides relaunch");
     row.enabled = YES;
     NSCAssert(row.textView.editable && row.box.alphaValue == 1, @"re-enabling restores editor");
 
-    // Clearing text shows placeholder again.
     row.textView.string = @"";
     [row textDidChange:[NSNotification notificationWithName:NSTextDidChangeNotification object:row.textView]];
     NSCAssert(!row.placeholder.hidden && !DPLaunchFlagsSavedText().length, @"clearing restores placeholder and removes default");
 
-    // External defaults update synced via DPPatchesDidChangeNotification updates editor text and status.
     DPLaunchFlagsSaveText(@"--enable-logging=stderr");
     [NSNotificationCenter.defaultCenter postNotificationName:DPPatchesDidChangeNotification object:nil];
     NSCAssert([row.textView.string isEqual:@"--enable-logging=stderr"] && !row.relaunch.hidden,
@@ -328,7 +312,6 @@ static void testSettingsRow(void) {
               && ![row textView:row.textView doCommandBySelector:@selector(insertNewline:)],
               @"Tab/Shift-Tab move focus while Return inserts newline");
 
-    // Uncommitted text flushes on textDidEndEditing:, viewWillMoveToWindow:nil, and relaunchDia:, but NOT when disabled.
     row.textView.string = @"--force-dark-mode";
     [row textDidEndEditing:[NSNotification notificationWithName:NSTextDidEndEditingNotification object:row.textView]];
     NSCAssert([DPLaunchFlagsSavedText() isEqual:@"--force-dark-mode"], @"textDidEndEditing flushes uncommitted text");
@@ -358,7 +341,6 @@ static void testSettingsRow(void) {
               @"disabled row does not overwrite saved flags on blur or detach");
     row.enabled = YES;
 
-    // Dark Aqua updateLayer resolves dynamic CGColors safely.
     row.box.appearance = [NSAppearance appearanceNamed:NSAppearanceNameDarkAqua];
     [row.box updateLayer];
     NSCAssert(row.box.layer.backgroundColor != NULL && row.box.layer.borderColor != NULL,

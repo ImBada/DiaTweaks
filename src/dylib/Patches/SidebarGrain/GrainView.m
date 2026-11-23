@@ -77,8 +77,8 @@
     _scale = zoom;
     _grainOpacity = opacity;
     _material = material;
-    self.layer.compositingFilter = fine ? nil :
-        dark ? @"screenBlendMode" : @"multiplyBlendMode";
+    if (fine) self.layer.compositingFilter = nil;
+    else self.layer.compositingFilter = dark ? @"screenBlendMode" : @"multiplyBlendMode";
     self.needsDisplay = YES;
 }
 

@@ -2,8 +2,13 @@
 
 BOOL DPValidChatModel(NSString *model) {
     if (![model isKindOfClass:NSString.class] || !model.length || model.length > 256) return NO;
-    NSMutableCharacterSet *blocked = [NSMutableCharacterSet whitespaceAndNewlineCharacterSet];
-    [blocked formUnionWithCharacterSet:NSCharacterSet.controlCharacterSet];
+    static NSCharacterSet *blocked;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        NSMutableCharacterSet *set = [NSMutableCharacterSet whitespaceAndNewlineCharacterSet];
+        [set formUnionWithCharacterSet:NSCharacterSet.controlCharacterSet];
+        blocked = set;
+    });
     return [model rangeOfCharacterFromSet:blocked].location == NSNotFound;
 }
 
@@ -19,9 +24,9 @@ static BOOL DPMayBeChatRun(NSData *line) {
     return YES;
 }
 
-// Only Dia's own chat run is rewritten. Every other frame, and any run that doesn't have the exact shape, goes through as it came.
+// Only Dia's own chat run is rewritten; any other frame, or a run of a different shape, passes through untouched.
 NSData *DPChatAgentRequest(NSData *line, NSString *model) {
-    if (!model || !DPValidChatModel(model) || !DPMayBeChatRun(line)) return line;
+    if (!model || !DPMayBeChatRun(line) || !DPValidChatModel(model)) return line;
     id parsed = [NSJSONSerialization JSONObjectWithData:line options:NSJSONReadingMutableContainers error:nil];
     NSMutableDictionary *message = [parsed isKindOfClass:NSMutableDictionary.class] ? parsed : nil;
     if (![message[@"type"] isEqual:@"RUN"]) return line;

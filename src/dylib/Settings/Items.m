@@ -1,16 +1,41 @@
 #import "Settings.h"
 
 void DPForEachOption(DPPatch *patch, void (^body)(DPPatch *option)) {
-    for (NSUInteger i = 0; i < DPPatchCount; i++)
-        if (DPRequired(DPPatches[i]) == patch) body(DPPatches[i]);
+    for (NSUInteger i = 0; i < DPPatchCount; i++) {
+        DPPatch *option = DPPatches[i];
+        if (DPRequired(option) != patch) continue;
+        body(option);
+        DPForEachOption(option, body);
+    }
 }
 
-static BOOL DPShownOn(DPPatch *patch) { return patch && (DPPaused ? DPSavedOn(patch) : patch->on); }
+NSArray<NSValue *> *DPFolderMembers(NSString *key) {
+    NSMutableArray<NSValue *> *members = [NSMutableArray new];
+    for (NSUInteger i = 0; i < DPPatchCount; i++)
+        if (DPPatches[i]->group && [DPPatches[i]->group isEqualToString:key]) [members addObject:[NSValue valueWithPointer:DPPatches[i]]];
+    return members;
+}
+
+BOOL DPShownOn(DPPatch *patch) { return patch && (DPPaused ? DPSavedOn(patch) : patch->on); }
+
+NSString *DPActiveSummary(DPPatch *patch) {
+    NSString *why = DPWhyDisabled(patch);
+    if (why || !DPShownOn(patch)) return why;
+    NSMutableArray<NSString *> *options = [NSMutableArray new];
+    DPForEachOption(patch, ^(DPPatch *option) {
+        if (DPShownOn(option)) [options addObject:option->title];
+    });
+    return [options componentsJoinedByString:@" · "];
+}
 
 NSString *DPWhyDisabled(DPPatch *patch) {
     if (patch->unavailable) return @"Unavailable on this Dia version.";
-    DPPatch *required = DPRequired(patch), *cover = DPPatchNamed(patch->coveredBy);
-    if (required && !DPShownOn(required)) return [NSString stringWithFormat:@"Needs %@.", required->title];
+    NSString *problem = DPLocalProblem(patch);
+    if (problem) return problem;
+    int hops = 0;
+    for (DPPatch *required = DPRequired(patch); required && hops++ < 32; required = DPRequired(required))
+        if (!DPShownOn(required)) return [NSString stringWithFormat:@"Needs %@.", required->title];
+    DPPatch *cover = DPPatchNamed(patch->coveredBy);
     return DPShownOn(cover) ? [NSString stringWithFormat:@"%@ hides this too.", cover->title] : nil;
 }
 
@@ -24,6 +49,7 @@ NSString *DPWhyHiddenBy(DPPatch *disabler) {
 NSString *DPWhyHidden(DPPatch *patch) { return DPShownOn(patch) ? DPWhyHiddenBy(DPPatchNamed(patch->disabledBy)) : nil; }
 
 NSURL *DPWikiURL(DPPatch *patch) {
+    if (DPIsLocalPatch(patch)) return nil;
     NSString *page = [patch->title stringByReplacingOccurrencesOfString:@" " withString:@"-"];
     return [NSURL URLWithString:[@"https://github.com/JaceThings/DiaTweaks/wiki/" stringByAppendingString:page]];
 }
@@ -31,8 +57,12 @@ NSURL *DPWikiURL(DPPatch *patch) {
 NSArray<NSString *> *DPRelaunchingOnPause(void) {
     if (DPSafeMode || DPPausedAtLaunch) return @[];
     NSMutableArray<NSString *> *waiting = [NSMutableArray new];
-    for (NSUInteger i = 0; i < DPPatchCount; i++)
-        if (DPPatches[i]->relaunch && DPPatches[i]->on) [waiting addObject:DPPatches[i]->title];
+    for (NSUInteger i = 0; i < DPPatchCount; i++) {
+        DPPatch *patch = DPPatches[i];
+        // App Icon and Morning Brief Language are baked into Dia, so pausing them needs a rebuild too.
+        BOOL baked = [patch->key isEqualToString:@"appIcon"] || [patch->key isEqualToString:@"briefLanguage"];
+        if ((patch->relaunch || baked) && patch->on) [waiting addObject:patch->title];
+    }
     return waiting;
 }
 
@@ -48,8 +78,9 @@ void DPSyncPauseRow(NSTextField *label, NSButton *button) {
     }
     label.stringValue = DPPaused ? @"Tweaks are paused, so none of them are running. Your settings are kept."
                                  : @"Pause every tweak and keep their settings.";
-    button.title = !DPPaused ? @"Pause Tweaks"
-        : DPPausedAtLaunch && !DPSafeMode ? @"Resume and Relaunch" : @"Resume Tweaks";
+    if (!DPPaused) button.title = @"Pause Tweaks";
+    else if (DPPausedAtLaunch && !DPSafeMode) button.title = @"Resume and Relaunch";
+    else button.title = @"Resume Tweaks";
 }
 
 static void DPRelaunchToResume(void) {

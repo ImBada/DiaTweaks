@@ -64,20 +64,16 @@ pub fn run(
             break status;
         }
         if signals::interrupted() {
-            match on_interrupt {
-                OnInterrupt::StopDownloads => {
-                    if !stopping {
-                        spinner.set_message("Stopping after the current step…");
-                        stopping = true;
-                    }
-                    stop_downloads(pid);
-                }
-                OnInterrupt::Finish(why) => {
-                    if !stopping {
-                        spinner.set_message(why);
-                        stopping = true;
-                    }
-                }
+            let (message, stop) = match on_interrupt {
+                OnInterrupt::StopDownloads => ("Stopping after the current step…", true),
+                OnInterrupt::Finish(why) => (why, false),
+            };
+            if !stopping {
+                spinner.set_message(message);
+                stopping = true;
+            }
+            if stop {
+                stop_downloads(pid);
             }
         }
         thread::sleep(Duration::from_millis(50));
