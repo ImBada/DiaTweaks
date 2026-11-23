@@ -26,15 +26,20 @@ static NSImage *DPSmallSymbol(NSString *name) {
     return [[NSImage imageWithSystemSymbolName:name accessibilityDescription:nil] imageWithSymbolConfiguration:small];
 }
 
+// The header's layers lie flipped, as the view does, so a positive turn goes clockwise on screen.
+static const CGFloat DPOpenTurn = M_PI_2;
+// Matched to a folder's chevron in Dia 1.58, sampled frame by frame: about a 0.17 s response with a slight overshoot (damping ratio 0.86).
+static const CGFloat DPTurnStiffness = 1430, DPTurnDamping = 65;
+
 @interface DPPinnedHeader : NSView
 @property (nonatomic, copy) NSString *space;
-@property (nonatomic) BOOL shown, collapsed, hovered, folding;
+@property (nonatomic) BOOL shown, collapsed, hovered, folding, settled;
 @property (nonatomic, strong) NSDate *springSince;
 @property (nonatomic) NSInteger rows;
 @property (nonatomic) CGFloat top, end, below, row;
-@property (nonatomic, strong) NSImageView *pin, *chevron;
+@property (nonatomic, strong) NSImageView *pin;
 @property (nonatomic, strong) NSTextField *title;
-@property (nonatomic, strong) CALayer *line;
+@property (nonatomic, strong) CALayer *line, *chevron;
 @end
 
 static void DPFold(NSString *space, BOOL collapsed);
@@ -45,12 +50,14 @@ static void DPFold(NSString *space, BOOL collapsed);
     if (!(self = [super initWithFrame:NSZeroRect])) return nil;
     self.wantsLayer = YES;
     self.pin = [NSImageView imageViewWithImage:DPSmallSymbol(@"pin.fill")];
-    self.chevron = [NSImageView new];
     self.title = [NSTextField labelWithString:@"Pinned"];
     self.title.font = [NSFont systemFontOfSize:11 weight:NSFontWeightMedium];
     self.line = [CALayer layer];
-    for (NSView *view in @[ self.pin, self.title, self.chevron ]) [self addSubview:view];
-    [self.layer addSublayer:self.line];
+    // A layer of its own, so it turns about its middle like a folder's chevron; a view's layer is AppKit's to place.
+    self.chevron = [CALayer layer];
+    self.chevron.contentsGravity = kCAGravityCenter;
+    for (NSView *view in @[ self.pin, self.title ]) [self addSubview:view];
+    for (CALayer *layer in @[ self.line, self.chevron ]) [self.layer addSublayer:layer];
     [self addTrackingArea:[[NSTrackingArea alloc] initWithRect:NSZeroRect
         options:NSTrackingMouseEnteredAndExited | NSTrackingActiveInKeyWindow | NSTrackingInVisibleRect owner:self userInfo:nil]];
     self.accessibilityElement = YES;
@@ -65,9 +72,15 @@ static void DPFold(NSString *space, BOOL collapsed);
 - (void)restyle {
     [self.effectiveAppearance performAsCurrentDrawingAppearance:^{
         NSColor *ink = self.hovered ? NSColor.secondaryLabelColor : NSColor.tertiaryLabelColor;
-        self.pin.contentTintColor = self.chevron.contentTintColor = ink;
+        self.pin.contentTintColor = ink;
         self.title.textColor = ink;
-        DPWithoutAnimation(^{ self.line.backgroundColor = NSColor.separatorColor.CGColor; });
+        NSImage *chevron = [DPSmallSymbol(@"chevron.right") imageWithSymbolConfiguration:[NSImageSymbolConfiguration configurationWithPaletteColors:@[ ink ]]];
+        CGFloat scale = [chevron recommendedLayerContentsScale:self.window.backingScaleFactor ?: 2];
+        DPWithoutAnimation(^{
+            self.line.backgroundColor = NSColor.separatorColor.CGColor;
+            self.chevron.contentsScale = scale;
+            self.chevron.contents = [chevron layerContentsForContentsScale:scale];
+        });
     }];
     self.accessibilityValue = self.collapsed ? @0 : @1;
 }
@@ -79,17 +92,37 @@ static void DPFold(NSString *space, BOOL collapsed);
     [self.title sizeToFit];
     self.pin.frame = NSMakeRect(DPRowInset, middle - 8, 16, 16);
     self.title.frame = NSMakeRect(DPTitleInset - 2, middle - round(NSHeight(self.title.frame) / 2), NSWidth(self.title.frame), NSHeight(self.title.frame));
-    self.chevron.frame = NSMakeRect(NSMaxX(bounds) - DPChevronInset - 12, middle - 6, 12, 12);
-    CGFloat left = NSMaxX(self.title.frame) + DPGap, right = NSMinX(self.chevron.frame) - DPGap;
-    DPWithoutAnimation(^{ self.line.frame = NSMakeRect(left, middle - 0.5, MAX(0, right - left), 1); });
+    NSRect chevron = NSMakeRect(NSMaxX(bounds) - DPChevronInset - 12, middle - 6, 12, 12);
+    CGFloat left = NSMaxX(self.title.frame) + DPGap, right = NSMinX(chevron) - DPGap;
+    DPWithoutAnimation(^{
+        self.line.frame = NSMakeRect(left, middle - 0.5, MAX(0, right - left), 1);
+        self.chevron.bounds = NSMakeRect(0, 0, NSWidth(chevron), NSHeight(chevron));
+        self.chevron.position = NSMakePoint(NSMidX(chevron), NSMidY(chevron));
+    });
     [self restyle];
 }
 
+// Folded, the chevron points right; open, it turns a quarter clockwise to point down. It turns with the fold, as a folder's does.
 - (void)setCollapsed:(BOOL)collapsed {
-    if (_collapsed == collapsed && self.chevron.image) return;
+    if (_collapsed == collapsed && self.chevron.contents) return;
     _collapsed = collapsed;
-    self.chevron.image = DPSmallSymbol(collapsed ? @"chevron.right" : @"chevron.down");
-    DPWithoutAnimation(^{ self.line.opacity = collapsed ? 0 : 1; });
+    CGFloat to = collapsed ? 0 : DPOpenTurn;
+    // From wherever it is now, so a second click mid-turn turns it back smoothly.
+    NSNumber *from = [(self.chevron.presentationLayer ?: self.chevron) valueForKeyPath:@"transform.rotation.z"];
+    DPWithoutAnimation(^{
+        self.chevron.transform = CATransform3DMakeRotation(to, 0, 0, 1);
+        self.line.opacity = collapsed ? 0 : 1;
+    });
+    if (self.settled) {
+        CASpringAnimation *turn = [CASpringAnimation animationWithKeyPath:@"transform.rotation.z"];
+        turn.mass = 1;
+        turn.stiffness = DPTurnStiffness;
+        turn.damping = DPTurnDamping;
+        turn.fromValue = from;
+        turn.toValue = @(to);
+        turn.duration = turn.settlingDuration;
+        [self.chevron addAnimation:turn forKey:@"turn"];
+    }
     [self restyle];
 }
 
@@ -156,6 +189,7 @@ static void DPMeasure(NSCollectionViewLayout *layout) {
     header.row = row;
     header.frame = NSMakeRect(0, header.top, NSWidth(list.bounds), DPHeaderHeight);
     header.needsLayout = YES;
+    header.settled = YES;
 }
 
 static DPPinnedHeader *DPShownHeader(NSCollectionViewLayout *layout) {
