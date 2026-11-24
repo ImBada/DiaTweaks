@@ -7,10 +7,13 @@ static const NSInteger DPFollowerCount = sizeof(DPFollowerTags) / sizeof(DPFollo
 static NSHashTable<NSMenu *> *DPGroupMenus;
 static BOOL DPInserting;
 
+// Re-adding autoreleases the menu; Dia frees a scratch menu before moving its items, so a late free crashes it.
 static void DPTrackGroupMenu(NSMenu *menu) {
     if (!menu) return;
     if (!DPGroupMenus) DPGroupMenus = [NSHashTable weakObjectsHashTable];
-    [DPGroupMenus addObject:menu];
+    @autoreleasepool {
+        [DPGroupMenus addObject:menu];
+    }
 }
 
 static BOOL DPIsFollowerTag(NSInteger tag) {
@@ -195,7 +198,9 @@ static void DPApplyGroupTabs(DPPatch *patch) {
         [top.submenu itemWithTag:DPGroupMenuTag].hidden = !patch->on;
         for (NSInteger i = 0; i < DPFollowerCount; i++) [top.submenu itemWithTag:DPFollowerTags[i]].hidden = !patch->on;
     }
-    for (NSMenu *menu in DPGroupMenus.allObjects) DPSyncMenuVisibility(menu);
+    @autoreleasepool {
+        for (NSMenu *menu in DPGroupMenus.allObjects) DPSyncMenuVisibility(menu);
+    }
 }
 
 static NSString *DPVerifyGroupTabs(DPPatch *patch) {
