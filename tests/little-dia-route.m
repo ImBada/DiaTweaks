@@ -24,6 +24,9 @@ NSString *DPAppSupport(NSString *path) { return [@"/nonexistent" stringByAppendi
 id DPCommandBrowser(void) { return gCommandBrowser; }
 id DPBrowserOfWindow(NSWindow *window) { return [gBrowserByWindow objectForKey:window]; }
 
+static NSEventModifierFlags DPEvent_modifierFlags(id self, SEL _cmd) { return 0; }
+static NSPoint DPEvent_mouseLocation(id self, SEL _cmd) { return NSMakePoint(-100000, -100000); }
+
 void DPExpectLittleDiaWindow(NSRect frame, NSDictionary *noted, void (^missed)(void), void (^claimed)(NSWindow *window)) {
     [gExpected addObject:@{@"frame" : [NSValue valueWithRect:frame], @"missed" : [missed copy]}];
 }
@@ -165,6 +168,9 @@ static void reset(FakeBrowser *browser) {
 int main(void) {
     @autoreleasepool {
         [NSApplication sharedApplication];
+        // Held Option sends links to a tab, and the pointer picks the screen: neither may come from the host.
+        DPHookClass(object_getClass(NSEvent.class), @selector(modifierFlags), (IMP)DPEvent_modifierFlags);
+        DPHookClass(object_getClass(NSEvent.class), @selector(mouseLocation), (IMP)DPEvent_mouseLocation);
         gExpected = [NSMutableArray array];
         gOriginalEvents = [NSMutableArray array];
         gOriginalOpenURLs = [NSMutableArray array];

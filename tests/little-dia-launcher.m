@@ -58,9 +58,24 @@ void DPOnLaunch(void (^block)(void)) { block(); }
 static int failures;
 #define CHECK(cond, msg) do { if (!(cond)) { printf("FAIL: %s\n", msg); failures++; } } while (0)
 
+static BOOL gPanelShown;
+static BOOL DPPanel_isVisible(id self, SEL _cmd) { return gPanelShown; }
+static void DPPanel_makeKeyAndOrderFront(id self, SEL _cmd, id sender) { gPanelShown = YES; }
+static void DPPanel_orderOut(id self, SEL _cmd, id sender) { gPanelShown = NO; }
+static NSPoint DPEvent_mouseLocation(id self, SEL _cmd) { return NSMakePoint(-100000, -100000); }
+
+static void DPSwapMethod(Class cls, SEL sel, IMP imp) {
+    class_replaceMethod(cls, sel, imp, method_getTypeEncoding(class_getInstanceMethod(cls, sel)));
+}
+
 int main(void) {
     @autoreleasepool {
         [NSApplication sharedApplication];
+        // Track the panel's visibility without ever ordering a real window onto the host's desktop or reading its cursor.
+        DPSwapMethod(DPLittleDiaLauncherPanel.class, @selector(isVisible), (IMP)DPPanel_isVisible);
+        DPSwapMethod(DPLittleDiaLauncherPanel.class, @selector(makeKeyAndOrderFront:), (IMP)DPPanel_makeKeyAndOrderFront);
+        DPSwapMethod(DPLittleDiaLauncherPanel.class, @selector(orderOut:), (IMP)DPPanel_orderOut);
+        DPSwapMethod(object_getClass(NSEvent.class), @selector(mouseLocation), (IMP)DPEvent_mouseLocation);
         gOpened = [NSMutableArray array];
         FakeEngine *engine = [FakeEngine new];
         engine.url = @"https://kagi.com/search?q={searchTerms}";

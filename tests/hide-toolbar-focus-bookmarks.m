@@ -10,6 +10,7 @@ static NSPoint gMouse;
 static BOOL DPApp_isActive(NSApplication *self, SEL _cmd) { return gAppActive; }
 static BOOL DPWindow_isKeyWindow(NSWindow *self, SEL _cmd) { return self == gKeyWindow; }
 static NSPoint DPEvent_mouseLocation(NSEvent *self, SEL _cmd) { return gMouse; }
+static NSUInteger DPEvent_pressedMouseButtons(NSEvent *self, SEL _cmd) { return 0; }
 
 BOOL DPBesideSidebar(NSView *container) { return NO; }
 BOOL DPLittleDiaIsOver(NSWindow *window) { return gLittleDiaOver; }
@@ -63,6 +64,7 @@ int main(void) {
         DPHookClass(NSApp.class, @selector(isActive), (IMP)DPApp_isActive);
         DPHookClass(NSWindow.class, @selector(isKeyWindow), (IMP)DPWindow_isKeyWindow);
         DPHookClass(object_getClass(NSEvent.class), @selector(mouseLocation), (IMP)DPEvent_mouseLocation);
+        DPHookClass(object_getClass(NSEvent.class), @selector(pressedMouseButtons), (IMP)DPEvent_pressedMouseButtons);
 
         DPHideToolbar.on = NO;
         DPHideToolbar.progress = 0;

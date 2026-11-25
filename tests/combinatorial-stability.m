@@ -229,8 +229,9 @@ static int gLastConfigArgc;
 static int gPopupCalls, gPipRequests;
 static NSMutableArray<NSEvent * (^)(NSEvent *)> *gKeyMonitors;
 
-static const NSPoint DPCombOffscreenPointer = {-1000, -1000};
+static const NSPoint DPCombOffscreenPointer = {-100000, -100000};
 static NSPoint DPEvent_mouseLocation(id self, SEL _cmd) { return DPCombOffscreenPointer; }
+static NSUInteger DPEvent_pressedMouseButtons(id self, SEL _cmd) { return 0; }
 
 static id DPEvent_addLocalMonitor(id self, SEL _cmd, NSEventMask mask, NSEvent * (^handler)(NSEvent *)) {
     id token = DPCallOriginal(DPEvent_addLocalMonitor, self, mask, handler);
@@ -1769,8 +1770,9 @@ int main(void) {
         Class eventMeta = object_getClass(NSEvent.class);
         DPHookClass(eventMeta, @selector(addLocalMonitorForEventsMatchingMask:handler:), (IMP)DPEvent_addLocalMonitor);
         DPHookClass(eventMeta, @selector(removeMonitor:), (IMP)DPEvent_removeMonitor);
-        // Keep the host's real pointer out of every hover check.
+        // Keep the host's real pointer and held mouse buttons out of every hover check.
         DPHookClass(eventMeta, @selector(mouseLocation), (IMP)DPEvent_mouseLocation);
+        DPHookClass(eventMeta, @selector(pressedMouseButtons), (IMP)DPEvent_pressedMouseButtons);
 
         // Stub NSMenu popup presentation before patches hook it, so popup tests never block headless runs.
         Class menuMeta = object_getClass(NSMenu.class);

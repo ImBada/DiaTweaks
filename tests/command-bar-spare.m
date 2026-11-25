@@ -174,6 +174,7 @@ void DPInstallPress(void) {}
 static BOOL DPApp_isActive(NSApplication *self, SEL _cmd) { return gAppActive; }
 static NSWindow *DPApp_keyWindow(NSApplication *self, SEL _cmd) { return gKeyWindow; }
 static NSArray<NSWindow *> *DPApp_windows(NSApplication *self, SEL _cmd) { return gWindows; }
+static NSUInteger DPEvent_pressedMouseButtons(id self, SEL _cmd) { return 0; }
 static BOOL DPApp_sendAction(NSApplication *self, SEL _cmd, SEL action, id target, id sender) {
     gSendActionCalls++;
     return gSendActionResult;
@@ -227,6 +228,7 @@ int main(void) {
         gSplits = [NSMutableDictionary dictionary];
         NSApp.delegate = (id)gDelegate;
 
+        DPHookClass(object_getClass(NSEvent.class), @selector(pressedMouseButtons), (IMP)DPEvent_pressedMouseButtons);
         DPHookClass(NSApp.class, @selector(isActive), (IMP)DPApp_isActive);
         DPHookClass(NSApp.class, @selector(keyWindow), (IMP)DPApp_keyWindow);
         DPHookClass(NSApp.class, @selector(windows), (IMP)DPApp_windows);
