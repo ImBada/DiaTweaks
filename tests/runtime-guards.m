@@ -87,6 +87,19 @@ static void expect(BOOL ok, NSString *what) {
 - (void)browser:(id)browser removeTabsFromGroupWithSessionIds:(NSArray *)ids completion:(void (^)(id))done { self.ungroupCalls++; }
 @end
 
+@interface DPThrowingMenu : NSMenu
+@property NSInteger throwTag;
+@end
+@implementation DPThrowingMenu
+- (void)insertItem:(NSMenuItem *)item atIndex:(NSInteger)index {
+    if (self.throwTag && item.tag == self.throwTag) {
+        self.throwTag = 0;
+        @throw [NSException exceptionWithName:NSRangeException reason:@"index out of range" userInfo:nil];
+    }
+    [super insertItem:item atIndex:index];
+}
+@end
+
 static int runtimeLookups;
 static char aliasNames[32][48];
 static Class aliasClasses[32];
@@ -301,6 +314,44 @@ int main(void) {
         NSMenu *fresh = [[NSMenu alloc] initWithTitle:@"Fresh"];
         [fresh addItemWithTitle:@"New Group with 2 Tabs" action:nil keyEquivalent:@""];
         expect([fresh itemWithTag:DPGroupMenuTag] == nil, @"Menu.m does not mutate fresh context menus while off");
+
+        DPGroupTabs.on = YES;
+        NSArray<NSMenuItem *> *built;
+        __weak NSMenu *weakDropped;
+        @autoreleasepool {
+            NSMenu *dropped = [[NSMenu alloc] initWithTitle:@""];
+            weakDropped = dropped;
+            for (NSString *title in @[ @"Duplicate", @"New Group with 2 Tabs", @"Close Tab" ])
+                [dropped addItem:[[NSMenuItem alloc] initWithTitle:title action:nil keyEquivalent:@""]];
+            built = [dropped.itemArray copy];
+        }
+        expect([built filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"tag == %ld", (long)DPGroupMenuTag]].count == 1, @"Menu.m places Group Tabs by Domain in a scratch menu Dia builds");
+        expect(weakDropped == nil, @"Menu.m does not keep Dia's scratch menu alive once Dia drops it");
+        NSMenu *tabsMenu = [[NSMenu alloc] initWithTitle:@"Tabs"];
+        BOOL moved = YES;
+        @try {
+            for (NSMenuItem *item in built) [tabsMenu addItem:item];
+        } @catch (NSException *exception) {
+            moved = NO;
+        }
+        expect(moved && built.firstObject.menu == tabsMenu, @"Dia can move a scratch menu's items into the Tabs menu after Group Tabs placed items in it");
+
+        for (NSNumber *failing in @[ @(DPGroupMenuTag), @(DPExpandMenuTag) ]) {
+            DPThrowingMenu *flaky = [[DPThrowingMenu alloc] initWithTitle:@"Flaky"];
+            flaky.throwTag = failing.integerValue;
+            BOOL threw = NO;
+            @try {
+                [flaky addItem:[[NSMenuItem alloc] initWithTitle:@"New Group with 2 Tabs" action:nil keyEquivalent:@""]];
+            } @catch (NSException *exception) {
+                threw = YES;
+            }
+            expect(threw && !DPInserting, @"Menu.m stops ignoring menus after AppKit throws while it places Group Tabs items");
+            [flaky addItem:[[NSMenuItem alloc] initWithTitle:@"New Group with 3 Tabs" action:nil keyEquivalent:@""]];
+            BOOL complete = [flaky itemWithTag:DPGroupMenuTag] != nil;
+            for (NSInteger i = 0; i < DPFollowerCount; i++) complete = complete && [flaky itemWithTag:DPFollowerTags[i]] != nil;
+            expect(complete, @"Menu.m still places Group Tabs items in a menu after an earlier placement threw");
+        }
+        DPGroupTabs.on = NO;
 
         NSToolbar *testToolbar = [[NSToolbar alloc] initWithIdentifier:@"DPTestToolbar"];
         DPFakeToolbarDelegate *tbDelegate = [DPFakeToolbarDelegate new];

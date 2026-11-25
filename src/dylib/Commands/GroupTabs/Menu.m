@@ -169,7 +169,13 @@ static void DPInstallMenuBarItem(void) {
 }
 
 static void DPMenuAdded(NSMenu *menu, NSMenuItem *item) {
-    if (DPIsCommandTag(item.tag) || (DPGroupTabs.on && DPIsNewGroupTitle(item.title)) || DPIsTrackedGroupMenu(menu)) DPPlaceGroupItem(menu);
+    @autoreleasepool {
+        @try {
+            if (DPIsCommandTag(item.tag) || (DPGroupTabs.on && DPIsNewGroupTitle(item.title)) || DPIsTrackedGroupMenu(menu)) DPPlaceGroupItem(menu);
+        } @finally {
+            DPInserting = NO;
+        }
+    }
 }
 
 static void DPMenu_addItem(NSMenu *self, SEL _cmd, NSMenuItem *item) {
@@ -185,7 +191,13 @@ static void DPMenu_insertItem(NSMenu *self, SEL _cmd, NSMenuItem *item, NSIntege
 void DPInstallGroupMenus(void) {
     DPHookClass(NSMenu.class, @selector(addItem:), (IMP)DPMenu_addItem);
     DPHookClass(NSMenu.class, @selector(insertItem:atIndex:), (IMP)DPMenu_insertItem);
-    DPOnLaunch(^{ DPInstallMenuBarItem(); });
+    DPOnLaunch(^{
+        @try {
+            DPInstallMenuBarItem();
+        } @finally {
+            DPInserting = NO;
+        }
+    });
 }
 
 static void DPApplyGroupTabs(DPPatch *patch) {
