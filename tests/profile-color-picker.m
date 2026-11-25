@@ -957,6 +957,111 @@ static void TestWheelIsAngular(void) {
     Check([outside alphaComponent] < 0.05, @"wheel corner is transparent");
 }
 
+static NSInteger gTreeProbes, gBlendCalls;
+
+@interface DPCountingProbeView : NSView
+@end
+@implementation DPCountingProbeView
+- (NSArray<NSView *> *)subviews {
+    gTreeProbes++;
+    return [super subviews];
+}
+@end
+
+@interface NSColor (DPCountBlends)
+- (NSColor *)dp_countedBlendedColorWithFraction:(CGFloat)fraction ofColor:(NSColor *)color;
+@end
+@implementation NSColor (DPCountBlends)
+- (NSColor *)dp_countedBlendedColorWithFraction:(CGFloat)fraction ofColor:(NSColor *)color {
+    gBlendCalls++;
+    return [self dp_countedBlendedColorWithFraction:fraction ofColor:color];
+}
+@end
+
+@interface _TtC10TabSidebar30SidebarContainerViewController : NSViewController
+@end
+@implementation _TtC10TabSidebar30SidebarContainerViewController
+- (void)viewDidLayout { [super viewDidLayout]; }
+@end
+
+static void TestTintCachingAndPerf(void) {
+    Method origBlend = class_getInstanceMethod(NSColor.class, @selector(blendedColorWithFraction:ofColor:));
+    Method swizBlend = class_getInstanceMethod(NSColor.class, @selector(dp_countedBlendedColorWithFraction:ofColor:));
+    method_exchangeImplementations(origBlend, swizBlend);
+
+    _TtC10TabSidebar30SidebarContainerViewController *sidebarVC = [_TtC10TabSidebar30SidebarContainerViewController new];
+    DPProfileColorPicker.on = NO;
+    DPProfileColorPicker.install();
+
+    _TtC6Window14PlatformWindow *win = [[_TtC6Window14PlatformWindow alloc] initWithContentRect:NSMakeRect(0, 0, 800, 600)
+                                                                                      styleMask:NSWindowStyleMaskTitled
+                                                                                        backing:NSBackingStoreBuffered defer:NO];
+    win.releasedWhenClosed = NO;
+    win.fakeVisible = YES;
+    DPCountingProbeView *probeBranch = [[DPCountingProbeView alloc] initWithFrame:NSMakeRect(0, 0, 100, 100)];
+    for (int i = 0; i < 40; i++) [probeBranch addSubview:[[NSView alloc] initWithFrame:NSMakeRect(0, 0, 10, 10)]];
+    [win.contentView addSubview:probeBranch];
+
+    _TtC15WindowTreatment31WindowBackgroundOverlayTintView *tint = [[_TtC15WindowTreatment31WindowBackgroundOverlayTintView alloc] initWithFrame:win.contentView.bounds];
+    _TtC5ARCUI12GradientView *grad = [[_TtC5ARCUI12GradientView alloc] initWithFrame:tint.bounds];
+    NSArray *dia = DPDiaPresetColors(0.2, 0.5, 0.8);
+    grad.diaColors = dia;
+    grad.gradientLayer.colors = dia;
+    [tint addSubview:grad];
+    [win.contentView addSubview:tint];
+
+    _TtC10TabSidebar17SpaceSwitcherView *switcher = [[_TtC10TabSidebar17SpaceSwitcherView alloc] initWithFrame:NSMakeRect(0, 0, 100, 24)];
+    _TtC10TabSidebar21SpaceSwitcherItemView *item1 = [_TtC10TabSidebar21SpaceSwitcherItemView new];
+    _TtC10TabSidebar21SpaceSwitcherItemView *item2 = [_TtC10TabSidebar21SpaceSwitcherItemView new];
+    item1.isSelected = YES;
+    switcher.itemViews = @{ @"perf-space-1": item1, @"perf-space-2": item2 };
+    [switcher addSubview:item1];
+    [switcher addSubview:item2];
+    [win.contentView addSubview:switcher];
+    sidebarVC.view = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 220, 600)];
+    [win.contentView addSubview:sidebarVC.view];
+
+    DPSetProfileHexForSpace(@"perf-space-1", @"#E15554");
+    DPSetProfileHexForSpace(@"perf-space-2", @"#3BB273");
+    DPProfileColorPicker.on = YES;
+
+    gTreeProbes = 0;
+    gBlendCalls = 0;
+    DPRefreshProfileColorForWindow(win);
+    NSInteger firstWalkProbes = gTreeProbes, firstBlends = gBlendCalls;
+    Check(firstWalkProbes >= 1 && firstBlends == 1, @"initial window tint discovery scans tree once and computes gradient once");
+
+    gTreeProbes = 0;
+    gBlendCalls = 0;
+    for (int i = 0; i < 200; i++) {
+        DPRefreshProfileColorForWindow(win);
+        [sidebarVC viewDidLayout];
+    }
+    Check(gTreeProbes == 0, @"200 repeat refreshes and sidebar layouts perform zero window view-tree DFS walks");
+    Check(gBlendCalls == 0, @"200 repeat refreshes hit the gradient color cache with zero NSColor blends");
+
+    item1.isSelected = NO;
+    item2.isSelected = YES;
+    gTreeProbes = 0;
+    gBlendCalls = 0;
+    [sidebarVC viewDidLayout];
+    Check(DPColorsMatchHex(grad.gradientLayer.colors, @"#3BB273"), @"space switch via viewDidLayout applies new profile hex");
+    Check(gTreeProbes >= 1 && gBlendCalls == 1, @"space change invalidates window cache once and caches the second color");
+
+    gTreeProbes = 0;
+    gBlendCalls = 0;
+    for (int i = 0; i < 50; i++) [sidebarVC viewDidLayout];
+    Check(gTreeProbes == 0 && gBlendCalls == 0, @"subsequent viewDidLayout frames in new space do zero DFS or blends");
+
+    DPSetProfileHexForSpace(@"perf-space-1", nil);
+    DPSetProfileHexForSpace(@"perf-space-2", nil);
+    DPProfileColorPicker.on = NO;
+    DPProfileColorPicker.apply(&DPProfileColorPicker);
+    win.fakeVisible = NO;
+    [win close];
+    method_exchangeImplementations(origBlend, swizBlend);
+}
+
 int main(void) {
     @autoreleasepool {
         unsetenv("DIATWEAKS_DOMAIN");
@@ -967,6 +1072,7 @@ int main(void) {
         [NSApplication sharedApplication];
         TestHexParsingAndFormatting();
         TestTint();
+        TestTintCachingAndPerf();
         TestCircleAndSelection();
         TestPopover();
         TestRingRendersOutsideTheSwatch();

@@ -2,13 +2,16 @@ use std::ffi::{c_char, CString};
 
 use anyhow::{bail, Result};
 use core_foundation::{
+    array::CFArray,
     base::{CFType, CFTypeRef, TCFType},
     boolean::CFBoolean,
+    dictionary::CFDictionary,
     number::CFNumber,
     string::CFString,
 };
 use core_foundation_sys::preferences::{
-    CFPreferencesAppSynchronize, CFPreferencesCopyAppValue, CFPreferencesSetAppValue,
+    kCFPreferencesAnyHost, kCFPreferencesCurrentUser, CFPreferencesAppSynchronize,
+    CFPreferencesCopyAppValue, CFPreferencesCopyMultiple, CFPreferencesSetAppValue,
 };
 
 extern "C" {
@@ -40,8 +43,26 @@ impl Prefs {
         (!value.is_null()).then(|| unsafe { CFType::wrap_under_create_rule(value) })
     }
 
-    pub fn get(&self, key: &str) -> Option<bool> {
-        as_bool(&self.raw(key)?)
+    /// Reads many keys in one cfprefsd round trip; `Manifest::state` asks for every tweak at once.
+    pub fn bools(&self, keys: &[&str]) -> Vec<Option<bool>> {
+        let wanted: Vec<CFString> = keys.iter().map(|key| CFString::new(key)).collect();
+        let array = CFArray::from_CFTypes(&wanted);
+        let found = unsafe {
+            CFPreferencesCopyMultiple(
+                array.as_concrete_TypeRef(),
+                self.domain.as_concrete_TypeRef(),
+                kCFPreferencesCurrentUser,
+                kCFPreferencesAnyHost,
+            )
+        };
+        if found.is_null() {
+            return keys.iter().map(|_| None).collect();
+        }
+        let found = unsafe { CFDictionary::<CFString, CFType>::wrap_under_create_rule(found) };
+        wanted
+            .iter()
+            .map(|key| found.find(key).and_then(|value| as_bool(&value)))
+            .collect()
     }
 
     pub fn set(&self, key: &str, on: bool) {
@@ -120,6 +141,14 @@ mod tests {
         unsafe {
             CFPreferencesAppSynchronize(prefs.domain.as_concrete_TypeRef());
         }
+        let _ = std::process::Command::new("/usr/bin/defaults")
+            .args(["delete", &prefs.name])
+            .output();
+        if let Ok(home) = std::env::var("HOME") {
+            let _ = std::fs::remove_file(
+                std::path::Path::new(&home).join(format!("Library/Preferences/{}.plist", prefs.name)),
+            );
+        }
     }
 
     #[test]
@@ -137,6 +166,25 @@ mod tests {
     }
 
     #[test]
+    fn bools_reads_many_keys_in_one_go() {
+        let domain = format!("com.diapatches.test.batch.{}", std::process::id());
+        let prefs = Prefs::new(&domain);
+        prefs.set("on", true);
+        prefs.set("off", false);
+        assert!(prefs.save().is_ok());
+
+        let reloaded = Prefs::new(&domain);
+        assert_eq!(
+            reloaded.bools(&["on", "off", "missing"]),
+            vec![Some(true), Some(false), None]
+        );
+        assert_eq!(reloaded.bools(&["on", "on"]), vec![Some(true), Some(true)]);
+        assert!(reloaded.bools(&[]).is_empty());
+
+        clear(&reloaded, &["on", "off"]);
+    }
+
+    #[test]
     fn prefs_round_trips_booleans_and_numbers() {
         let domain = format!("com.diapatches.test.prefs.{}", std::process::id());
         let prefs = Prefs::new(&domain);
@@ -145,9 +193,10 @@ mod tests {
         assert!(prefs.save().is_ok());
 
         let reloaded = Prefs::new(&domain);
-        assert_eq!(reloaded.get("flagOn"), Some(true));
-        assert_eq!(reloaded.get("flagOff"), Some(false));
-        assert_eq!(reloaded.get("missing"), None);
+        assert_eq!(
+            reloaded.bools(&["flagOn", "flagOff", "missing"]),
+            vec![Some(true), Some(false), None]
+        );
 
         clear(&reloaded, &["flagOn", "flagOff"]);
     }
@@ -183,10 +232,15 @@ mod tests {
         assert!(prefs.save().is_ok());
 
         let reloaded = Prefs::new(&domain);
-        assert_eq!(reloaded.get("profileColorPicker"), Some(true));
-        assert_eq!(reloaded.get("launchFlags"), Some(true));
-        assert_eq!(reloaded.get("profileColors"), None);
-        assert_eq!(reloaded.get("launchFlagsArgs"), None);
+        assert_eq!(
+            reloaded.bools(&[
+                "profileColorPicker",
+                "launchFlags",
+                "profileColors",
+                "launchFlagsArgs"
+            ]),
+            vec![Some(true), Some(true), None, None]
+        );
 
         let raw_dict = unsafe {
             CFPreferencesCopyAppValue(

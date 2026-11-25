@@ -40,7 +40,8 @@ def move(source, destination):
 
 def outside_users(names):
     inside = tuple(os.path.join(PATCHES, name) + os.sep for name in names)
-    paths = sources("src/dylib")
+    # Optional tweaks in tweaks/ import built-in headers too, so they're checked as well.
+    paths = sources("src/dylib") + sources("tweaks")
     keys = {key for path in paths if path.startswith(inside) for key in re.findall(r'\.key\s*=\s*@"([^"]+)"', read(path))}
     for path in paths:
         if path.startswith(inside):
@@ -96,7 +97,7 @@ def to_builtin(names):
 
 
 def outside(names, pairs):
-    for path in ["Makefile"] + sources("tests"):
+    for path in ["Makefile"] + sources("tests") + sources("tweaks"):
         rewrite(path, [pair for name in names for pair in pairs(name)])
 
 

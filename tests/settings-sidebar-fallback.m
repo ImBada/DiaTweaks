@@ -13,6 +13,9 @@ static void expect(BOOL ok, NSString *what) {
 
 static void DPNoop(id self, SEL _cmd) {}
 
+static int DPTestApplies;
+static void DPCountTestApply(DPPatch *patch) { DPTestApplies++; }
+
 static NSMutableDictionary<NSString *, NSToolbarItem *> *DPDiaToolbarItems;
 
 static id DPDiaToolbarItem(id self, SEL _cmd, NSToolbar *toolbar, NSString *identifier, BOOL insert) { return DPDiaToolbarItems[identifier]; }
@@ -27,9 +30,41 @@ static void DPSettle(void) {
     for (int i = 0; i < 10; i++) [NSRunLoop.mainRunLoop runMode:NSDefaultRunLoopMode beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
 }
 
+static NSArray<NSView *> *DPTestRows(void) {
+    static NSArray<NSView *> *rows;
+    if (!rows) rows = @[ DPLabel(@"A row of text long enough to want the whole width of the page", 13, NSFontWeightRegular, NSColor.labelColor),
+                         [NSButton buttonWithTitle:@"Do It" target:nil action:nil] ];
+    return rows;
+}
+
+static NSMenu *DPTestChoices(void) {
+    NSMenu *menu = [[NSMenu alloc] initWithTitle:@"Size"];
+    for (NSString *value in @[ @"Small", @"Large" ]) {
+        NSMenuItem *item = [[NSMenuItem alloc] initWithTitle:value action:nil keyEquivalent:@""];
+        item.representedObject = value.lowercaseString;
+        [menu addItem:item];
+    }
+    // The last item stands for the nil choice, so a patch without a default has something to select.
+    [menu addItem:[[NSMenuItem alloc] initWithTitle:@"None" action:nil keyEquivalent:@""]];
+    return menu;
+}
+
 static NSArray<NSString *> *DPSearchOnly(id self, SEL _cmd, NSToolbar *toolbar) {
     return @[ DPSearchItemIdentifier, NSToolbarFlexibleSpaceItemIdentifier, @"PreferencesNavigateBack", @"PreferencesPaneTitle" ];
 }
+
+@interface DPWordToolbarDelegate : NSObject <NSToolbarDelegate> {
+@public
+    uintptr_t paneToolbarItems;
+}
+@end
+@implementation DPWordToolbarDelegate
+- (NSArray<NSToolbarItemIdentifier> *)toolbarAllowedItemIdentifiers:(NSToolbar *)toolbar { return DPSearchOnly(self, _cmd, toolbar); }
+- (NSArray<NSToolbarItemIdentifier> *)toolbarDefaultItemIdentifiers:(NSToolbar *)toolbar { return DPSearchOnly(self, _cmd, toolbar); }
+- (NSToolbarItem *)toolbar:(NSToolbar *)toolbar itemForItemIdentifier:(NSToolbarItemIdentifier)identifier willBeInsertedIntoToolbar:(BOOL)flag {
+    return DPDiaToolbarItems[identifier];
+}
+@end
 
 int main(int argc, const char *argv[]) {
     @autoreleasepool {
@@ -147,6 +182,137 @@ int main(int argc, const char *argv[]) {
         [shown selectRowIndexes:[NSIndexSet indexSetWithIndex:0] byExtendingSelection:NO];
         expect([label.stringValue isEqualToString:@"General"], [NSString stringWithFormat:@"leaving a tweak page gives Dia's title back: %@", label.stringValue]);
         expect(!backItem.enabled && !patches.showsPage, @"leaving a tweak page gives Dia's Back state back");
+
+        // A tweak page's rows are laid out by DPFullRow: the content spans the row between its 12pt insets, and no
+        // trailing spacer (which could only be given a negative width) is installed beside it.
+        static DPPatch testChild = {
+            .key = @"sidebarFallbackChild", .title = @"Child", .detail = @"An option under the test tweak.",
+            .requires = @"sidebarFallbackTest", .defaultOn = YES,
+        };
+        static DPPatch testPatch = {
+            .key = @"sidebarFallbackTest", .title = @"Test Tweak", .detail = @"Rows and a choice menu.",
+            .section = @"Test", .defaultOn = YES, .choice = @"sidebarFallbackChoice",
+            .choices = DPTestChoices, .rows = DPTestRows,
+        };
+        static DPPatch *testPatches[] = { &testChild, &testPatch };
+        DPPatches = testPatches;
+        DPPatchCount = 2;
+        // The suite may run twice against one defaults domain.
+        [DPSettingsDefaults() removeObjectForKey:testPatch.choice];
+        [DPSettingsDefaults() removeObjectForKey:testPatch.key];
+
+        DPPageView *tweakPage = [[DPPageView alloc] initWithPatch:&testPatch];
+        NSWindow *pageWindow = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 560, 900)
+                                                          styleMask:NSWindowStyleMaskBorderless
+                                                            backing:NSBackingStoreBuffered
+                                                              defer:NO];
+        pageWindow.contentView = tweakPage;
+        [tweakPage layoutSubtreeIfNeeded];
+        DPSettle();
+        [tweakPage layoutSubtreeIfNeeded];
+        expect(!tweakPage.hasAmbiguousLayout, @"full-width tweak rows never leave ambiguous Auto Layout constraints");
+        NSArray<NSView *> *content = testPatch.rows();
+        for (NSView *view in content) {
+            NSView *row = view.superview;
+            NSRect aligned = [view alignmentRectForFrame:view.frame];  // A text field's cell insets are outside this.
+            expect(row.subviews.count == 1, @"a full-width row holds only its content");
+            expect(NSMinX(aligned) == 12 && NSWidth(aligned) == NSWidth(row.frame) - 24,
+                   [NSString stringWithFormat:@"a full-width row spans 12pt insets: %@ of %@", NSStringFromRect(aligned), NSStringFromRect(row.frame)]);
+        }
+
+        NSPopUpButton *picker = (NSPopUpButton *)DPFindView(tweakPage, ^BOOL(NSView *v) { return [v isKindOfClass:NSPopUpButton.class]; });
+        expect([picker.selectedItem.title isEqual:@"None"],
+               [NSString stringWithFormat:@"a choice whose default is nil selects the item without a representedObject: %@", picker.selectedItem.title]);
+        DPSetChoice(&testPatch, @"large");
+        BOOL raised = NO;
+        @try { DPSetChoice(&testPatch, nil); DPSetChoice(&testPatch, (NSString *)@42); } @catch (NSException *exception) { raised = YES; }
+        expect(!raised && [DPChoice(&testPatch) isEqual:@"large"], @"a nil or non-string choice leaves the saved choice alone without throwing");
+        [tweakPage sync];
+        [picker selectItemWithTitle:@"None"];
+        [NSApp sendAction:picker.action to:picker.target from:picker];
+        expect([picker.selectedItem.title isEqual:@"Large"] && [DPChoice(&testPatch) isEqual:@"large"],
+               @"picking an item without a string representedObject snaps back to the active choice");
+
+        // Raw Swift ivar hardening: unmapped words, IEEE-754 floats, heap C buffers, and non-arrays never crash DPRemoveDiaPaneItems.
+        DPWordToolbarDelegate *wordDelegate = [DPWordToolbarDelegate new];
+        NSToolbar *wordToolbar = [[NSToolbar alloc] initWithIdentifier:@"DPWordToolbar"];
+        wordToolbar.delegate = wordDelegate;
+        NSViewController *wordSide = [NSViewController new], *wordDetail = [NSViewController new];
+        NSTableView *wordTable = [[NSTableView alloc] initWithFrame:NSMakeRect(0, 0, 200, 400)];
+        [wordTable addTableColumn:[[NSTableColumn alloc] initWithIdentifier:@"sidebar"]];
+        wordTable.dataSource = delegate;
+        wordTable.delegate = delegate;
+        NSScrollView *wordScroll = [[NSScrollView alloc] initWithFrame:NSMakeRect(0, 0, 200, 400)];
+        wordScroll.documentView = wordTable;
+        wordSide.view = wordScroll;
+        wordDetail.view = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 600, 400)];
+        NSSplitViewController *wordSplit = [NSSplitViewController new];
+        [wordSplit addSplitViewItem:[NSSplitViewItem sidebarWithViewController:wordSide]];
+        [wordSplit addSplitViewItem:[NSSplitViewItem splitViewItemWithViewController:wordDetail]];
+        NSWindow *wordWin = [NSWindow windowWithContentViewController:wordSplit];
+        wordWin.toolbar = wordToolbar;
+        [wordTable reloadData];
+        char nonObjectHeap[64];
+        memset(nonObjectHeap, 'A', sizeof nonObjectHeap);
+        uintptr_t hazards[] = { 0, 0x8000000000000001ULL, 0x100000008ULL, 0x3ff0000000000000ULL, (uintptr_t)nonObjectHeap };
+        for (size_t i = 0; i < sizeof hazards / sizeof *hazards; i++) {
+            wordDelegate->paneToolbarItems = hazards[i];
+            [wordTable selectRowIndexes:[NSIndexSet indexSetWithIndex:0] byExtendingSelection:NO];
+            [wordTable selectRowIndexes:[NSIndexSet indexSetWithIndex:3] byExtendingSelection:NO];
+        }
+        expect(YES, @"non-object words and unmapped pointers in paneToolbarItems never crash Settings");
+
+        // Safe Mode keeps switches usable so a crashing tweak can be turned off without running apply, while disabling live page controls.
+        DPTestApplies = 0;
+        testPatch.apply = DPCountTestApply;
+        testPatch.on = NO;
+        testChild.on = NO;
+        DPSafeMode = 1;
+        DPSetPatch(&testPatch, YES, YES);
+        expect(testPatch.on && DPSavedOn(&testPatch) && DPTestApplies == 0, @"a switch flipped in Safe Mode saves without running apply");
+        [tweakPage sync];
+        DPPatchSwitch *testSwitch = (DPPatchSwitch *)DPFindView(tweakPage, ^BOOL(NSView *v) {
+            return [v isKindOfClass:DPPatchSwitch.class] && ((DPPatchSwitch *)v).patch == &testPatch;
+        });
+        expect(testSwitch.enabled && testSwitch.state == NSControlStateValueOn && !picker.enabled,
+               @"Safe Mode keeps switches usable while disabling live choice pickers");
+        DPSetChoice(&testPatch, @"small");
+        expect([DPChoice(&testPatch) isEqual:@"small"] && DPTestApplies == 0, @"Safe Mode choice saves without running apply");
+        DPSafeMode = 0;
+        testPatch.apply = NULL;
+        DPSetPatch(&testPatch, NO, YES);
+
+        // A pane nobody can see only notes that it is out of date, and catches up when it or its ancestor is shown again.
+        DPOverviewView *overview = [[DPOverviewView alloc] initWithFrame:NSMakeRect(0, 0, 560, 600)];
+        DPPaneView *hiddenPane = [[DPPaneView alloc] initWithTitle:@"Patches" content:overview];
+        NSWindow *paneWindow = [NSWindow windowWithContentViewController:[NSViewController new]];
+        NSView *paneHolder = [[NSView alloc] initWithFrame:paneWindow.contentView.bounds];
+        [paneWindow.contentView addSubview:paneHolder];
+        [paneHolder addSubview:hiddenPane];
+        hiddenPane.frame = paneHolder.bounds;
+        hiddenPane.hidden = YES;
+        __block int paneSyncs = 0;
+        Method syncWithQuery = class_getInstanceMethod(DPOverviewView.class, @selector(syncWithQuery:));
+        IMP syncIMP = method_getImplementation(syncWithQuery);
+        method_setImplementation(syncWithQuery, imp_implementationWithBlock(^(DPOverviewView *view, NSString *query) {
+            if (view == overview) paneSyncs++;
+            ((void (*)(id, SEL, NSString *))syncIMP)(view, @selector(syncWithQuery:), query);
+        }));
+        [NSNotificationCenter.defaultCenter postNotificationName:DPPatchesDidChangeNotification object:nil];
+        expect(paneSyncs == 0, [NSString stringWithFormat:@"a hidden pane skips the rebuild: %d syncs", paneSyncs]);
+        hiddenPane.hidden = NO;
+        expect(paneSyncs == 1, @"showing the pane runs the rebuild it deferred");
+        paneHolder.hidden = YES;
+        [NSNotificationCenter.defaultCenter postNotificationName:DPPatchesDidChangeNotification object:nil];
+        expect(paneSyncs == 1, @"a pane under a hidden ancestor also skips the rebuild");
+        paneHolder.hidden = NO;
+        expect(paneSyncs == 2, @"unhiding the ancestor flushes the deferred rebuild");
+        hiddenPane.hidden = YES;
+        hiddenPane.hidden = NO;
+        expect(paneSyncs == 2, @"a pane that is already up to date is not rebuilt again");
+        method_setImplementation(syncWithQuery, syncIMP);
+        [DPSettingsDefaults() removeObjectForKey:testPatch.choice];
+        [DPSettingsDefaults() removeObjectForKey:testPatch.key];
 
         if (failures) printf("%d failures\n", failures);
         else printf("settings sidebar fallback: ok\n");

@@ -19,7 +19,9 @@ static void DPSidebarHeader_layout(NSView *self, SEL _cmd) {
         if (!DPHideTrafficLights.on) DPSet(self, &DPLightsKey, nil);
         return DPCallOriginal(DPSidebarHeader_layout, self);
     }
-    [stack setVisibilityPriority:DPHideTrafficLights.on ? NSStackViewVisibilityPriorityNotVisible : NSStackViewVisibilityPriorityMustHold forView:held.firstObject];
+    // Writing a priority the stack already has re-invalidates its layout, so only write a new one.
+    NSStackViewVisibilityPriority priority = DPHideTrafficLights.on ? NSStackViewVisibilityPriorityNotVisible : NSStackViewVisibilityPriorityMustHold;
+    if ([stack visibilityPriorityForView:held.firstObject] != priority) [stack setVisibilityPriority:priority forView:held.firstObject];
     DPCallOriginal(DPSidebarHeader_layout, self);
     if (!DPHideTrafficLights.on) {
         NSRect laidOut = DPLaidOutStack(stack);

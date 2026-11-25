@@ -1,12 +1,68 @@
 #import "Patches/CommandBar/Tabs.h"
+#import <pthread.h>
+
+@interface DPScriptWindowMemo : NSObject {
+@public
+    __weak id delegate;
+    NSString *identifier;
+    id scripted;
+}
+@end
+
+@implementation DPScriptWindowMemo
+@end
+
+static NSMapTable<NSWindow *, DPScriptWindowMemo *> *DPScriptWindowCache;
+static BOOL DPScriptWindowClearArmed;
+
+static void DPClearScriptWindowCache(void) {
+    [DPScriptWindowCache removeAllObjects];
+    DPScriptWindowClearArmed = NO;
+}
+
+static BOOL DPMemoMatchesDelegate(id delegate, DPScriptWindowMemo *memo, NSString *identifier) {
+    if (!memo || memo->delegate != delegate || ![memo->identifier isEqualToString:identifier]) return NO;
+    void *slot = DPIvar(delegate, "_appleScriptWindows") ?: DPIvar(delegate, "appleScriptWindows");
+    if (!slot) return YES;
+    id stored = *(__unsafe_unretained id *)slot;
+    return [stored isKindOfClass:NSArray.class] && [(NSArray *)stored indexOfObjectIdenticalTo:memo->scripted] != NSNotFound
+        && [[DPValueForKey(memo->scripted, @"windowId") description] isEqualToString:identifier];
+}
 
 id DPScriptWindow(NSWindow *window) {
     NSString *identifier = window.identifier;
-    if (!identifier) return nil;
-    id windows = DPValueForKey(NSApp.delegate, @"appleScriptWindows");
+    id delegate = NSApp.delegate;
+    if (!identifier || !delegate) return nil;
+    BOOL onMain = pthread_main_np() != 0;
+    if (onMain) {
+        if (!DPScriptWindowCache) {
+            DPScriptWindowCache = [NSMapTable weakToStrongObjectsMapTable];
+            CFRunLoopObserverRef observer = CFRunLoopObserverCreateWithHandler(NULL, kCFRunLoopBeforeWaiting | kCFRunLoopExit, true, 0,
+                ^(CFRunLoopObserverRef o, CFRunLoopActivity a) { DPClearScriptWindowCache(); });
+            CFRunLoopAddObserver(CFRunLoopGetMain(), observer, kCFRunLoopCommonModes);
+            CFRelease(observer);
+        }
+        DPScriptWindowMemo *memo = [DPScriptWindowCache objectForKey:window];
+        if (DPMemoMatchesDelegate(delegate, memo, identifier)) return memo->scripted;
+    }
+    id windows = DPValueForKey(delegate, @"appleScriptWindows");
     if (![windows isKindOfClass:NSArray.class]) return nil;
     for (id scripted in windows)
-        if ([DPValueForKey(scripted, @"windowId") isEqual:identifier]) return scripted;
+        if ([DPValueForKey(scripted, @"windowId") isEqual:identifier]) {
+            if (onMain) {
+                DPScriptWindowMemo *memo = [DPScriptWindowMemo new];
+                memo->delegate = delegate;
+                memo->identifier = [identifier copy];
+                memo->scripted = scripted;
+                [DPScriptWindowCache setObject:memo forKey:window];
+                if (!DPScriptWindowClearArmed) {
+                    DPScriptWindowClearArmed = YES;
+                    dispatch_async(dispatch_get_main_queue(), ^{ DPClearScriptWindowCache(); });
+                }
+            }
+            return scripted;
+        }
+    if (onMain) [DPScriptWindowCache removeObjectForKey:window];
     return nil;
 }
 

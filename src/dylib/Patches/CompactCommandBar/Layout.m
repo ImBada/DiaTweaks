@@ -38,10 +38,11 @@ static void DPPopover_setFrameOrigin(NSView *self, SEL _cmd, NSPoint origin) {
 static void DPRefit(NSView *commandBar) {
     NSView *box = commandBar.superview;
     while (box && !DPIsKind(box, DPDiaPopover) && !(DPIsKind(box, DPDiaAssistantPanel) && DPTrimsPanel(box))) box = box.superview;
-    if (!box || !DPMayAdjust(box)) return;
+    if (!box) return;
     NSRect before = box.frame;
     NSSize full = NSMakeSize(NSWidth(before), NSHeight(before) + DPTrim(box));
     if (fabs(full.height - DPCompactSize(box, full).height - DPTrim(box)) < 0.5) return;
+    if (!DPMayAdjust(box)) return;
     [box setFrameSize:full];
     if (DPIsKind(box, DPDiaPopover) && !box.superview.isFlipped) [box setFrameOrigin:NSMakePoint(NSMinX(before), NSMaxY(before) - NSHeight(box.frame))];
     box.superview.superview.needsLayout = YES;
@@ -111,6 +112,7 @@ static void DPCommandBarButton_setAccessibilityLabel(NSView *self, SEL _cmd, NSS
     if (!DPCompactCommandBar.on) return;
     NSView *commandBar = DPCommandBarAbove(self);
     NSView *toolbar = DPCommandBarPart(commandBar, DPDiaCommandBarToolbar);
+    DPForgetChatLocked(toolbar);
     NSStackView *stack = DPToolbarStack(toolbar);
     if (!stack || ![stack.views containsObject:self] || self == DPGoButton(toolbar)) return;
     DPRememberChatLocked(DPChatLocked(toolbar));

@@ -60,6 +60,13 @@ static void DPReportHeight(NSCollectionViewLayout *layout, double height) {
     if (ctx && releaseFn) releaseFn(ctx);
 }
 
+typedef struct { CGRect now, then; } DPMove;
+
+static int DPCompareDoubles(const void *a, const void *b) {
+    double x = *(const double *)a, y = *(const double *)b;
+    return x < y ? -1 : x > y;
+}
+
 static void DPLayout_prepareLayout(NSCollectionViewLayout *self, SEL _cmd) {
     DPCallOriginal(DPLayout_prepareLayout, self);
     if (!DPCompactTabRows.on) return DPSet(self, &DPMovesKey, nil);
@@ -67,40 +74,66 @@ static void DPLayout_prepareLayout(NSCollectionViewLayout *self, SEL _cmd) {
     NSArray<NSCollectionViewLayoutAttributes *> *all = DPKeptAttributes(self);
     CGFloat height = DPRowHeight(all), cut = height - DPCompactRowHeight();
     if (!contentHeight || cut < 0.5) return DPSet(self, &DPMovesKey, nil);
-    NSMutableArray<NSValue *> *rows = [NSMutableArray new];
+    NSUInteger count = all.count, rows = 0;
+    NSMutableData *scratch = [NSMutableData dataWithLength:(count + 1) * sizeof(double)];
+    double *top = scratch.mutableBytes;
+    BOOL sorted = YES;
     for (NSCollectionViewLayoutAttributes *a in all)
-        if (a.representedElementCategory == NSCollectionElementCategoryItem && NSHeight(a.frame) >= height - 0.5)
-            [rows addObject:[NSValue valueWithRect:NSMakeRect(NSMinX(a.frame), NSMinY(a.frame), NSWidth(a.frame), height)]];
-    NSMutableArray<NSArray<NSValue *> *> *moves = [NSMutableArray new];
-    for (NSCollectionViewLayoutAttributes *a in all) {
-        NSRect frame = a.frame;
-        for (NSValue *value in rows) {
-            NSRect row = value.rectValue;
-            // A folder's first row starts 3 pt up into its header.
-            if (NSMaxY(row) <= NSMinY(a.frame) + 3.5) frame.origin.y -= cut;
-            else if (NSMinY(row) >= NSMinY(a.frame) - 0.5 && NSMaxY(row) <= NSMaxY(a.frame) + 0.5) frame.size.height -= cut;
+        if (a.representedElementCategory == NSCollectionElementCategoryItem && NSHeight(a.frame) >= height - 0.5) {
+            double y = NSMinY(a.frame);
+            if (rows && y < top[rows - 1]) sorted = NO;
+            top[rows++] = y;
         }
-        if (a.representedElementCategory == NSCollectionElementCategoryItem)
-            [moves addObject:@[ [NSValue valueWithRect:frame], [NSValue valueWithRect:a.frame] ]];
+    if (!sorted) qsort(top, rows, sizeof *top, DPCompareDoubles);
+    NSMutableData *moves = [NSMutableData dataWithLength:count * sizeof(DPMove)];
+    DPMove *move = moves.mutableBytes;
+    NSUInteger moved = 0, cAbove = 0, cFrom = 0, cTo = 0;
+    for (NSCollectionViewLayoutAttributes *a in all) {
+        NSRect dia = a.frame, frame = dia;
+        // Rows above shift it up; rows it holds shrink it. A folder's first row starts 3 pt up into its header.
+        double aboveLimit = NSMinY(dia) + 3.5, fromLimit = NSMinY(dia) - 0.5, toLimit = NSMaxY(dia) + 0.5;
+        while (cAbove > 0 && top[cAbove - 1] + height > aboveLimit) cAbove--;
+        while (cAbove < rows && top[cAbove] + height <= aboveLimit) cAbove++;
+        while (cFrom > 0 && top[cFrom - 1] >= fromLimit) cFrom--;
+        while (cFrom < rows && top[cFrom] < fromLimit) cFrom++;
+        while (cTo > 0 && top[cTo - 1] + height > toLimit) cTo--;
+        while (cTo < rows && top[cTo] + height <= toLimit) cTo++;
+        NSUInteger from = MAX(cAbove, cFrom);
+        frame.origin.y -= cut * cAbove;
+        if (cTo > from) frame.size.height -= cut * (cTo - from);
+        if (a.representedElementCategory == NSCollectionElementCategoryItem) move[moved++] = (DPMove){frame, dia};
         a.frame = frame;
     }
-    *contentHeight -= cut * rows.count;
+    moves.length = moved * sizeof(DPMove);
+    *contentHeight -= cut * rows;
     DPSet(self, &DPMovesKey, moves);
     DPReportHeight(self, *contentHeight);
 }
 
-CGFloat DPTabListDiaY(NSArray<NSArray<NSValue *> *> *moves, CGFloat y) {
-    NSArray<NSValue *> *inside = nil, *above = nil;
-    for (NSArray<NSValue *> *move in moves) {
-        NSRect now = move[0].rectValue;
-        if (y >= NSMinY(now) && y < NSMaxY(now) && (!inside || NSHeight(now) < NSHeight(inside[0].rectValue))) inside = move;
-        if (NSMaxY(now) <= y && (!above || NSMaxY(now) > NSMaxY(above[0].rectValue))) above = move;
+static CGFloat DPDiaYIn(const DPMove *moves, NSUInteger count, CGFloat y) {
+    const DPMove *inside = NULL, *above = NULL;
+    for (NSUInteger i = 0; i < count; i++) {
+        NSRect now = moves[i].now;
+        if (y >= NSMinY(now) && y < NSMaxY(now) && (!inside || NSHeight(now) < NSHeight(inside->now))) inside = &moves[i];
+        if (NSMaxY(now) <= y && (!above || NSMaxY(now) > NSMaxY(above->now))) above = &moves[i];
     }
     if (inside) {
-        NSRect now = inside[0].rectValue, then = inside[1].rectValue;
+        NSRect now = inside->now, then = inside->then;
         return NSMinY(then) + (y - NSMinY(now)) * NSHeight(then) / NSHeight(now);
     }
-    return above ? y - NSMaxY(above[0].rectValue) + NSMaxY(above[1].rectValue) : y;
+    return above ? y - NSMaxY(above->now) + NSMaxY(above->then) : y;
+}
+
+static NSData *DPPackedMoves(NSArray<NSArray<NSValue *> *> *moves) {
+    NSMutableData *packed = [NSMutableData dataWithLength:moves.count * sizeof(DPMove)];
+    DPMove *move = packed.mutableBytes;
+    for (NSArray<NSValue *> *each in moves) *move++ = (DPMove){each[0].rectValue, each[1].rectValue};
+    return packed;
+}
+
+CGFloat DPTabListDiaY(NSArray<NSArray<NSValue *> *> *moves, CGFloat y) {
+    NSData *packed = DPPackedMoves(moves);
+    return DPDiaYIn(packed.bytes, packed.length / sizeof(DPMove), y);
 }
 
 @interface DPCompactDrag : NSProxy
@@ -150,10 +183,10 @@ void DPClearDraggedTab(void) { DPDragHandedSet = NO; }
 static id<NSDraggingInfo> DPDiaDrag(NSView *tabList, id<NSDraggingInfo> info) {
     if (!DPCompactTabRows.on) return info;
     NSCollectionView *list = (NSCollectionView *)DPFindView(tabList, ^BOOL(NSView *view) { return DPIsKind(view, DPDiaTabListCollection); });
-    NSArray *moves = DPGet(list.collectionViewLayout, &DPMovesKey);
+    NSData *moves = DPGet(list.collectionViewLayout, &DPMovesKey);
     if (!moves) return info;
     NSPoint point = [list convertPoint:info.draggingLocation fromView:nil];
-    point.y = DPTabListDiaY(moves, point.y);
+    point.y = DPDiaYIn(moves.bytes, moves.length / sizeof(DPMove), point.y);
     return DPDraggingInfoAt(info, [list convertPoint:point toView:nil]);
 }
 

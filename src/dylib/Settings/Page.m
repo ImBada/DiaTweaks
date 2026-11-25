@@ -7,12 +7,6 @@ static NSArray<NSView *> *DPRowsOf(DPPatch *patch) {
     return patch->shortcut ? [@[ DPShortcutRow(patch) ] arrayByAddingObjectsFromArray:rows] : rows;
 }
 
-static NSView *DPWideRow(NSView *view) {
-    NSView *row = DPRow(view, [NSView new]);
-    [view.trailingAnchor constraintEqualToAnchor:row.trailingAnchor constant:-12].active = YES;
-    return row;
-}
-
 @implementation DPPageView {
     DPPatch *_patch;
     NSMutableArray<DPPatchSwitch *> *_switches;
@@ -74,7 +68,7 @@ static NSView *DPWideRow(NSView *view) {
         if (option->choices || optionRows.count) {
             NSMutableArray<NSView *> *under = [NSMutableArray arrayWithCapacity:optionRows.count + (option->choices != NULL)];
             if (option->choices) [under addObject:[self choiceRowFor:option]];
-            for (NSView *view in optionRows) [under addObject:DPWideRow(view)];
+            for (NSView *view in optionRows) [under addObject:DPFullRow(view)];
             for (NSView *row in under) {
                 DPSet(row, &DPChoicePatchKey, [NSValue valueWithPointer:option]);
                 add(title, row);
@@ -86,8 +80,8 @@ static NSView *DPWideRow(NSView *view) {
     NSMutableArray<NSView *> *cards = [NSMutableArray new];
     for (NSView *view in _rows) {
         if ([view isMemberOfClass:DPFillView.class]) [cards addObject:view];
-        else if ([view.identifier isEqual:DPLeadingOption]) [groups[@"Options"] insertObject:DPWideRow(view) atIndex:0];
-        else add(view.identifier ?: @"Options", DPWideRow(view));
+        else if ([view.identifier isEqual:DPLeadingOption]) [groups[@"Options"] insertObject:DPFullRow(view) atIndex:0];
+        else add(view.identifier ?: @"Options", DPFullRow(view));
     }
     if ([titles containsObject:unavailable]) {
         [titles removeObject:unavailable];
@@ -165,9 +159,10 @@ static NSView *DPWideRow(NSView *view) {
 }
 
 static void DPSelectChoice(NSPopUpButton *picker, DPPatch *patch) {
-    id choice = DPChoice(patch);
+    id choice = DPChoice(patch) ?: NSNull.null;
+    // A menu item without a representedObject is the nil choice, so it still has to be pickable.
     for (NSMenuItem *item in picker.menu.itemArray)
-        if ([item.representedObject isEqual:choice]) return [picker selectItem:item];
+        if ([(item.representedObject ?: NSNull.null) isEqual:choice]) return [picker selectItem:item];
 }
 
 - (NSView *)choiceRowFor:(DPPatch *)patch {
@@ -184,7 +179,10 @@ static void DPSelectChoice(NSPopUpButton *picker, DPPatch *patch) {
 }
 
 - (void)choose:(NSPopUpButton *)picker {
-    DPSetChoice([DPGet(picker, &DPChoicePatchKey) pointerValue] ?: _patch, picker.selectedItem.representedObject);
+    DPPatch *patch = [DPGet(picker, &DPChoicePatchKey) pointerValue] ?: _patch;
+    id choice = picker.selectedItem.representedObject;
+    if (![choice isKindOfClass:NSString.class]) return DPSelectChoice(picker, patch);
+    DPSetChoice(patch, choice);
 }
 
 static void DPSetRowControlsEnabled(NSView *view, BOOL enabled) {
@@ -194,13 +192,13 @@ static void DPSetRowControlsEnabled(NSView *view, BOOL enabled) {
 }
 
 - (void)sync {
+    BOOL running = !DPSafeMode && !DPPaused && !DPPausedAtLaunch;
     for (DPPatchSwitch *toggle in _switches) [toggle sync];
     for (NSPopUpButton *picker in _pickers) {
         DPPatch *patch = [DPGet(picker, &DPChoicePatchKey) pointerValue] ?: _patch;
-        picker.enabled = !DPPaused && !DPWhyDisabled(patch);
+        picker.enabled = running && !DPWhyDisabled(patch);
         DPSelectChoice(picker, patch);
     }
-    BOOL running = !DPSafeMode && !DPPaused && !DPPausedAtLaunch;
     for (NSView *row in _rows)
         if (![row isMemberOfClass:DPFillView.class]) DPSetRowControlsEnabled(row, _patch->on && running);
     for (NSArray *gated in _gated) ((NSView *)gated[0]).hidden = !DPExperimentalShown([gated[1] pointerValue]);

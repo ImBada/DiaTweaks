@@ -1,4 +1,5 @@
 #import "Peek/Peek.h"
+#import "runloop.h"
 #import "Patches/HideToolbar/HideToolbar.h"
 #import <objc/runtime.h>
 
@@ -151,6 +152,16 @@ void DPDrawProgressShader(CAMetalLayer *layer, CGFloat progress, CGFloat cycle, 
 #import "Peek/Zoom.m"
 #import "Peek/DragLinks.m"
 
+@interface DPOrderProbeCover : DPPeekCover
+@property BOOL attachedAtOrderOut;
+@end
+@implementation DPOrderProbeCover
+- (void)orderOut:(id)sender {
+    self.attachedAtOrderOut = self.parentWindow != nil;
+    [super orderOut:sender];
+}
+@end
+
 static int failures;
 #define CHECK(cond, msg) do { if (!(cond)) { printf("FAIL: %s\n", msg); failures++; } } while (0)
 
@@ -291,6 +302,63 @@ int main(void) {
         CHECK(gDetachCalls == 2, "nothing is left to cool");
         [warmA close];
         [warmB close];
+
+        DPPeekTestWindow *idleWindow = MakeWindow(NSMakeRect(-30000, -29000, 600, 400));
+        NSURL *idleURL = [NSURL URLWithString:@"https://idle.example/"];
+        gDetachCalls = 0;
+        DPPeekWarmIdle = 10;
+        DPPeekWarm(idleWindow, source, idleURL);
+        DPPeekWarmSlot *idleSlot = [DPPeekWarmSlots objectForKey:idleWindow];
+        NSUInteger idleStamp = idleSlot.stamp;
+        DPPeekWarm(idleWindow, source, idleURL);
+        CHECK([DPPeekWarmSlots objectForKey:idleWindow] == idleSlot && idleSlot.stamp == idleStamp + 1 && gDetachCalls == 0,
+              "hovering the warmed link again keeps its page and pushes the idle cool-down back");
+        DPFakePeekPage *otherSource = [DPFakePeekPage new];
+        DPPeekCloseForSource(otherSource);
+        CHECK([DPPeekWarmSlots objectForKey:idleWindow] == idleSlot, "closing an unrelated tab leaves the warmed page alone");
+        DPPeekCloseForSource(source);
+        CHECK([DPPeekWarmSlots objectForKey:idleWindow] == nil && gDetachCalls == 1 && !DPPeekHasWarm(),
+              "closing the source tab drops the page warmed for it");
+        DPPeekWarmIdle = 0.05;
+        DPPeekWarm(idleWindow, source, idleURL);
+        CHECK(DPPeekHasWarm(), "a freshly hovered link warms a page");
+        CHECK(DPPumpUntil(^BOOL { return [DPPeekWarmSlots objectForKey:idleWindow] == nil; }) && gDetachCalls == 2,
+              "a warmed page nobody opens cools itself once the idle timeout passes");
+        DPPeekWarmIdle = 25;
+        [idleWindow close];
+
+        DPPeekTestWindow *dragWindow = MakeWindow(NSMakeRect(-30000, -28000, 600, 400));
+        NSUInteger (^zones)(NSWindow *) = ^NSUInteger(NSWindow *host) {
+            NSUInteger count = 0;
+            for (NSWindow *child in host.childWindows) if ([child.contentView isKindOfClass:DPPeekZone.class]) count++;
+            return count;
+        };
+        DPPeekDragZoneFade = 0.03;
+        DPShowZone(dragWindow, NSMakePoint(100, 100));
+        NSPanel *firstZone = DPZonePanel;
+        DPPeekHideDragZone();
+        DPShowZone(dragWindow, NSMakePoint(160, 120));
+        CHECK(DPZonePanel == firstZone && zones(dragWindow) == 1, "a drag begun while the last zone fades out takes over its panel");
+        [DPZoneRelease invalidate];  // The pointer is still down in the drag, which the release timer would otherwise see as let go.
+        DPDrainMainQueue(0.08);
+        CHECK(DPZonePanel == firstZone && firstZone.parentWindow == dragWindow && zones(dragWindow) == 1,
+              "the fade-out's pending removal leaves the reused panel in place");
+        DPPeekHideDragZone();
+        DPDrainMainQueue(0.08);
+        CHECK(zones(dragWindow) == 0 && firstZone.parentWindow == nil, "a hidden zone is taken off its window once the fade-out ends");
+        DPShowZone(dragWindow, NSMakePoint(100, 100));
+        CHECK(DPZonePanel != firstZone && zones(dragWindow) == 1, "a drag after the fade-out gets a fresh panel");
+        DPPeekHideDragZone();
+        DPDrainMainQueue(0.08);
+        DPPeekDragZoneFade = 0.35;
+        [dragWindow close];
+
+        DPOrderProbeCover *probeCover = [[DPOrderProbeCover alloc] initWithContentRect:NSMakeRect(0, 0, 100, 100) styleMask:NSWindowStyleMaskBorderless
+                                                                              backing:NSBackingStoreBuffered defer:NO];
+        probeCover.releasedWhenClosed = NO;
+        [window addChildWindow:probeCover ordered:NSWindowAbove];
+        [probeCover dismiss];
+        CHECK(!probeCover.attachedAtOrderOut && probeCover.parentWindow == nil, "dismissing a cover detaches it from its window before ordering it out");
 
         DPPeek.on = NO;
         gCloseCalls = 0;

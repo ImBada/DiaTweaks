@@ -6,7 +6,8 @@
 
 DPPatch DPHideToolbar, DPRevealToolbarOnHover, DPShowToolbarWithSidebar, DPShowToolbarOnNewTab, DPShowToolbarWithTopTabs;
 BOOL DPBesideSidebar(NSView *view) { return NO; }
-BOOL DPLittleDiaIsOver(NSWindow *window) { return NO; }
+static BOOL gLittleDiaOver;
+BOOL DPLittleDiaIsOver(NSWindow *window) { return gLittleDiaOver; }
 void DPRepaintTabs(NSWindow *window) {}
 BOOL DPToolbarHasPermissionRequest(DPToolbarHover *hover) { return NO; }
 static NSUInteger frameWrites, alphaWrites;
@@ -47,6 +48,14 @@ static void checkGeometry(BOOL flipped, BOOL bookmarks) {
     page.frame = NSMakeRect(original.origin.x, original.origin.y, 1100, original.size.height);
     DPApplyToolbar(pane);
     NSCAssert(NSWidth(page.frame) == 1100 && NSWidth(web.frame) == 1100, @"off leaves a new Dia frame alone");
+    gLittleDiaOver = YES;
+    DPApplyToolbar(pane);
+    NSCAssert(bar.alphaValue == 0 && (!bookmarks || marks.alphaValue == 0), @"Little Dia hides the bars with Hide Toolbar off");
+    gLittleDiaOver = NO;
+    DPApplyToolbar(pane);
+    NSCAssert(bar.alphaValue == 1 && (!bookmarks || marks.alphaValue == 1), @"both bars come back when Little Dia closes");
+    NSCAssert(NSEqualRects(page.frame, NSMakeRect(0, pageY + (flipped && bookmarks ? 25 : 0), 1100, 750 - (bookmarks ? 25 : 0))),
+              @"the page stays where Hide Toolbar off left it");
 }
 
 int main(void) {

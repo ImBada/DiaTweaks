@@ -29,6 +29,10 @@ impl StagedMarkers {
         ] {
             let src = support.join(rel);
             let dst = support.join(tmp);
+            // A restore that was killed leaves the marker stashed; put it back so this run owns it again.
+            if !src.exists() && dst.exists() && fs::rename(&dst, &src).is_err() {
+                continue;
+            }
             if fs::rename(&src, &dst).is_ok() {
                 stashed.push((src, dst));
             }
@@ -161,5 +165,16 @@ mod tests {
             .path()
             .join("staged/DiaTweaks/.release.plist.restore")
             .exists());
+
+        // A restore that died before it could put its marker back leaves only the .restore copy.
+        fs::write(dir.path().join("staged/.ready.restore"), "98765").unwrap();
+        let stashed = StagedMarkers::stash(dir.path());
+        stashed.restore();
+        assert_eq!(fs::read_to_string(&ready).unwrap(), "98765");
+        assert!(!dir.path().join("staged/.ready.restore").exists());
+
+        let stashed = StagedMarkers::stash(dir.path());
+        stashed.discard();
+        assert!(!ready.exists() && !dir.path().join("staged/.ready.restore").exists());
     }
 }

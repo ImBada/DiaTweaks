@@ -91,6 +91,7 @@ static const CGFloat DPGlowEase = 0.15;
     self.frames = [NSTimer timerWithTimeInterval:interval repeats:YES block:^(NSTimer *timer) {
         if (weak) [weak step]; else [timer invalidate];
     }];
+    if (interval == DPGlowIdle) self.frames.tolerance = 0.05;
     [NSRunLoop.mainRunLoop addTimer:self.frames forMode:NSRunLoopCommonModes];
 }
 

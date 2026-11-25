@@ -164,10 +164,17 @@ static BOOL check(NSArray<NSString *> *argv) {
 }
 
 // Dia's feed server turns away some HTTP clients but accepts curl.
+// file:// is only for the fixtures DIAPATCH_FEED, DIAPATCH_RELEASES and DIAPATCH_COMPARE point at, which only exist
+// inside a test DIAPATCH_HOME; a URL read out of a feed's own JSON must never reach the local disk.
+static NSArray<NSString *> *fetchArgv(NSString *url, int seconds, NSString *file) {
+    NSMutableArray *argv = [@[ @"/usr/bin/curl", @"-fsSL", @"--proto", env("DIAPATCH_HOME") ? @"=https,file" : @"=https",
+                               @"--proto-redir", @"=https", @"--max-time", @(seconds).stringValue, url ] mutableCopy];
+    if (file) [argv addObjectsFromArray:@[ @"-o", file ]];
+    return argv;
+}
+
 static int fetch(NSString *url, int seconds, NSString *file, NSString **output) {
-    NSArray *argv = @[ @"/usr/bin/curl", @"-fsSL", @"--proto", @"=https,file", @"--proto-redir", @"=https", @"--max-time",
-                       @(seconds).stringValue, url ];
-    return run(file ? [argv arrayByAddingObjectsFromArray:@[ @"-o", file ]] : argv, output);
+    return run(fetchArgv(url, seconds, file), output);
 }
 
 // codesign --strict rejects the extended attributes Finder copies carry.
@@ -181,7 +188,11 @@ static int place(NSString *from, NSString *to) {
     const char *source = from.fileSystemRepresentation, *target = to.fileSystemRepresentation;
     struct stat sourceInfo, targetInfo;
     if (lstat(source, &sourceInfo) != 0) return errno;
-    BOOL swap = lstat(target, &targetInfo) == 0 && (S_ISDIR(sourceInfo.st_mode) || S_ISDIR(targetInfo.st_mode));
+    if (lstat(target, &targetInfo) != 0) return rename(source, target) == 0 ? 0 : errno;
+    // RENAME_SWAP rejects two different kinds, so a symlink is unlinked and renamed over instead.
+    if (S_ISLNK(targetInfo.st_mode) && S_ISDIR(sourceInfo.st_mode))
+        return unlink(target) == 0 ? (rename(source, target) == 0 ? 0 : errno) : errno;
+    BOOL swap = S_ISDIR(sourceInfo.st_mode) || S_ISDIR(targetInfo.st_mode);
     return (swap ? renamex_np(source, target, RENAME_SWAP) : rename(source, target)) == 0 ? 0 : errno;
 }
 
@@ -371,10 +382,12 @@ static BOOL configureInfo(NSString *app) {
     return [info writeToURL:url error:&error] || fail(@"cannot update %@: %@", url.path, error.localizedDescription);
 }
 
-static NSString *localIdentity(NSString *keychain) {
+// asked stays NO when security couldn't answer at all, so a locked keychain is never taken for "no identity yet".
+static NSString *localIdentity(NSString *keychain, BOOL *asked) {
     NSString *list;
-    run(@[ @"/usr/bin/security", @"find-identity", @"-p", @"codesigning", keychain ], &list);
-    if (!list.length) return nil;
+    int status = run(@[ @"/usr/bin/security", @"find-identity", @"-p", @"codesigning", keychain ], &list);
+    if (asked) *asked = status == 0;
+    if (status != 0 || !list.length) return nil;
     static NSRegularExpression *pattern;
     static dispatch_once_t once;
     dispatch_once(&once, ^{
@@ -402,7 +415,7 @@ static NSString *createLocalIdentity(NSString *keychain) {
         && check(@[ @"/usr/bin/security", @"import", p12, @"-k", keychain, @"-f", @"pkcs12", @"-P", @"diapatch", @"-T",
                     @"/usr/bin/codesign" ]);
     removeTree(dir);
-    return ok ? localIdentity(keychain) : nil;
+    return ok ? localIdentity(keychain, NULL) : nil;
 }
 
 // Macs upgraded from before Sierra can still keep the login keychain as login.keychain.
@@ -423,7 +436,8 @@ static NSArray<NSString *> *signer(void) {
     NSString *identity = env("DIAPATCH_IDENTITY") ?: trimmed([NSString stringWithContentsOfFile:inHome(@"identity") encoding:NSUTF8StringEncoding error:NULL]);
     if (identity.length) return @[ identity ];
     NSString *keychain = loginKeychain();
-    identity = keychain ? localIdentity(keychain) ?: createLocalIdentity(keychain) : nil;
+    BOOL asked = NO;
+    identity = keychain ? localIdentity(keychain, &asked) ?: (asked ? createLocalIdentity(keychain) : nil) : nil;
     if (identity) return @[ identity, @"--keychain", keychain ];
     say(@"warning: signing ad hoc because %@, so Dia will ask for keychain access and screen sharing again after every update",
         keychain ? @"DiaTweaks couldn't add its signing certificate to your login keychain (unlock it in Keychain Access if it's locked)"
@@ -562,12 +576,33 @@ static NSString *diaFeed(void) {
     return env("DIAPATCH_FEED") ?: ([saved isKindOfClass:NSString.class] ? saved : nil) ?: infoOf(gPristine)[@"SUFeedURL"] ?: kFeed;
 }
 
+// Settings asks about updates every time it opens, and `diatweaks update-dia` asks twice in a row.
+static const NSTimeInterval kFeedCacheAge = 300;
+
+static NSString *feedCachePath(void) { return [gCache stringByAppendingPathComponent:@"feed.plist"]; }
+
+static NSString *cachedFeed(NSString *url) {
+    if ([url hasPrefix:@"file:"]) return nil;
+    NSDictionary *saved = [NSDictionary dictionaryWithContentsOfFile:feedCachePath()];
+    NSDate *savedAt = saved[@"saved"];
+    if (![saved[@"url"] isEqual:url] || ![saved[@"text"] isKindOfClass:NSString.class] || ![savedAt isKindOfClass:NSDate.class]) return nil;
+    return -savedAt.timeIntervalSinceNow < kFeedCacheAge ? saved[@"text"] : nil;
+}
+
+static void rememberFeed(NSString *url, NSString *text) {
+    if (!gCache || [url hasPrefix:@"file:"]) return;
+    [NSFileManager.defaultManager createDirectoryAtPath:gCache withIntermediateDirectories:YES attributes:nil error:NULL];
+    [@{ @"url" : url, @"text" : text, @"saved" : NSDate.date } writeToFile:feedCachePath() atomically:YES];
+}
+
 static Release *latest(int seconds, NSString **channel, NSString **problem) {
-    NSString *url = diaFeed(), *output;
+    NSString *url = diaFeed(), *output = cachedFeed(url);
     NSError *error;
+    BOOL cached = output != nil, fetched = cached;
     *channel = [url containsString:@"/release-candidate/"] ? @"Early Birds" : nil;
-    NSXMLDocument *feed = fetch(url, seconds, nil, &output) == 0 && output.length
-        ? [[NSXMLDocument alloc] initWithXMLString:output options:0 error:&error] : nil;
+    if (!fetched) fetched = fetch(url, seconds, nil, &output) == 0 && output.length;
+    NSXMLDocument *feed = fetched ? [[NSXMLDocument alloc] initWithXMLString:output options:0 error:&error] : nil;
+    if (feed && !cached) rememberFeed(url, output);
     Release *release = offer(releasesIn(feed));
     if (!release)
         *problem = [NSString stringWithFormat:@"no update from %@: %@", url,
@@ -995,9 +1030,14 @@ static BOOL status(BOOL json) {
 }
 
 static BOOL checkUpdates(void) {
-    NSString *channel, *problem, *tweaksProblem;
-    Release *dia = latest(15, &channel, &problem);
-    NSDictionary *tweaks = latestTweaks(15, &tweaksProblem);
+    // Dia's feed and DiaTweaks' release feed are independent, so both are fetched at once.
+    __block NSString *channel, *problem, *tweaksProblem;
+    __block Release *dia;
+    __block NSDictionary *tweaks;
+    dispatch_group_t group = dispatch_group_create();
+    dispatch_group_async(group, dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{ dia = latest(15, &channel, &problem); });
+    dispatch_group_async(group, dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{ tweaks = latestTweaks(15, &tweaksProblem); });
+    dispatch_group_wait(group, DISPATCH_TIME_FOREVER);
     BOOL ready = stagedReady();
     BOOL diaStaged = ready && [buildOf(gStaged) isEqual:dia.build];
     NSDictionary *result = @{

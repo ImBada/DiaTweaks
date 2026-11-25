@@ -12,8 +12,13 @@ static NSNotificationName const DPTabLayoutMayHaveChanged = @"DPTabLayoutMayHave
 
 static void DPSidebarFooter_viewDidMoveToWindow(NSView *self, SEL _cmd) {
     DPCallOriginal(DPSidebarFooter_viewDidMoveToWindow, self);
+    static BOOL pending;
+    if (pending) return;
+    pending = YES;
     dispatch_async(dispatch_get_main_queue(), ^{
-        [NSNotificationCenter.defaultCenter postNotificationName:DPTabLayoutMayHaveChanged object:nil];
+        pending = NO;
+        // Read the layout once per turn for every preview that is listening, not once per preview.
+        [NSNotificationCenter.defaultCenter postNotificationName:DPTabLayoutMayHaveChanged object:DPTabLayout()];
     });
 }
 
@@ -127,13 +132,19 @@ static BOOL DPIsLocalKey(NSString *key) {
     if (!(self = [super initWithFrame:NSZeroRect])) return nil;
     _key = key;
     self.hidden = YES;
-    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(load) name:DPTabLayoutMayHaveChanged object:nil];
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(layoutChanged:) name:DPTabLayoutMayHaveChanged object:nil];
     [self load];
     return self;
 }
 
-- (void)load {
-    NSString *layout = DPTabLayout();
+- (void)layoutChanged:(NSNotification *)notification {
+    NSString *layout = [notification.object isKindOfClass:NSString.class] ? notification.object : DPTabLayout();
+    [self load:layout];
+}
+
+- (void)load { [self load:DPTabLayout()]; }
+
+- (void)load:(NSString *)layout {
     if ([layout isEqual:_layout]) return;
     _layout = layout;
     if (DPIsLocalKey(_key)) return;

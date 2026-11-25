@@ -2,7 +2,7 @@
 #import "Commands/GroupTabs/GroupTabs.h"
 
 extern DPPatch DPPrivateWindowTheme;
-static char DPColorsKey;
+static char DPColorsKey, DPPendingThemeKey;
 
 static id DPContextOf(NSWindow *window) {
     id browser = DPBrowserOfWindow(window);
@@ -66,15 +66,21 @@ static void DPThemePrivateWindows(void) {
 
 static void DPGradient_updateLayer(NSView *self, SEL _cmd) {
     DPCallOriginal(DPGradient_updateLayer, self);
-    if (!DPIsKind(self.superview, DPDiaWindowTint)) return;
+    NSWindow *window = self.window;
+    if (!DPIsKind(self.superview, DPDiaWindowTint) || !window) return;
     CAGradientLayer *layer = DPGradientLayer(self);
-    if (!layer) return;
-    if (!DPPrivateWindowTheme.on) {
-        if (DPGet(layer, &DPColorsKey)) DPThemePrivate(self);
-        return;
-    }
-    if (self.window && DPIsPrivate(self.window)) DPThemePrivate(self);
-    else DPThemePrivateWindows();
+    if (!layer || (!DPPrivateWindowTheme.on && !DPGet(layer, &DPColorsKey))) return;
+    // updateLayer is AppKit's display pass: theme on the next turn, once per window, instead of changing other windows' layers now.
+    if ([DPGet(window, &DPPendingThemeKey) boolValue]) return;
+    DPSet(window, &DPPendingThemeKey, @YES);
+    dispatch_async(dispatch_get_main_queue(), ^{
+        DPSet(window, &DPPendingThemeKey, nil);
+        if (DPPrivateWindowTheme.on) return DPThemePrivateWindows();
+        for (NSWindow *other in NSApp.windows) {   // hand back anything we changed after the tweak went off
+            NSView *gradient = DPIsKind(other, DPDiaWindow) ? DPWindowGradient(other) : nil;
+            if (gradient && DPGet(DPGradientLayer(gradient), &DPColorsKey)) DPThemePrivate(gradient);
+        }
+    });
 }
 
 static void DPApplyPrivateTheme(DPPatch *patch) { DPThemePrivateWindows(); }

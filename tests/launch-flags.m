@@ -2,8 +2,23 @@
 #import "SafeMode/SafeMode.h"
 #import "Settings/Settings.h"
 #import "Updates/Updates.h"
+#import "watchdog.h"
 
-static NSString *DPTestDomain(void) { return [NSString stringWithFormat:@"com.diapatches.launch-flags-test.%d", getpid()]; }
+// An absolute path keeps the plist in a scratch folder: a short domain lands in ~/Library/Preferences and cfprefsd rewrites it after removal.
+static NSString *DPTestDomain(void) {
+    static NSString *suite;
+    if (!suite) {
+        char *dir = mkdtemp(strdup([NSTemporaryDirectory() stringByAppendingPathComponent:@"launch-flags-test.XXXXXX"].fileSystemRepresentation));
+        suite = [@(dir) stringByAppendingPathComponent:@"com.diapatches"];
+        free(dir);
+    }
+    return suite;
+}
+
+static void DPCleanTestDomain(void) {
+    [NSUserDefaults.standardUserDefaults removePersistentDomainForName:DPTestDomain()];
+    [NSFileManager.defaultManager removeItemAtPath:DPTestDomain().stringByDeletingLastPathComponent error:nil];
+}
 
 @interface NSUserDefaults (DPLaunchFlagsTest)
 - (instancetype)dp_launchFlagsInitWithSuiteName:(NSString *)suite;
@@ -374,6 +389,8 @@ int main(void) {
         unsetenv("DIATWEAKS_DOMAIN");
         method_exchangeImplementations(class_getInstanceMethod(NSUserDefaults.class, @selector(initWithSuiteName:)),
                                        class_getInstanceMethod(NSUserDefaults.class, @selector(dp_launchFlagsInitWithSuiteName:)));
+        DPOnTestCleanup(DPCleanTestDomain);
+        DPArmTestWatchdog(30);
         [NSUserDefaults.standardUserDefaults removePersistentDomainForName:DPTestDomain()];
 
         testExtensionsAndDrop();
@@ -381,7 +398,6 @@ int main(void) {
         testLifecycleAndSelfRelaunch();
         testSettingsRow();
 
-        [NSUserDefaults.standardUserDefaults removePersistentDomainForName:DPTestDomain()];
         puts("all launch flag checks passed");
     }
 }

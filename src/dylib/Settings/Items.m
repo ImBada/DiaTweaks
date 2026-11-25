@@ -180,7 +180,7 @@ void DPSetTweaksPaused(BOOL paused, NSWindow *window) {
 }
 
 - (void)sync {
-    self.state = DPPaused ? DPSavedOn(self.patch) : self.patch->on;
+    self.state = DPShownOn(self.patch) ? NSControlStateValueOn : NSControlStateValueOff;
     self.enabled = !DPWhyDisabled(self.patch) && !DPPaused;
     NSString *hint = DPWhyHidden(self.patch);
     DPSetHint(self.hiddenIcon, hint);

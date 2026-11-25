@@ -20,6 +20,9 @@ BOOL DPPeekIsShortcut(NSEvent *event, NSMenuItem *item) {
     return held == mask && DPEventIsKey(event, key);
 }
 
+// Weak so a test can hand back a scratch pasteboard and leave the real clipboard alone.
+__attribute__((weak)) NSPasteboard *DPPeekPasteboard(void) { return NSPasteboard.generalPasteboard; }
+
 BOOL DPPeekCopyURL(DPPeekCard *peek, NSEvent *event) {
     BOOL markdown = DPPeekIsShortcut(event, DPPeekMenuItem(NSApp.mainMenu, @"Copy URL as Markdown"));
     if (!markdown && !DPPeekIsShortcut(event, DPPeekMenuItem(NSApp.mainMenu, @"Copy URL"))) return NO;
@@ -27,7 +30,7 @@ BOOL DPPeekCopyURL(DPPeekCard *peek, NSEvent *event) {
     if (![url isKindOfClass:NSURL.class]) return NO;
     NSString *title = DPValueForKey(peek.page, @"title");
     if (![title isKindOfClass:NSString.class] || !title.length) title = url.absoluteString;
-    NSPasteboard *board = NSPasteboard.generalPasteboard;
+    NSPasteboard *board = DPPeekPasteboard();
     [board clearContents];
     if (markdown) [board setString:[NSString stringWithFormat:@"[%@](%@)", title, url.absoluteString] forType:NSPasteboardTypeString];
     else {

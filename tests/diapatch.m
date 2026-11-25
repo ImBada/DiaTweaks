@@ -133,6 +133,19 @@ static void testMoveAndResumeApplyTweaks(NSString *dir) {
     expect(!exists(src), @"place removes source regular file immediately");
     expect([[NSString stringWithContentsOfFile:dst encoding:NSUTF8StringEncoding error:NULL] isEqual:@"new"], @"dst holds new contents");
 
+    NSString *realDir = [dir stringByAppendingPathComponent:@"real-dir"];
+    makeDir(realDir);
+    NSString *dirLink = [dir stringByAppendingPathComponent:@"dir-link"];
+    [NSFileManager.defaultManager createSymbolicLinkAtPath:dirLink withDestinationPath:realDir error:NULL];
+    NSString *swapSrc = [dir stringByAppendingPathComponent:@"swap-src"];
+    makeDir(swapSrc);
+    [@"marker" writeToFile:[swapSrc stringByAppendingPathComponent:@"marker"] atomically:YES encoding:NSUTF8StringEncoding error:NULL];
+    expect(place(swapSrc, dirLink) == 0, @"place replaces a symlink with a directory instead of failing with EINVAL");
+    BOOL swapped = NO;
+    expect([NSFileManager.defaultManager fileExistsAtPath:dirLink isDirectory:&swapped] && swapped
+               && exists([dirLink stringByAppendingPathComponent:@"marker"]),
+           @"the symlink is replaced by the directory itself");
+
     NSString *broken = [dir stringByAppendingPathComponent:@"broken-link"];
     [NSFileManager.defaultManager createSymbolicLinkAtPath:broken withDestinationPath:@"/nonexistent/target" error:NULL];
     NSString *dirSrc = [dir stringByAppendingPathComponent:@"dir-src"];
@@ -171,6 +184,32 @@ static void testMoveAndResumeApplyTweaks(NSString *dir) {
     expect([[NSString stringWithContentsOfFile:inHome(@DYLIB) encoding:NSUTF8StringEncoding error:NULL] isEqual:@"new-dylib"],
            @"resumed applyTweaks installs remaining staged files");
     expect(!exists(gStagedTweaks), @"resumed applyTweaks removes staged folder");
+}
+
+static void testFetchArgs(NSString *dir) {
+    NSString *saved = env("DIAPATCH_HOME");
+    setenv("DIAPATCH_HOME", [dir stringByAppendingPathComponent:@"fetch-home"].fileSystemRepresentation, 1);
+    expect([fetchArgv(@"https://example.com/releases.json", 60, nil) containsObject:@"=https,file"],
+           @"a test home may still fetch the file:// fixtures DIAPATCH_FEED and DIAPATCH_RELEASES name");
+    unsetenv("DIAPATCH_HOME");
+    NSArray<NSString *> *argv = fetchArgv(@"https://example.com/DiaTweaks.zip", 60, @"/tmp/DiaTweaks.zip");
+    expect(![argv containsObject:@"=https,file"] && [argv containsObject:@"=https"],
+           @"a URL read out of a release's JSON can't reach the local disk");
+    expect([argv containsObject:@"--proto-redir"] && [argv.lastObject isEqual:@"/tmp/DiaTweaks.zip"],
+           @"the download still writes to its file");
+    if (saved) setenv("DIAPATCH_HOME", saved.fileSystemRepresentation, 1);
+}
+
+static void testFeedCache(NSString *dir) {
+    gCache = [dir stringByAppendingPathComponent:@"feed-cache"];
+    NSString *url = @"https://releases.example.com/BoostBrowser-updates.xml";
+    expect(!cachedFeed(url), @"nothing is cached before the first check");
+    rememberFeed(url, @"<rss/>");
+    expect([cachedFeed(url) isEqual:@"<rss/>"], @"a feed is reused by the next status or update, not fetched twice");
+    expect(!cachedFeed(@"https://example.com/release-candidate/BoostBrowser-updates.xml"), @"another channel isn't served the cached feed");
+    [@{ @"url" : url, @"text" : @"<rss/>", @"saved" : [NSDate dateWithTimeIntervalSinceNow:-(kFeedCacheAge + 1)] }
+        writeToFile:feedCachePath() atomically:YES];
+    expect(!cachedFeed(url), @"an old feed is fetched again");
 }
 
 static void testNewer(void) {
@@ -409,6 +448,8 @@ int main(void) {
         testMachO(dir);
         testMoveAndResumeApplyTweaks(dir);
         testNewer();
+        testFetchArgs(dir);
+        testFeedCache(dir);
         testBriefLanguage(dir);
         testFeedFollowsDomain(dir);
         testIconCatalog(dir);

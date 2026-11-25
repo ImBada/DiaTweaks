@@ -3,7 +3,11 @@
 
 enum { DPPeekPageVisible = 2 };
 
-static char DPPeekLastActiveKey;
+@interface NSView (DPPeekToolbarRefresh)
+- (void)refresh;
+@end
+
+static char DPPeekLastActiveKey, DPPeekLastTabsKey;
 static BOOL DPPeekSyncing;
 static NSTimer *DPPeekSyncTimer;
 
@@ -40,6 +44,8 @@ static void DPPeekSyncAllWindows(void) {
         else if (![windows containsObject:owner]) [windows addObject:owner];
     }
     for (NSWindow *window in windows) DPPeekSyncTabs(window);
+    for (DPPeekCard *peek in all)
+        if (!peek.closing && !peek.isHiddenOrHasHiddenAncestor && [peek.toolbar respondsToSelector:@selector(refresh)]) [peek.toolbar refresh];
     DPPeekHandoffSync();
     DPPeekUpdateSyncTimer();
 }
@@ -55,17 +61,30 @@ void DPPeekUpdateSyncTimer(void) {
     }
     if (DPPeekSyncTimer) return;
     DPPeekSyncTimer = [NSTimer timerWithTimeInterval:0.25 repeats:YES block:^(NSTimer *timer) { DPPeekSyncAllWindows(); }];
+    DPPeekSyncTimer.tolerance = 0.05;
     [NSRunLoop.mainRunLoop addTimer:DPPeekSyncTimer forMode:NSRunLoopCommonModes];
 }
 
 void DPPeekCloseForSource(id source) {
     if (!source) return;
+    DPPeekCoolForSource(source);
     for (DPPeekCard *peek in DPPeekAllCards(nil))
         if (!peek.closing && peek.source == source) {
             DPPeekChatDetachQuiet(peek);
             [peek close:DPPeekClose];
         }
     DPPeekUpdateSyncTimer();
+}
+
+static BOOL DPPeekCardsSettled(NSWindow *window, NSArray<DPPeekCard *> *cards, NSString *active, NSSet<NSString *> *openIDs) {
+    for (DPPeekCard *peek in cards) {
+        if (peek.closing) continue;
+        if ((peek.hadSource && !peek.source) || !peek.originTabID || ![openIDs containsObject:peek.originTabID]) return NO;
+        BOOL visible = [active isEqual:peek.originTabID];
+        if (visible ? (peek.isHiddenOrHasHiddenAncestor || peek.window != window) : (!peek.hidden || peek.superview != window.contentView))
+            return NO;
+    }
+    return YES;
 }
 
 void DPPeekSyncTabs(NSWindow *window) {
@@ -80,11 +99,15 @@ void DPPeekSyncTabs(NSWindow *window) {
         // A cover outliving its card only needs the selection check; its own dismissal stops the timer.
         if (!cards.count) return;
         NSString *lastActive = DPGet(window, &DPPeekLastActiveKey);
-        if (active && ![active isEqual:lastActive]) {
+        BOOL sameActive = active && [active isEqual:lastActive];
+        if (active != lastActive && !sameActive) {
             DPSet(window, &DPPeekLastActiveKey, active);
-            if (lastActive) DPPeekCoolIn(window);
+            if (active && lastActive) DPPeekCoolIn(window);
         }
         NSSet<NSString *> *openIDs = (scriptWindow && active) ? DPPeekOpenTabIDs(scriptWindow, active) : nil;
+        NSSet<NSString *> *lastOpenIDs = DPGet(window, &DPPeekLastTabsKey);
+        if (sameActive && openIDs && [openIDs isEqualToSet:lastOpenIDs] && DPPeekCardsSettled(window, cards, active, openIDs)) return;
+        DPSet(window, &DPPeekLastTabsKey, openIDs);
         DPPeekCard *toShow = nil;
         for (DPPeekCard *peek in cards) {
             if (peek.closing) continue;
@@ -174,21 +197,21 @@ static void DPPeekPage_close(id self, SEL _cmd) {
     DPCallOriginal(DPPeekPage_close, self);
     if (!DPPeek.on) return;
     __weak id weak = self;
-    DPPeekRunMain(^{ if (DPPeek.on && DPPeekHasCards() && weak) DPPeekCloseForPageOrSource(weak); });
+    DPPeekRunMain(^{ if (DPPeek.on && (DPPeekHasCards() || DPPeekHasWarm()) && weak) DPPeekCloseForPageOrSource(weak); });
 }
 
 static void DPPeekPage_closeTiming(id self, SEL _cmd, NSInteger timing) {
     DPCallOriginal(DPPeekPage_closeTiming, self, timing);
     if (!DPPeek.on) return;
     __weak id weak = self;
-    DPPeekRunMain(^{ if (DPPeek.on && DPPeekHasCards() && weak) DPPeekCloseForPageOrSource(weak); });
+    DPPeekRunMain(^{ if (DPPeek.on && (DPPeekHasCards() || DPPeekHasWarm()) && weak) DPPeekCloseForPageOrSource(weak); });
 }
 
 static void DPPeekWebContent_finalizeDiscard(id self, SEL _cmd, id page, BOOL discarded) {
     DPCallOriginal(DPPeekWebContent_finalizeDiscard, self, page, discarded);
     if (!DPPeek.on || !discarded || !page) return;
     __weak id weak = page;
-    DPPeekRunMain(^{ if (DPPeek.on && DPPeekHasCards() && weak) DPPeekCloseForSource(weak); });
+    DPPeekRunMain(^{ if (DPPeek.on && (DPPeekHasCards() || DPPeekHasWarm()) && weak) DPPeekCloseForSource(weak); });
 }
 
 void DPPeekInstallSelection(void) {

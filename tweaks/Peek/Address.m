@@ -32,10 +32,10 @@
 - (void)mouseDown:(NSEvent *)event { [self begin]; }
 
 - (void)updateTrackingAreas {
+    [super updateTrackingAreas];
     for (NSTrackingArea *area in self.trackingAreas) [self removeTrackingArea:area];
     [self addTrackingArea:[[NSTrackingArea alloc] initWithRect:NSZeroRect
         options:NSTrackingMouseEnteredAndExited | NSTrackingActiveInKeyWindow | NSTrackingInVisibleRect owner:self userInfo:nil]];
-    [super updateTrackingAreas];
 }
 
 - (void)mouseEntered:(NSEvent *)event { self.hovered = YES; [self refresh]; }

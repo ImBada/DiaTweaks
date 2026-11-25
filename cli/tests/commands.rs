@@ -91,6 +91,11 @@ impl Drop for Sandbox {
         let _ = Command::new("/usr/bin/defaults")
             .args(["delete", &self.domain])
             .output();
+        if let Ok(home) = std::env::var("HOME") {
+            let _ = fs::remove_file(
+                Path::new(&home).join(format!("Library/Preferences/{}.plist", self.domain)),
+            );
+        }
         let _ = Command::new("/bin/chmod")
             .args(["-R", "u+w"])
             .arg(self.dir.path())

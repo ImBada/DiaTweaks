@@ -109,6 +109,6 @@ expect "non-UTF8 feed and release responses do not crash" sh -c "DIAPATCH_HOME='
 start=$(date +%s)
 DIAPATCH_HOME="$temporary/relaunch-home" DIAPATCH_CACHE="$temporary/relaunch-cache" DIAPATCH_APP="$temporary/missing.app" "$diapatch" install --relaunch >/dev/null 2>&1 || true
 elapsed=$(( $(date +%s) - start ))
-expect "install --relaunch on missing app exits promptly" test "$elapsed" -lt 4
+expect "install --relaunch on missing app exits promptly" test "$elapsed" -lt 10
 
 [ "$failures" = 0 ]

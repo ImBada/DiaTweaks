@@ -2,13 +2,21 @@
 
 extern DPPatch DPCloseFromTabSwitcher;
 
+static id DPSwitcherState(NSWindowController *switcher) {
+    return DPSwiftValue(DPSwiftValue(DPSwiftValue(switcher, @"viewModel"), @"stateSubject"), @"currentValue");
+}
+
+static NSString *DPSwitcherFocus(NSWindowController *switcher) {
+    return [DPSwiftValue(DPSwitcherState(switcher), @"focusedItemID") description];
+}
+
 static NSArray<NSString *> *DPSwitcherTabs(NSWindowController *switcher, NSString **focused) {
-    id state = DPSwiftValue(DPSwiftValue(DPSwiftValue(switcher, @"viewModel"), @"stateSubject"), @"currentValue");
+    id state = DPSwitcherState(switcher);
     if (focused) *focused = [DPSwiftValue(state, @"focusedItemID") description];
     return DPUUIDsIn([DPSwiftValue(state, @"items") description]);
 }
 
-static id DPScriptTab(NSString *tabID) {
+static id DPSwitcherScriptTab(NSString *tabID) {
     id windows = DPValueForKey(NSApp.delegate, @"appleScriptWindows");
     if (![windows isKindOfClass:NSArray.class]) return nil;
     for (id window in windows) {
@@ -39,38 +47,40 @@ static NSUInteger DPFocusGeneration;
 
 static void DPFocus(NSString *tabID, NSString *lastSeen, int tries, NSUInteger gen) {
     if (!DPCloseFromTabSwitcher.on || gen != DPFocusGeneration || !(NSEvent.modifierFlags & NSEventModifierFlagControl)) return;
-    NSString *focused = nil;
     NSWindowController *switcher = DPOpenTabSwitcher();
-    if (switcher) DPSwitcherTabs(switcher, &focused);
+    NSString *focused = switcher ? DPSwitcherFocus(switcher) : nil;
     if (!tries || [focused isEqual:tabID]) return;
     if (focused && ![focused isEqual:lastSeen]) DPStep();
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 20 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
-        DPFocus(tabID, focused ?: lastSeen, tries - 1, gen);
+    int left = switcher ? tries - 1 : MIN(tries - 1, 8);
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 30 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
+        DPFocus(tabID, focused ?: lastSeen, left, gen);
     });
 }
 
-static void DPReopenOnceClosed(NSString *closed, NSString *focus, int tries, NSUInteger gen) {
+static void DPReopenOnceClosed(NSString *closed, NSString *focus, NSMenuItem *cycle, int tries, NSUInteger gen) {
     if (!DPCloseFromTabSwitcher.on || gen != DPFocusGeneration || !tries || !(NSEvent.modifierFlags & NSEventModifierFlagControl)) return;
-    if (DPScriptTab(closed)) {
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 20 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{ DPReopenOnceClosed(closed, focus, tries - 1, gen); });
+    if (DPSwitcherScriptTab(closed)) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 30 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
+            DPReopenOnceClosed(closed, focus, cycle, tries - 1, gen);
+        });
         return;
     }
-    NSMenuItem *cycle = DPCycleItem(NSApp.mainMenu);
-    if (cycle) [NSApp sendAction:cycle.action to:cycle.target from:cycle];
-    DPFocus(focus, nil, 100, gen);
+    [NSApp sendAction:cycle.action to:cycle.target from:cycle];
+    DPFocus(focus, nil, 20, gen);
 }
 
 static BOOL DPCloseFocusedTab(NSWindowController *switcher) {
     NSString *focused = nil;
     NSMutableArray<NSString *> *tabs = [DPSwitcherTabs(switcher, &focused) mutableCopy];
     NSUInteger index = focused ? [tabs indexOfObject:focused] : NSNotFound;
-    id tab = focused ? DPScriptTab(focused) : nil;
+    id tab = focused ? DPSwitcherScriptTab(focused) : nil;
     if (index == NSNotFound || !tab || ![tab respondsToSelector:@selector(close:)]) return NO;
     NSUInteger gen = ++DPFocusGeneration;
     [tab performSelector:@selector(close:) withObject:nil];
     [tabs removeObjectAtIndex:index];
     [switcher close];
-    if (tabs.count > 1) DPReopenOnceClosed(focused, tabs[MIN(index, tabs.count - 1)], 50, gen);
+    NSMenuItem *cycle = tabs.count > 1 ? DPCycleItem(NSApp.mainMenu) : nil;
+    if (cycle) DPReopenOnceClosed(focused, tabs[MIN(index, tabs.count - 1)], cycle, 12, gen);
     return YES;
 }
 

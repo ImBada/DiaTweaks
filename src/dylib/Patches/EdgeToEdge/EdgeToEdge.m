@@ -87,11 +87,15 @@ static void DPContainer_setFrame(NSView *self, SEL _cmd, NSRect frame) {
     } else if (DPGet(self, &DPAnimationKey)) {
         DPSet(self, &DPAnimationKey, nil);
     }
-    DPSet(self, &DPRequestedFrameKey, @(frame));
-    [DPContainers addObject:self];
+    // Only a live override needs Dia's frame kept: otherwise this is one NSValue and one associated write per frame set.
+    BOOL recording = active || DPGet(self, &DPRequestedFrameKey) || DPGet(self, &DPAnimationKey);
+    if (recording) {
+        DPSet(self, &DPRequestedFrameKey, @(frame));
+        [DPContainers addObject:self];
+    }
     CGFloat amount = active && DPMayAdjust(self) ? DPEdgeToEdgeAmount(self) : 0;
     NSRect adjusted = amount > 0 ? DPEdgeToEdgeFrame(self, frame, amount) : frame;
-    DPSetCornerRadius(self, NSEqualRects(adjusted, frame) ? 0 : amount * DPWindowPadding);
+    if (recording) DPSetCornerRadius(self, NSEqualRects(adjusted, frame) ? 0 : amount * DPWindowPadding);
     DPCallOriginal(DPContainer_setFrame, self, adjusted);
 }
 
@@ -110,7 +114,10 @@ static NSString *DPVerifyEdgeToEdge(DPPatch *patch) {
     if (!containers.count) return @"no web content found";
     for (NSView *container in containers) {
         NSValue *requested = DPRequestedFrame(container);
-        if (!requested) return @"never saw Dia place the web content";
+        if (!requested) {
+            if (patch->on) return @"never saw Dia place the web content";
+            continue;
+        }
         CALayer *layer = DPRoundedContent(container).layer;
         BOOL square = patch->on && DPFullScreen(container);
         if (layer && (DPCornersRound(layer, YES) == square || (!DPBesideSidebar(container) && DPCornersRound(layer, NO) == square)))

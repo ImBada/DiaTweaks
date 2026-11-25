@@ -21,5 +21,7 @@ for path in paths:
         data = handle.read()
     blob += struct.pack("<H", len(name)) + name + struct.pack("<I", len(data)) + data
 os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
-with open(out, "wb") as handle:
+# A partial write here would have a fresh mtime, so make would embed a truncated archive.
+with open(out + ".tmp", "wb") as handle:
     handle.write(blob)
+os.replace(out + ".tmp", out)

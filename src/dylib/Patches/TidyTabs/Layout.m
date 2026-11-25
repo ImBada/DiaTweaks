@@ -2,7 +2,7 @@
 
 static const CGFloat DPTidyRowHeight = 24;
 static NSHashTable<NSView *> *DPTidyLists;
-static char DPScrollFrameKey, DPActiveKey;
+static char DPScrollFrameKey, DPActiveKey, DPTrackedKey;
 
 NSScrollView *DPTidyListScroll(NSView *list) {
     for (NSView *sub in list.subviews) if ([sub isKindOfClass:NSScrollView.class]) return (NSScrollView *)sub;
@@ -11,13 +11,16 @@ NSScrollView *DPTidyListScroll(NSView *list) {
 
 static void DPTabList_layout(NSView *self, SEL _cmd) {
     DPCallOriginal(DPTabList_layout, self);
-    [DPTidyLists addObject:self];
+    if (!DPGet(self, &DPTrackedKey)) {
+        DPSet(self, &DPTrackedKey, @YES);
+        [DPTidyLists addObject:self];
+    }
     BOOL on = DPTidyTabs.on;
     if (on) {
-        DPSet(self, &DPActiveKey, @YES);
+        if (!DPGet(self, &DPActiveKey)) DPSet(self, &DPActiveKey, @YES);
     } else {
-        [[DPTidyHover forList:self] detach];
         if (!DPGet(self, &DPActiveKey)) return;
+        [[DPTidyHover forList:self] detach];
         DPSet(self, &DPActiveKey, nil);
     }
     CGFloat progress = on ? [DPTidyHover attachToList:self].progress : 0;
@@ -30,9 +33,13 @@ static void DPTabList_layout(NSView *self, SEL _cmd) {
     inset = MIN(inset, NSHeight(laidOut));
     frame.size.height -= inset;
     if (self.isFlipped) frame.origin.y += inset;
-    if (inset > 0) DPOverride(scroll, &DPScrollFrameKey, @(laidOut), @(frame));
+    BOOL adjusted = NSEqualRects(scroll.frame, frame);
+    if (!adjusted && DPMayAdjust(scroll)) {
+        scroll.frame = frame;
+        adjusted = YES;
+    }
+    if (inset > 0 && adjusted) DPOverride(scroll, &DPScrollFrameKey, @(laidOut), @(frame));
     else if (DPGet(scroll, &DPScrollFrameKey)) DPSet(scroll, &DPScrollFrameKey, nil);
-    if (!NSEqualRects(scroll.frame, frame)) scroll.frame = frame;
 
     DPTidyRowView *row = DPTidyRowIn(self, inset > 0);
     if (!row) return;

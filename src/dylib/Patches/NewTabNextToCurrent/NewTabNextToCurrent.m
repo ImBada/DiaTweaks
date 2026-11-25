@@ -16,10 +16,9 @@ static char DPStateKey, DPRelayKey;
 @implementation DPNextTabs
 @end
 
-static NSArray<NSString *> *DPTabIDs(NSWindow *window) {
-    id tabs = DPValueForKey(DPScriptWindow(window), @"appleScriptTabs");
-    if (![tabs isKindOfClass:NSArray.class]) return @[];
-    NSMutableArray<NSString *> *ids = [NSMutableArray arrayWithCapacity:[tabs count]];
+static NSArray<NSString *> *DPTabIDsIn(NSArray *tabs) {
+    if (!tabs.count) return @[];
+    NSMutableArray<NSString *> *ids = [NSMutableArray arrayWithCapacity:tabs.count];
     for (id tab in tabs) {
         id tabID = DPTabID(tab);
         if (tabID) [ids addObject:tabID];
@@ -27,21 +26,41 @@ static NSArray<NSString *> *DPTabIDs(NSWindow *window) {
     return ids;
 }
 
-static BOOL DPIsBlank(NSWindow *window, NSString *tabID) {
-    NSString *url = [DPValueForKey(DPScriptTab(window, tabID), @"URL") description];
+static NSArray<NSString *> *DPTabIDs(NSWindow *window) {
+    return DPTabIDsIn(DPScriptTabs(DPScriptWindow(window)));
+}
+
+static BOOL DPIsBlankTab(id tab) {
+    NSString *url = [DPValueForKey(tab, @"URL") description];
     return !url.length || !([url hasPrefix:@"http:"] || [url hasPrefix:@"https:"] || [url hasPrefix:@"file:"]);
+}
+
+static BOOL DPIsBlankIn(NSArray *tabs, NSString *tabID) {
+    for (id tab in tabs) if ([DPTabID(tab) isEqual:tabID]) return DPIsBlankTab(tab);
+    return YES;
+}
+
+static BOOL DPIsBlank(NSWindow *window, NSString *tabID) {
+    return DPIsBlankTab(DPScriptTab(window, tabID));
+}
+
+static DPNextTabs *DPStateWith(NSWindow *window, NSString *active, NSArray<NSString *> *ids) {
+    DPNextTabs *state = DPGet(window, &DPStateKey);
+    if (state || !active) return state;
+    state = [DPNextTabs new];
+    state.originOf = [NSMutableDictionary dictionary];
+    state.knownIDs = [NSSet setWithArray:ids];
+    state.lastFrontID = active;
+    DPSet(window, &DPStateKey, state);
+    return state;
 }
 
 static DPNextTabs *DPStateFor(NSWindow *window) {
     DPNextTabs *state = DPGet(window, &DPStateKey);
-    NSString *active = DPActiveTabID(window);
-    if (state || !active) return state;
-    state = [DPNextTabs new];
-    state.originOf = [NSMutableDictionary dictionary];
-    state.knownIDs = [NSSet setWithArray:DPTabIDs(window)];
-    state.lastFrontID = active;
-    DPSet(window, &DPStateKey, state);
-    return state;
+    if (state) return state;
+    id scripted = DPScriptWindow(window);
+    NSString *active = DPActiveTabIDIn(scripted);
+    return active ? DPStateWith(window, active, DPTabIDsIn(DPScriptTabs(scripted))) : nil;
 }
 
 static void DPAskGroups(id delegate, id browser, void (^done)(NSArray *groups)) {
@@ -189,14 +208,16 @@ static void DPReturnTo(NSWindow *window, NSString *originID, NSString *expectedF
 static void DPNote(NSWindow *window) {
     DPNextTabs *state = DPGet(window, &DPStateKey);
     if (state.moving) return;
-    NSString *active = DPActiveTabID(window);
-    NSArray<NSString *> *ids = active ? DPTabIDs(window) : nil;
+    id scripted = DPScriptWindow(window);
+    NSString *active = DPActiveTabIDIn(scripted);
+    NSArray *tabs = active ? DPScriptTabs(scripted) : nil;
+    NSArray<NSString *> *ids = tabs ? DPTabIDsIn(tabs) : nil;
     if (!ids.count) return;
-    if (!state) return (void)DPStateFor(window);
+    if (!state) return (void)DPStateWith(window, active, ids);
     NSSet<NSString *> *now = [NSSet setWithArray:ids];
     BOOL switched = ![active isEqual:state.lastFrontID];
 
-    if (state.lastFrontID && switched && ![state.knownIDs containsObject:active] && [now containsObject:state.lastFrontID] && DPIsBlank(window, active))
+    if (state.lastFrontID && switched && ![state.knownIDs containsObject:active] && [now containsObject:state.lastFrontID] && DPIsBlankIn(tabs, active))
         state.originOf[active] = state.lastFrontID;
 
     for (NSString *tab in state.originOf.allKeys) {

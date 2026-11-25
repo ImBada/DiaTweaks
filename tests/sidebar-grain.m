@@ -5,8 +5,22 @@ NSString *DPTestTexture = @"grain";
 NSString *DPChoice(DPPatch *patch) { return DPTestTexture; }
 void DPSetChoice(DPPatch *patch, NSString *choice) { DPTestTexture = choice; }
 
+// An absolute path keeps the plist in a scratch folder: a short domain lands in ~/Library/Preferences and cfprefsd rewrites it after removal.
+#import "watchdog.h"
+
 static NSString *DPTestDomain(void) {
-    return [NSString stringWithFormat:@"com.diapatches.grain-test.%d", getpid()];
+    static NSString *suite;
+    if (!suite) {
+        char *dir = mkdtemp(strdup([NSTemporaryDirectory() stringByAppendingPathComponent:@"grain-test.XXXXXX"].fileSystemRepresentation));
+        suite = [@(dir) stringByAppendingPathComponent:@"com.diapatches"];
+        free(dir);
+    }
+    return suite;
+}
+
+static void DPCleanTestDomain(void) {
+    [NSUserDefaults.standardUserDefaults removePersistentDomainForName:DPTestDomain()];
+    [NSFileManager.defaultManager removeItemAtPath:DPTestDomain().stringByDeletingLastPathComponent error:nil];
 }
 
 @interface NSUserDefaults (DPGrainFixture)
@@ -29,6 +43,8 @@ int main(void) { @autoreleasepool {
     DPSidebarGrain.choice = @"sidebarGrainMaterial";
     method_exchangeImplementations(class_getInstanceMethod(NSUserDefaults.class, @selector(initWithSuiteName:)),
         class_getInstanceMethod(NSUserDefaults.class, @selector(dp_grainTestSuite:)));
+    DPOnTestCleanup(DPCleanTestDomain);
+    DPArmTestWatchdog(30);
     NSUserDefaults *defaults = [[NSUserDefaults alloc] initWithSuiteName:@"com.diapatches"];
     [defaults removePersistentDomainForName:DPTestDomain()];
     DPTestTextureHosts();
@@ -129,6 +145,5 @@ int main(void) { @autoreleasepool {
     assert(DPGrainScale(nil) == 130 && [defaults objectForKey:@"sidebarGrainScale"]);
     DPGrainRowsFor(rows, nil, nil);
     assert(amount.integerValue == 30);
-    [defaults removePersistentDomainForName:DPTestDomain()];
     printf("PASS: %lu light/dark renders; six textures at equal contrast across amount, softness and scale; native active-window hooks; settings rows; defaults/reset; saved settings; per-profile fallback, overrides and reset\n", renders);
 } }

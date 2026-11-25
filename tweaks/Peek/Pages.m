@@ -7,6 +7,8 @@
 @property (nonatomic, strong) id page;
 @property (nonatomic, strong) NSView *view;
 @property (nonatomic, copy) NSURL *url;
+@property (nonatomic, weak) id source;
+@property (nonatomic) NSUInteger stamp;
 @end
 
 @implementation DPPeekWarmSlot
@@ -16,6 +18,7 @@ static NSMapTable *DPPeekFactories;
 static __weak id DPPeekLastFactory;
 static NSMapTable<NSWindow *, DPPeekWarmSlot *> *DPPeekWarmSlots;
 static char DPPeekWindowClosedKey;
+NSTimeInterval DPPeekWarmIdle = 25;
 
 static void DPPeekSend(id object, SEL sel) {
     if ([object respondsToSelector:sel]) ((void (*)(id, SEL))objc_msgSend)(object, sel);
@@ -108,13 +111,16 @@ static void DPPeekDetach(id page, NSView *host) {
     [host removeFromSuperview];
 }
 
+__attribute__((weak)) NSTimeInterval DPPeekBlankPollDelay(void) { return 0.05; }
+__attribute__((weak)) NSTimeInterval DPPeekFindLinkDelay(void) { return 0.15; }
+
 // Some extensions crash Dia when a page closes while still showing a site, so it goes blank first.
 static void DPPeekCloseWhenBlank(id page, int checks) {
     if (!page) return;
     id rawURL = DPValueForKey(page, @"url");
     NSString *urlString = [rawURL isKindOfClass:NSURL.class] ? [rawURL absoluteString] : nil;
     if (checks && ![urlString isEqual:@"about:blank"])
-        return (void)dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 50 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{ DPPeekCloseWhenBlank(page, checks - 1); });
+        return (void)dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(DPPeekBlankPollDelay() * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ DPPeekCloseWhenBlank(page, checks - 1); });
     DPPeekSend(page, @selector(close));
 }
 
@@ -146,7 +152,7 @@ static void DPPeekFindLink(NSWindow *window, id source, NSPoint origin, NSView *
         done = YES;
         found(link);
     };
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.15 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ finish(fallback); });
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(DPPeekFindLinkDelay() * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ finish(fallback); });
     void (^answer)(NSString *, BOOL) = ^(NSString *result, BOOL ok) {
         NSString *box = [result stringByTrimmingCharactersInSet:[NSCharacterSet characterSetWithCharactersInString:@"\""]];
         NSArray<NSString *> *parts = [box componentsSeparatedByString:@","];
@@ -175,10 +181,24 @@ static id DPPeekMakePage(NSWindow *window, id source, void (^attach)(id page)) {
     return page;
 }
 
+// A warmed page holds a hidden renderer, and Chromium only reports a link once, so leaving it unopened must not keep it alive.
+static void DPPeekArmCool(NSWindow *window, DPPeekWarmSlot *slot) {
+    NSUInteger stamp = ++slot.stamp;
+    __weak NSWindow *weakWindow = window;
+    __weak DPPeekWarmSlot *weakSlot = slot;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(DPPeekWarmIdle * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        NSWindow *owner = weakWindow;
+        DPPeekWarmSlot *held = weakSlot;
+        if (owner && held && held.stamp == stamp && [DPPeekWarmSlots objectForKey:owner] == held) DPPeekCoolIn(owner);
+    });
+}
+
 void DPPeekWarm(NSWindow *window, id source, NSURL *url) {
     if (!window || [DPGet(window, &DPPeekWindowClosedKey) boolValue]) return;
     if (DPPeekHasCards()) DPPeekSyncTabs(window);
-    if ([url isEqual:[DPPeekWarmSlots objectForKey:window].url] || DPPeekCardIn(window)) return;
+    DPPeekWarmSlot *warm = [DPPeekWarmSlots objectForKey:window];
+    if ([url isEqual:warm.url]) return DPPeekArmCool(window, warm);
+    if (DPPeekCardIn(window)) return;
     DPPeekCoolIn(window);
     __block NSView *host = nil;
     id page = DPPeekMakePage(window, source, ^(id page) { host = DPPeekWarmHost(window, page); });
@@ -189,8 +209,10 @@ void DPPeekWarm(NSWindow *window, id source, NSURL *url) {
     slot.page = page;
     slot.view = host;
     slot.url = url;
+    slot.source = source;
     if (!DPPeekWarmSlots) DPPeekWarmSlots = [NSMapTable weakToStrongObjectsMapTable];
     [DPPeekWarmSlots setObject:slot forKey:window];
+    DPPeekArmCool(window, slot);
 }
 
 static DPPeekWarmSlot *DPPeekTakeWarm(NSWindow *window) {
@@ -207,6 +229,14 @@ void DPPeekCoolIn(NSWindow *window) {
 void DPPeekCool(void) {
     for (NSWindow *window in DPPeekWarmSlots.keyEnumerator.allObjects) DPPeekCoolIn(window);
 }
+
+void DPPeekCoolForSource(id source) {
+    if (!source) return;
+    for (NSWindow *window in DPPeekWarmSlots.keyEnumerator.allObjects)
+        if ([DPPeekWarmSlots objectForKey:window].source == source) DPPeekCoolIn(window);
+}
+
+BOOL DPPeekHasWarm(void) { return DPPeekWarmSlots.count > 0; }
 
 static void DPPeekOpenFrom(NSWindow *window, NSString *originTabID, NSURL *url, NSRect link, id delegate, id source, id warmPage, NSView *warmHost) {
     if (DPPeekHasCards()) DPPeekSyncTabs(window);

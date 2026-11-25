@@ -62,13 +62,14 @@ void DPOnLaunch(void (^block)(void)) { block(); }
 - (void)unpin:(id)sender { self.unpins++; }
 @end
 
+static int gMenuBuilds;
 @interface _TtC5TabUI7TabView : NSView
 @property (nonatomic, strong) DPFakeViewModel *viewModel;
 @property (nonatomic, strong) NSMenu *contextMenu;
 @end
 @implementation _TtC5TabUI7TabView
 - (id)safeSwiftValueForKey:(NSString *)key { return [key isEqual:@"viewModel"] ? self.viewModel : nil; }
-- (NSMenu *)menuForEvent:(NSEvent *)event { return self.contextMenu; }
+- (NSMenu *)menuForEvent:(NSEvent *)event { gMenuBuilds++; return self.contextMenu; }
 @end
 
 @interface _TtC3ADK18WebContentChromium : NSObject
@@ -76,6 +77,26 @@ void DPOnLaunch(void (^block)(void)) { block(); }
 @end
 @implementation _TtC3ADK18WebContentChromium
 - (void)webContents:(id)webContents didCreateNewWebContent:(id)newContent targetURL:(NSURL *)url disposition:(NSInteger)disposition { gOriginalCalls++; }
+@end
+
+@interface DPScriptTab : NSObject
+@property (nonatomic, copy) NSString *URL;
+@property (nonatomic, getter=isPinned) BOOL pinned;
+@end
+@implementation DPScriptTab
+@end
+
+@interface DPScriptWindow : NSObject
+@property (nonatomic, copy) NSString *windowId;
+@property (nonatomic, copy) NSArray *appleScriptTabs;
+@end
+@implementation DPScriptWindow
+@end
+
+@interface DPScriptDelegate : NSObject <NSApplicationDelegate>
+@property (nonatomic, copy) NSArray *appleScriptWindows;
+@end
+@implementation DPScriptDelegate
 @end
 
 @interface DPVisibleWindow : NSWindow
@@ -124,6 +145,16 @@ static void DPShowTabFor(_TtC5TabUI7TabView *tab, DPFakePage *page, NSString *it
     NSMenu *menu = [[NSMenu alloc] initWithTitle:@"Tab"];
     [menu addItemWithTitle:item action:@selector(unpin:) keyEquivalent:@""].target = target;
     tab.contextMenu = menu;
+}
+
+static DPScriptWindow *DPScripted(NSString *windowID, NSString *url, BOOL pinned) {
+    DPScriptTab *tab = [DPScriptTab new];
+    tab.URL = url;
+    tab.pinned = pinned;
+    DPScriptWindow *window = [DPScriptWindow new];
+    window.windowId = windowID;
+    window.appleScriptTabs = @[ tab ];
+    return window;
 }
 
 static void DPClick(DPFakePage *source, DPFakePage *opened, NSInteger disposition) {
@@ -215,11 +246,15 @@ int main(void) {
         gNewTarget.unpins = 0;
         DPShowTabFor(gNewTab, opened, @"Unpin", nil, NO);
         gModifiers = NSEventModifierFlagCommand;
+        int buildsBefore = gMenuBuilds;
         DPClick(pinned, opened, DPBackgroundTab);
-        PumpFor(1.2);
+        PumpFor(0.45);
         CHECK(gNewTarget.unpins == 0, "a nil-target Unpin item is refused");
+        int unpinTicks = gMenuBuilds - buildsBefore;
+        // 1 source-pinned check + at most 6 unpin attempts (initial + 5 retries).
+        CHECK(unpinTicks >= 2 && unpinTicks <= 7, "unpin retry loop is bounded to <= 6 attempts instead of 21");
         DPPinnedCmdClick.on = NO;
-        PumpFor(0.3);
+        PumpFor(0.1);
         DPPinnedCmdClick.on = YES;
         DPShowTabFor(gNewTab, opened, @"Unpin", gNewTarget, NO);
 
@@ -233,12 +268,67 @@ int main(void) {
         PumpFor(0.2);
         CHECK(gNewTarget.unpins == 0, "a link from another window's unpinned tab ignores the key window's pinned selection");
 
+        gWindow.identifier = @"A";
+        gOtherWindow.identifier = @"B";
+        DPScriptDelegate *delegate = [DPScriptDelegate new];
+        NSApp.delegate = delegate;
+        DPFakePage *icon = DPMakePage(@"55555555-5555-5555-5555-555555555555", @"https://icon.example/");
+        DPScriptWindow *pinnedCopy = DPScripted(@"A", @"https://icon.example/", YES), *looseCopy = DPScripted(@"B", @"https://icon.example/", NO);
+        gModifiers = NSEventModifierFlagCommand;
+        DPShowTabFor(gSourceTab, pinned, @"Unpin", gSourceTarget, NO);
+
+        [gOwners setObject:gWindow forKey:icon];
+        for (NSArray *order in @[ @[ pinnedCopy, looseCopy ], @[ looseCopy, pinnedCopy ] ]) {
+            gNewTarget.unpins = 0;
+            delegate.appleScriptWindows = order;
+            DPClick(icon, opened, DPBackgroundTab);
+            PumpUntil(^{ return (BOOL)(gNewTarget.unpins > 0); });
+            CHECK(gNewTarget.unpins == 1, "a favorite icon pinned in its own window is unpinned whatever order the windows list, and a loose copy in another window doesn't veto it");
+        }
+
+        [gOwners setObject:gOtherWindow forKey:icon];
+        for (NSArray *order in @[ @[ pinnedCopy, looseCopy ], @[ looseCopy, pinnedCopy ] ]) {
+            gNewTarget.unpins = 0;
+            delegate.appleScriptWindows = order;
+            DPClick(icon, opened, DPBackgroundTab);
+            PumpFor(0.1);
+            CHECK(gNewTarget.unpins == 0, "a loose icon in its own window ignores another window's pinned copy");
+        }
+
+        NSWindow *stranger = [[DPVisibleWindow alloc] initWithContentRect:NSMakeRect(-30000, -30000, 400, 300) styleMask:NSWindowStyleMaskBorderless
+                                                                  backing:NSBackingStoreBuffered defer:NO];
+        stranger.identifier = @"Z";
+        [gOwners setObject:stranger forKey:icon];
+        gNewTarget.unpins = 0;
+        delegate.appleScriptWindows = @[ looseCopy, pinnedCopy ];
+        DPClick(icon, opened, DPBackgroundTab);
+        PumpUntil(^{ return (BOOL)(gNewTarget.unpins > 0); });
+        CHECK(gNewTarget.unpins == 1, "a window Dia doesn't script leaves the pinned copy to decide");
+
+        gNewTarget.unpins = 0;
+        delegate.appleScriptWindows = @[ looseCopy ];
+        DPClick(icon, opened, DPBackgroundTab);
+        PumpFor(0.1);
+        CHECK(gNewTarget.unpins == 0, "an icon only open as a loose tab is left alone");
+        [gOwners removeObjectForKey:icon];
+        delegate.appleScriptWindows = @[];
+        DPShowTabFor(gSourceTab, pinned, @"Unpin", gSourceTarget, YES);
+
+        __weak DPFakePage *weakPage;
+        @autoreleasepool {
+            DPFakePage *closed = DPMakePage(@"66666666-6666-6666-6666-666666666666", @"https://closed.example/");
+            weakPage = closed;
+            DPClick(pinned, closed, DPBackgroundTab);
+        }
+        PumpFor(0.3);
+        CHECK(weakPage == nil, "the unpin retries don't keep a closed tab's contents alive");
+
         gNewTarget.unpins = 0;
         DPPinnedCmdClick.on = NO;
         DPClick(pinned, opened, DPBackgroundTab);
         PumpFor(0.1);
         CHECK(gNewTarget.unpins == 0, "the hook is a no-op when the tweak is off");
-        CHECK(gOriginalCalls == 10, "the original handler still runs when off");
+        CHECK(gOriginalCalls == 10 + 7, "the original handler still runs when off");
 
         if (failures) return 1;
         puts("PASS: Pinned Tabs unpins tabs opened by ⌘-click or middle-click from a pinned tab");

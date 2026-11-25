@@ -101,7 +101,7 @@ static NSVisualEffectMaterial DPWindowBackgroundMaterial(NSWindow *window) {
     return effect ? ((NSVisualEffectView *)effect).material : NSVisualEffectMaterialUnderWindowBackground;
 }
 
-static void DPApplyMaterialUnder(NSView *tint, BOOL floating) {
+static void DPApplyMaterialBody(NSView *tint, BOOL floating) {
     NSView *content = tint.superview;
     if (!content) return;
     NSString *choice = DPWindowMaterial.on ? DPWindowMaterialChoice() : nil;
@@ -180,6 +180,20 @@ static void DPApplyMaterialUnder(NSView *tint, BOOL floating) {
     if (window.backgroundColor != targetBG && ![window.backgroundColor isEqual:targetBG]) window.backgroundColor = targetBG;
 }
 
+// The tile repaints on every resize frame, so remember what the last pass saw: a repaint only has new work when
+// the choice, the glass or what Dia put around the tint changed.
+static id DPMaterialState(NSView *tint, BOOL floating) {
+    NSView *content = tint.superview;
+    return @[ DPWindowMaterial.on ? DPWindowMaterialChoice() : @"", @(floating), @(DPTranslucentSidebar.on),
+              @(content.subviews.count), @(content.superview.subviews.count), @(DPGet(content, &DPGlassKey) != nil),
+              @(content.layer.cornerRadius) ];
+}
+
+static void DPApplyMaterialUnder(NSView *tint, BOOL floating) {
+    DPApplyMaterialBody(tint, floating);
+    if (DPGet(tint, &DPAppliedKey)) DPSet(tint, &DPAppliedKey, DPMaterialState(tint, floating));
+}
+
 static NSArray<NSView *> *DPWindowFrames(void) {
     NSMutableArray *frames = [NSMutableArray array];
     for (NSWindow *window in NSApp.windows) if (DPIsKind(window.contentView.superview, DPDiaWindowFrame)) [frames addObject:window.contentView.superview];
@@ -207,9 +221,10 @@ static void DPBackgroundTile_updateLayer(NSView *self, SEL _cmd) {
     for (NSView *host = self.superview; host; host = host.superview) {
         NSView *tint = DPTintIn(host);
         if (!tint) continue;
+        BOOL floating = DPIsKind(host, DPDiaFloatingSidebar);
+        if ([DPGet(tint, &DPAppliedKey) isEqual:DPMaterialState(tint, floating)]) return;
         if ([DPGet(tint, &DPPendingMaterialKey) boolValue]) return;
         DPSet(tint, &DPPendingMaterialKey, @YES);
-        BOOL floating = DPIsKind(host, DPDiaFloatingSidebar);
         __weak NSView *weakTint = tint;
         // Defer subview and window mutations out of AppKit's updateLayer display pass.
         dispatch_async(dispatch_get_main_queue(), ^{

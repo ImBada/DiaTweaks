@@ -362,6 +362,24 @@ static void TestWindowClose(void) {
     Check(DPContainers.allObjects.count == before, @"a late full-screen notification finds nothing to touch");
 }
 
+// Every web-content frame set pays this hook, so with nothing on it must not record anything or allocate.
+static void TestOffCost(void) {
+    SetPatches(NO, NO);
+    DPSquareSidebarCorners.on = NO;
+    DPSquareSidebarCorners.progress = 0;
+    _TtC6Window14PlatformWindow *window = MakeWindow(NSMakeSize(900, 600), NO);
+    Fixture f = MakeFixture(window, NSMakeRect(220, 6, 674, 588));
+    Check(DPRequestedFrame(f.container) == nil, @"off: a page Dia placed without edge-to-edge records no frame");
+    Check(![DPContainers containsObject:f.container], @"off: and isn't tracked");
+    CFAbsoluteTime start = CFAbsoluteTimeGetCurrent();
+    for (NSUInteger i = 0; i < 20000; i++) f.container.frame = NSMakeRect(220, 6, 674 + (i & 1), 588);
+    printf("off_frame_us=%.3f\n", (CFAbsoluteTimeGetCurrent() - start) * 1e6 / 20000);
+    Check(DPRequestedFrame(f.container) == nil && ![DPContainers containsObject:f.container],
+          @"off: setting 20000 frames still records nothing");
+    Check(NSEqualRects(f.container.frame, NSMakeRect(220, 6, 675, 588)), @"off: Dia's frames are untouched");
+    [f.container removeFromSuperview];
+}
+
 int main(void) {
     @autoreleasepool {
         [NSApplication sharedApplication];
@@ -376,6 +394,7 @@ int main(void) {
         TestVerify();
         TestOffLeavesDiaAlone();
         TestWindowClose();
+        TestOffCost();
     }
     if (failures) return 1;
     puts("PASS: per-window full-screen edge-to-edge, transitions, live toggles, corners, chat card, popover, pause, verify, and off");

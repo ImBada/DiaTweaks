@@ -2,10 +2,19 @@
 #import "Title.h"
 
 extern DPPatch DPTabTitles;
+static char DPTitleMemoKey;
 
 static NSString *DPContents_title(id self, SEL _cmd) {
     NSString *title = DPCallOriginal(DPContents_title, self);
-    return DPTabTitles.on && title.length ? DPDisplayTitle(title) : title;
+    if (!DPTabTitles.on || !title.length) {
+        if (!DPTabTitles.on && DPGet(self, &DPTitleMemoKey)) DPSet(self, &DPTitleMemoKey, nil);
+        return title;
+    }
+    NSArray<NSString *> *memo = DPGet(self, &DPTitleMemoKey);
+    if (memo && (memo[0] == title || [memo[0] isEqualToString:title])) return memo[1];
+    NSString *raw = [title copy], *clean = DPDisplayTitle(raw);
+    DPSet(self, &DPTitleMemoKey, @[ raw, clean ]);
+    return clean;
 }
 
 static void DPInstallTabTitles(void) {

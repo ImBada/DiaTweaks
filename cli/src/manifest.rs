@@ -244,9 +244,16 @@ impl Manifest {
     }
 
     pub fn state(&self, prefs: &Prefs) -> Vec<bool> {
-        self.patches
+        let keys: Vec<&str> = self
+            .patches
             .iter()
-            .map(|patch| prefs.get(&patch.key).unwrap_or(patch.default_on))
+            .map(|patch| patch.key.as_str())
+            .collect();
+        prefs
+            .bools(&keys)
+            .into_iter()
+            .zip(&self.patches)
+            .map(|(on, patch)| on.unwrap_or(patch.default_on))
             .collect()
     }
 

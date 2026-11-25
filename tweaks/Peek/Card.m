@@ -76,7 +76,8 @@ static NSRect DPPeekCardRect(NSRect area) {
         BOOL flipped = self.clip.isFlipped;
         self.host.frame = (NSRect){{0, flipped ? bar : NSHeight(self.clip.bounds) - bar - page.height}, page};
         DPPeekPlaceToolbar(self);
-        DPPeekLayoutHints(self.controls, NSWidth(self.bounds) - NSMaxX(self.controls.frame) - 8);
+        // The hints rebuild once a grow or pane slide settles; redoing all three every frame costs more than the motion.
+        if (!self.paneMoves && (self.grown <= 0 || self.grown >= 1)) DPPeekLayoutHints(self.controls, NSWidth(self.bounds) - NSMaxX(self.controls.frame) - 8);
     }];
 }
 

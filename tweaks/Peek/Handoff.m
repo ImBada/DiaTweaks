@@ -35,8 +35,8 @@ static DPPeekWindowCapture DPPeekCaptureOwnWindow(void) {
     self.promote = nil;
     [self.displayLink invalidate];
     self.displayLink = nil;
-    [self orderOut:nil];
     [self.parentWindow removeChildWindow:self];
+    [self orderOut:nil];
     DPPeekCard *peek = self.peek;
     if (peek && DPGet(peek, &DPPeekCoverKey) == self) DPSet(peek, &DPPeekCoverKey, nil);
     DPPeekUpdateSyncTimer();
@@ -122,6 +122,9 @@ void DPPeekHandoffSelectionChanged(NSWindow *window, NSString *active) {
     }
 }
 
+__attribute__((weak)) NSTimeInterval DPPeekCaptureDelay(void) { return 0.07; }
+__attribute__((weak)) NSTimeInterval DPPeekCoverDelay(void) { return 0.25; }
+
 static void DPPeekShowCover(DPPeekCard *peek, CGImageRef contents, void (^promote)(void)) {
     NSWindow *parent = peek.window;
     if (!parent.isVisible || peek.isHiddenOrHasHiddenAncestor || !contents) return promote();
@@ -156,7 +159,7 @@ static void DPPeekShowCover(DPPeekCard *peek, CGImageRef contents, void (^promot
     DPPeekUpdateSyncTimer();
     // A hidden or switched-away destination may never get its display ticks.
     __weak DPPeekCover *weak = cover;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 250 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(DPPeekCoverDelay() * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         DPPeekCover *cover = weak;
         if (cover.displayLink) [cover dismiss];
     });
@@ -180,7 +183,7 @@ void DPPeekPrepareHandoff(DPPeekCard *peek, void (^complete)(void)) {
         if (peek.window == window) DPPeekShowCover(peek, image, complete);
         else complete();
     };
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 70 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{ finish(NULL); });
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(DPPeekCaptureDelay() * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ finish(NULL); });
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INTERACTIVE, 0), ^{
         CGImageRef image = capture(screenBounds, kCGWindowListOptionIncludingWindow, windowID, kCGWindowImageBestResolution);
         dispatch_async(dispatch_get_main_queue(), ^{

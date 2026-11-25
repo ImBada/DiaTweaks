@@ -1,4 +1,7 @@
 #import "Settings.h"
+#include <mach/vm_map.h>
+
+extern const uintptr_t objc_debug_isa_class_mask;
 
 static char DPSettingsKey, DPSearchItemKey;
 
@@ -10,14 +13,45 @@ static DPSidebarRow DPOurRow(NSTableView *table, NSInteger row) {
     return row >= 0 && ours >= 0 ? ours : DPDiaRow;
 }
 
+static BOOL DPIsRegisteredClass(const void *candidate) {
+    if (!candidate) return NO;
+    static CFMutableSetRef known;
+    if (known && CFSetContainsValue(known, candidate)) return YES;
+    if (known) CFRelease(known);
+    known = CFSetCreateMutable(NULL, 0, NULL);
+    unsigned int count = 0;
+    Class *classes = objc_copyClassList(&count);
+    for (unsigned int i = 0; i < count; i++) CFSetAddValue(known, (__bridge const void *)classes[i]);
+    free(classes);
+    return CFSetContainsValue(known, candidate);
+}
+
+// The pane's toolbar items live in a raw Swift ivar: retaining an unmapped word or struct pointer would crash before @try.
+static NSArray *DPDiaPaneItems(id delegate) {
+    void **slot = DPIvar(delegate, "paneToolbarItems");
+    uintptr_t ptr = slot ? (uintptr_t)*slot : 0;
+    if (ptr < 0x100000000ULL || (ptr & 0xC000000000000007ULL)) return nil;
+    uintptr_t isa = 0;
+    vm_size_t read = 0;
+    if (vm_read_overwrite(mach_task_self(), (vm_address_t)ptr, sizeof isa, (vm_address_t)&isa, &read) != KERN_SUCCESS || read != sizeof isa)
+        return nil;
+    const void *rawCls = (const void *)(isa & objc_debug_isa_class_mask);
+    if (!DPIsRegisteredClass(rawCls)) return nil;
+    const char *name = class_getName((__bridge Class)rawCls);
+    if (!name || !strstr(name, "Array")) return nil;
+    @try {
+        id raw = (__bridge id)(void *)ptr;
+        return [raw isKindOfClass:NSArray.class] ? raw : nil;
+    } @catch (NSException *exception) {
+        return nil;
+    }
+}
+
 static void DPRemoveDiaPaneItems(NSToolbar *toolbar) {
-    void **slot = DPIvar(toolbar.delegate, "paneToolbarItems");
-    // A Swift array of objects is its NSArray storage; a tagged, misaligned or below-4GB word is some other layout.
-    if (!slot || (uintptr_t)*slot < 0x100000000 || ((uintptr_t)*slot & 0xC000000000000007)) return;
-    id raw = (__bridge id)*slot;
-    if (![raw isKindOfClass:NSArray.class]) return;
+    NSArray *raw = DPDiaPaneItems(toolbar.delegate);
+    if (!raw) return;
     NSMutableSet *identifiers = [NSMutableSet set];
-    for (id item in (NSArray *)raw) {
+    for (id item in raw) {
         id identifier = DPValueForKey(item, @"itemIdentifier");
         if ([identifier isKindOfClass:NSString.class]) [identifiers addObject:identifier];
     }

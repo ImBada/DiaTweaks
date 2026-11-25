@@ -4,9 +4,9 @@ extern DPPatch DPCompactSidebarHeader;
 static const CGFloat DPHeaderTrim = 10;
 static const CGFloat DPTopTabsButtonInset = 14;
 static NSHashTable<NSView *> *DPSidebars;
-static NSHashTable *DPFramedClasses;
+static NSHashTable *DPFramedClasses, *DPButtonsRowClasses;
 static Class DPHeaderClass;
-static char DPHeaderFrameKey, DPButtonsKey, DPRetriesKey;
+static char DPHeaderFrameKey, DPButtonsKey, DPRetriesKey, DPSidebarKey, DPSidebarChildKey;
 
 static NSRect DPLaidOutHeader(NSView *header) {
     return [DPDiaValue(header, &DPHeaderFrameKey, @(header.frame)) rectValue];
@@ -38,12 +38,21 @@ static NSRect DPCorneredRow(NSView *row, NSRect frame) {
 }
 
 static void DPButtonsRow_setFrame(NSView *self, SEL _cmd, NSRect frame) {
-    DPCallOriginal(DPButtonsRow_setFrame, self, DPCompactSidebarHeader.on ? DPCorneredRow(self, frame) : frame);
+    if (DPCompactSidebarHeader.on && DPGet(self, &DPButtonsKey)) frame = DPCorneredRow(self, frame);
+    DPCallOriginal(DPButtonsRow_setFrame, self, frame);
 }
 
 static NSView *DPNoteButtons(NSView *header) {
     NSView *lights = DPFindView(header, ^BOOL(NSView *v) { return DPIsKind(v, DPDiaTrafficLights); });
-    if (lights && lights.superview != header) DPSet(lights.superview, &DPButtonsKey, lights);
+    NSView *row = lights.superview;
+    if (lights && row && row != header) {
+        DPSet(row, &DPButtonsKey, lights);
+        Class cls = row.class;
+        if (![DPButtonsRowClasses containsObject:cls]) {
+            [DPButtonsRowClasses addObject:cls];
+            DPHookClass(cls, @selector(setFrame:), (IMP)DPButtonsRow_setFrame);
+        }
+    }
     return lights;
 }
 
@@ -67,56 +76,77 @@ static void DPHeader_layout(NSView *self, SEL _cmd) {
     }
 }
 
-// Rewritten in setFrame:, not after layout, to avoid a second pass that jitters during resize. Every sidebar subview's class is
-// hooked, NSView included, so the off path is one class check.
-static void DPCompactFrame_setFrame(NSView *self, SEL _cmd, NSRect frame) {
-    BOOL header = [self isKindOfClass:DPHeaderClass];
+static void DPHeader_setFrame(NSView *self, SEL _cmd, NSRect frame) {
     if (!DPCompactSidebarHeader.on) {
-        if (header && DPGet(self, &DPHeaderFrameKey)) DPSet(self, &DPHeaderFrameKey, nil);
-        return DPCallOriginal(DPCompactFrame_setFrame, self, frame);
+        if (DPGet(self, &DPHeaderFrameKey)) DPSet(self, &DPHeaderFrameKey, nil);
+        return DPCallOriginal(DPHeader_setFrame, self, frame);
     }
-    if (header) {
-        NSArray *values = DPGet(self, &DPHeaderFrameKey);
-        if (!values || ![values[1] isEqual:[NSValue valueWithRect:frame]]) {
-            NSRect laidOut = frame;
-            frame.size.height = MAX(0, NSHeight(laidOut) - DPHeaderTrim);
-            DPOverride(self, &DPHeaderFrameKey, [NSValue valueWithRect:laidOut], [NSValue valueWithRect:frame]);
-        }
-    } else if ([DPSidebars containsObject:self.superview]) {
-        NSView *header = DPSubview(self.superview, DPDiaSidebarHeader);
-        NSRect laidOut = header ? DPLaidOutHeader(header) : NSZeroRect;
-        if (header && !NSIsEmptyRect(laidOut) && fabs(NSMinY(frame) - NSMaxY(laidOut)) < 0.5) {
-            frame.origin.y = MAX(0, NSMaxY(laidOut) - DPHeaderTrim);
-            frame.size.height += DPHeaderTrim;
+    NSArray *values = DPGet(self, &DPHeaderFrameKey);
+    if (!values || ![values[1] isEqual:[NSValue valueWithRect:frame]]) {
+        NSRect laidOut = frame;
+        frame.size.height = MAX(0, NSHeight(laidOut) - DPHeaderTrim);
+        DPOverride(self, &DPHeaderFrameKey, [NSValue valueWithRect:laidOut], [NSValue valueWithRect:frame]);
+    }
+    DPCallOriginal(DPHeader_setFrame, self, frame);
+}
+
+// Rewritten in setFrame:, not after layout, to avoid a second pass that jitters during resize. Unrelated views of a hooked
+// sidebar subview class bail out before messaging superview or touching a weak table.
+static void DPCompactFrame_setFrame(NSView *self, SEL _cmd, NSRect frame) {
+    if (DPCompactSidebarHeader.on && DPGet(self, &DPSidebarChildKey)) {
+        NSView *sidebar = self.superview;
+        if (DPGet(sidebar, &DPSidebarKey)) {
+            NSView *header = DPSubview(sidebar, DPDiaSidebarHeader);
+            NSRect laidOut = header ? DPLaidOutHeader(header) : NSZeroRect;
+            if (header && !NSIsEmptyRect(laidOut) && fabs(NSMinY(frame) - NSMaxY(laidOut)) < 0.5) {
+                frame.origin.y = MAX(0, NSMaxY(laidOut) - DPHeaderTrim);
+                frame.size.height += DPHeaderTrim;
+            }
+        } else {
+            DPSet(self, &DPSidebarChildKey, nil);
         }
     }
     DPCallOriginal(DPCompactFrame_setFrame, self, frame);
 }
 
+static void DPHookSidebarChildren(NSView *sidebar) {
+    if (!sidebar) return;
+    DPSet(sidebar, &DPSidebarKey, @YES);
+    for (NSView *sub in sidebar.subviews) {
+        if (DPHeaderClass && [sub isKindOfClass:DPHeaderClass]) continue;
+        DPSet(sub, &DPSidebarChildKey, @YES);
+        Class cls = sub.class;
+        if ([DPFramedClasses containsObject:cls]) continue;
+        [DPFramedClasses addObject:cls];
+        DPHookClass(cls, @selector(setFrame:), (IMP)DPCompactFrame_setFrame);
+    }
+}
+
 static void DPSidebar_viewWillLayout(NSViewController *self, SEL _cmd) {
-    [DPSidebars addObject:self.view];
-    if (DPCompactSidebarHeader.on)
-        for (NSView *sub in self.view.subviews) {
-            Class cls = sub.class;
-            if ([DPFramedClasses containsObject:cls]) continue;
-            [DPFramedClasses addObject:cls];
-            DPHookClass(cls, @selector(setFrame:), (IMP)DPCompactFrame_setFrame);
-        }
+    if (!DPGet(self.view, &DPSidebarKey)) {
+        DPSet(self.view, &DPSidebarKey, @YES);
+        [DPSidebars addObject:self.view];
+    }
+    if (DPCompactSidebarHeader.on) DPHookSidebarChildren(self.view);
     DPCallOriginal(DPSidebar_viewWillLayout, self);
 }
 
 static void DPInstallCompactSidebarHeader(void) {
     DPSidebars = [NSHashTable weakObjectsHashTable];
-    DPFramedClasses = [NSHashTable hashTableWithOptions:NSPointerFunctionsOpaqueMemory | NSPointerFunctionsObjectPointerPersonality];
+    NSPointerFunctionsOptions opaque = NSPointerFunctionsOpaqueMemory | NSPointerFunctionsObjectPointerPersonality;
+    DPFramedClasses = [NSHashTable hashTableWithOptions:opaque];
+    DPButtonsRowClasses = [NSHashTable hashTableWithOptions:opaque];
     DPHeaderClass = objc_getClass(DPDiaSidebarHeader);
     DPHook(DPDiaSidebarController, @selector(viewWillLayout), (IMP)DPSidebar_viewWillLayout);
     DPHook(DPDiaSidebarHeader, @selector(layout), (IMP)DPHeader_layout);
-    DPHook(DPDiaSidebarHeader, @selector(setFrame:), (IMP)DPCompactFrame_setFrame);
-    DPHookClass(NSStackView.class, @selector(setFrame:), (IMP)DPButtonsRow_setFrame);
+    DPHook(DPDiaSidebarHeader, @selector(setFrame:), (IMP)DPHeader_setFrame);
 }
 
 static void DPApplyCompactSidebarHeader(DPPatch *patch) {
-    for (NSView *sidebar in DPSidebars.allObjects) DPSubview(sidebar, DPDiaSidebarHeader).needsLayout = YES;
+    for (NSView *sidebar in DPSidebars.allObjects) {
+        if (patch->on) DPHookSidebarChildren(sidebar);
+        DPSubview(sidebar, DPDiaSidebarHeader).needsLayout = YES;
+    }
     DPRelayoutViews(DPSidebars);
 }
 

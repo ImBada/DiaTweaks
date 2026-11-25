@@ -121,6 +121,21 @@ int main(void) {
         CHECK(DPGet(bar, &DPFrameKey) == nil && DPGet(page, &DPFrameKey) == nil && DPGet(pageChild, &DPFillsKey) == nil,
               "no DPFrameKey or DPFillsKey written when HideToolbar is off");
 
+        gLittleDiaOver = YES;
+        [pane layout];
+        CHECK(bar.alphaValue == 0, "Little Dia over a window with HideToolbar off hides the bars");
+        gLittleDiaOver = NO;
+        [pane layout];
+        CHECK(bar.alphaValue == 1 && NSEqualRects(page.frame, NSMakeRect(0, 44, 800, 556)),
+              "the bars come back when Little Dia closes with HideToolbar off");
+        gLittleDiaOver = YES;
+        [pane layout];
+        gLittleDiaOver = NO;
+        [pane layout];
+        [pane layout];
+        CHECK(bar.alphaValue == 1 && NSEqualRects(page.frame, NSMakeRect(0, 44, 800, 556)),
+              "HideToolbar off leaves the bars alone once Little Dia has come and gone");
+
         DPHideToolbar.on = YES;
         DPHideToolbar.progress = 1;
         DPShowToolbarWithSidebar.on = NO;

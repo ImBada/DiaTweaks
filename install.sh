@@ -143,12 +143,13 @@ rm -rf "$incoming"
 mkdir -p "$incoming" "$support/bin"
 cp build/diapatch build/DiaPatches.dylib build/patches.json ${cli:+"$cli"} "$incoming/"
 cp -R assets/app-icons "$incoming/"
-# Ctrl-C waits for the renames, so the installed files always come from one build.
+# Ctrl-C waits for the renames. The patch list and the dylib land before the binaries, so a failure
+# here can't leave a new diapatch reading an old patches.json.
 trap 'interrupted=1' INT TERM HUP
 (
     trap '' INT TERM HUP
-    mv -f "$incoming/diapatch" ${cli:+"$incoming/diatweaks"} "$support/bin/"
     mv -f "$incoming/DiaPatches.dylib" "$incoming/patches.json" "$support/"
+    mv -f "$incoming/diapatch" ${cli:+"$incoming/diatweaks"} "$support/bin/"
     rm -rf "$support/app-icons"
     rm -f "$support/release.plist"  # this is a source build now, not a release
     mv -f "$incoming/app-icons" "$support/"

@@ -20,6 +20,19 @@ BOOL DPChatLocked(NSView *view) {
     return DPFindView(view, ^BOOL(NSView *v) { return [v.accessibilityLabel hasSuffix:@"only available when you have chat usage"]; }) != nil;
 }
 
+// Layout and mouse-move hit tests ask this many times a second, and the answer only changes when Dia labels a button.
+static char DPLockedKey;
+
+static BOOL DPChatLockedCached(NSView *toolbar) {
+    NSNumber *locked = DPGet(toolbar, &DPLockedKey);
+    if (!locked) DPSet(toolbar, &DPLockedKey, locked = @(DPChatLocked(toolbar)));
+    return locked.boolValue;
+}
+
+void DPForgetChatLocked(NSView *toolbar) {
+    if (toolbar) DPSet(toolbar, &DPLockedKey, nil);
+}
+
 // Dia labels the buttons a moment after the bar shows, so until then the last label decides.
 static NSString *const DPChatLockedKey = @"commandBarChatLocked";
 
@@ -40,7 +53,7 @@ static BOOL DPOnCommandBarSurface(NSView *view) {
 NSView *DPCompactToolbar(NSView *commandBar) {
     if (!DPCompactCommandBar.on) return nil;
     NSView *toolbar = DPCommandBarPart(commandBar, DPDiaCommandBarToolbar);
-    BOOL compacts = toolbar && (DPCompactWithChat.on || [DPSettingsDefaults() boolForKey:DPChatLockedKey] || DPChatLocked(toolbar));
+    BOOL compacts = toolbar && (DPCompactWithChat.on || [DPSettingsDefaults() boolForKey:DPChatLockedKey] || DPChatLockedCached(toolbar));
     return compacts && DPOnCommandBarSurface(commandBar) ? toolbar : nil;
 }
 
@@ -66,6 +79,7 @@ void DPApplyCompactCommandBar(DPPatch *patch) {
         DPFindView(window.contentView.superview ?: window.contentView, ^BOOL(NSView *view) {
             if ([view isKindOfClass:barCls]) {
                 view.needsLayout = YES;
+                DPForgetChatLocked(DPCommandBarPart(view, DPDiaCommandBarToolbar));
                 DPCommandBarPart(view, DPDiaCommandBarInput).needsLayout = YES;
             }
             return NO;

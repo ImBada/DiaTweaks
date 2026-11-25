@@ -43,6 +43,11 @@ void DPOnLaunch(void (^block)(void)) {}
 
 static int failures;
 
+// Counts how often the hide rules are asked, so a cached miss can be measured instead of timed.
+static int gHideChecks;
+static BOOL DPCountedHide(NSView *view) { gHideChecks++; return NO; }
+static DPPatch DPCountedPatch = { .key = @"countedHide", .hides = DPCountedHide };
+
 static void check(const char *what, BOOL ok) {
     if (!ok) printf("FAIL: %s\n", what), failures++;
 }
@@ -178,6 +183,56 @@ int main(void) {
         DPApplyHides(&DPTurnOffAI);
         check("Turn Off AI off restores card chat button and Ask capsules",
               !cardChat.hidden && !askByIconOnly.hidden && !askByAction.hidden && !askByTooltip.hidden && diaHiddenAsk.hidden && DPSuppressed.count == 0);
+
+        // A view the rules passed over must be looked at again once it could match: Dia labels its views late.
+        DPHideChatButton.on = YES;
+        DPApplyHides(&DPHideChatButton);
+        _TtC13NavigationBar26NavigationBarCapsuleButton *lateIcon = makeAskCapsule(NO, NO, nil, @"Ask");
+        NSView *lateLabel = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 20, 20)];
+        [toolbar addSubview:lateIcon];
+        [toolbar addSubview:lateLabel];
+        DPEnforceHides(toolbar);
+        check("a capsule without a chat fill icon stays visible", !lateIcon.hidden && !lateLabel.hidden);
+        NSView *lateHolder = [[NSView alloc] initWithFrame:NSZeroRect];
+        NSImageView *lateChatFill = [[NSImageView alloc] initWithFrame:NSZeroRect];
+        lateChatFill.accessibilityLabel = @"chat fill";
+        [lateHolder addSubview:lateChatFill];
+        [lateIcon addSubview:lateHolder];
+        DPEnforceHides(toolbar);
+        check("a chat fill icon added after the first look still hides its capsule", lateIcon.hidden);
+        lateLabel.accessibilityLabel = @"Chat with this tab";
+        DPEnforceHides(toolbar);
+        check("a label set after the first look still hides its view", lateLabel.hidden);
+        DPHideChatButton.on = NO;
+        DPApplyHides(&DPHideChatButton);
+
+        // Unmatched views are the ones a layout pass spends its time on, so they are remembered until they change.
+        DPPatch *counted[] = { &DPCountedPatch };
+        DPPatches = counted;
+        DPPatchCount = 1;
+        DPCountedPatch.on = YES;
+        DPApplyHides(&DPCountedPatch);
+        _TtC13NavigationBar17NavigationBarView *plain = [[_TtC13NavigationBar17NavigationBarView alloc] initWithFrame:NSMakeRect(0, 0, 600, 40)];
+        for (NSInteger i = 0; i < 300; i++) {
+            NSView *view = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 10, 10)];
+            [view addSubview:[NSImageView new]];
+            [plain addSubview:view];
+        }
+        // 300 views, each holding one image view, so 601 views in the tree.
+        gHideChecks = 0;
+        DPEnforceHides(plain);
+        int firstPass = gHideChecks;
+        for (int pass = 0; pass < 49; pass++) DPEnforceHides(plain);
+        check("every view is checked once, not once per layout pass", firstPass >= 601 && gHideChecks == firstPass);
+        [[plain.subviews firstObject] addSubview:[NSImageView new]];
+        DPEnforceHides(plain);
+        check("a view that gains a subview is checked again", gHideChecks > firstPass);
+        DPTesting = NO;
+        check("DPAnyHidesOn stays YES on the cached production path while a hide patch is on", DPAnyHidesOn());
+        DPCountedPatch.on = NO;
+        DPApplyHides(&DPCountedPatch);
+        check("DPAnyHidesOn flips to NO on the cached production path once every hide patch is off", !DPAnyHidesOn());
+        DPTesting = YES;
     }
     if (failures) return 1;
     puts("PASS: hide-chat-button");

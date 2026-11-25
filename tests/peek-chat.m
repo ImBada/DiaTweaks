@@ -293,7 +293,17 @@ int main(void) {
         [NSApplication sharedApplication];
         gBrowser = [ArcBrowser new];
         DPPeekInstallPages();
+        DPPeek.on = NO;
         DPPeekInstallChat();
+        Class webClass = objc_getClass(DPDiaWebContents);
+        CHECK(!DPIsHooked(webClass, @selector(title), (IMP)DPWeb_title) && !DPIsHooked(webClass, @selector(executeJavascript:completion:), (IMP)DPWeb_exec),
+              "installing Peek while it is off leaves Dia's page reads alone");
+        DPPeek.on = YES;
+        DPPeekEnableChatContext();
+        DPPeekEnableChatContext();
+        CHECK(DPIsHooked(webClass, @selector(title), (IMP)DPWeb_title) && DPIsHooked(webClass, @selector(selectedText), (IMP)DPWeb_selectedText)
+              && DPIsHooked(webClass, @selector(accessibilityTreeForTreeId:), (IMP)DPWeb_a11yTree) && !DPPeekChatContextProblem(),
+              "turning Peek on hooks every page read once, however often it is applied");
 
         DPMenuTarget *menuTarget = [DPMenuTarget new];
         NSMenu *mainMenu = [NSMenu new];

@@ -2,6 +2,7 @@
 #import <Foundation/Foundation.h>
 #import <Security/Security.h>
 #include <sys/stat.h>
+#import "watchdog.h"
 
 static int failures;
 
@@ -52,11 +53,21 @@ static void setDomainValue(NSString *domain, CFStringRef key, CFPropertyListRef 
     CFPreferencesAppSynchronize((__bridge CFStringRef)domain);
 }
 
+static NSString *gIconRoot, *gIconDomain;
+static void DPCleanIconScratch(void) {
+    if (gIconDomain) [NSUserDefaults.standardUserDefaults removePersistentDomainForName:gIconDomain];
+    if (gIconRoot) [NSFileManager.defaultManager removeItemAtPath:gIconRoot error:NULL];
+}
+
 int main(void) {
     @autoreleasepool {
         NSFileManager *fm = NSFileManager.defaultManager;
         NSString *root = [NSTemporaryDirectory() stringByAppendingPathComponent:[NSString stringWithFormat:@"app-icon-signing-%@", NSUUID.UUID.UUIDString]];
-        NSString *domain = [NSString stringWithFormat:@"com.diapatches.test.%@", NSUUID.UUID.UUIDString];
+        NSString *domain = [root stringByAppendingPathComponent:@"com.diapatches"];
+        gIconRoot = root;
+        gIconDomain = domain;
+        DPOnTestCleanup(DPCleanIconScratch);
+        DPArmTestWatchdog(60);
         NSString *home = [root stringByAppendingPathComponent:@"home"];
         NSString *cache = [root stringByAppendingPathComponent:@"cache"];
         NSString *installed = [root stringByAppendingPathComponent:@"Dia.app"];
@@ -175,7 +186,6 @@ int main(void) {
 
         setDomainValue(domain, CFSTR("appIcon"), NULL);
         setDomainValue(domain, CFSTR("appIconChoice"), NULL);
-        [fm removeItemAtPath:root error:NULL];
     }
     if (!failures) printf("all app-icon-signing checks passed\n");
     return failures ? 1 : 0;

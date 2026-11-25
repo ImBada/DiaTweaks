@@ -8,6 +8,7 @@ BOOL DPAnyHidesOn(void);
 DPPatch *DPHider(NSView *view);
 // Until DPShareLabel(nil), DPHasLabel reads view's label once for every rule that asks; AppKit derives it slowly when none was set.
 void DPShareLabel(NSView *view);
+NSString *DPSharedLabel(NSView *view);
 void DPEnforceHides(NSView *root);
 void DPApplyHides(DPPatch *patch);
 NSString *DPVerifyHides(DPPatch *patch);

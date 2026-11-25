@@ -1,4 +1,4 @@
-#import "StdPatch/StdPatch.h"
+#import "StdPatch/Hide.h"
 #import <os/log.h>
 #import <pthread.h>
 #import <stdatomic.h>
@@ -105,13 +105,17 @@ void DPShareLabel(NSView *view) {
     DPLabelRead = NO;
 }
 
-BOOL DPHasLabel(NSView *view, NSString *accessibilityLabel) {
-    if (!view || view != DPLabelView || !pthread_main_np()) return [view.accessibilityLabel isEqualToString:accessibilityLabel];
+NSString *DPSharedLabel(NSView *view) {
+    if (!view || view != DPLabelView || !pthread_main_np()) return view.accessibilityLabel;
     if (!DPLabelRead) {
         DPLabel = view.accessibilityLabel;
         DPLabelRead = YES;
     }
-    return [DPLabel isEqualToString:accessibilityLabel];
+    return DPLabel;
+}
+
+BOOL DPHasLabel(NSView *view, NSString *accessibilityLabel) {
+    return [DPSharedLabel(view) isEqualToString:accessibilityLabel];
 }
 
 void DPRelayoutViews(NSHashTable<NSView *> *views) {
@@ -176,11 +180,36 @@ BOOL DPStateSelected(id state) {
     return style && ![style isEqualToString:@"nil"] && ![style containsString:@"none"] && ![style containsString:@"above"] && ![style containsString:@"below"];
 }
 
+// Tab views come before pinned tabs, so search each kind in one pass rather than collecting both into arrays.
+static NSView *DPFirstTabIn(NSView *root, Class tabClass, BOOL (^match)(NSView *tab)) {
+    if (!root || root.hidden) return nil;
+    if ([root isKindOfClass:tabClass] && match(root)) return root;
+    for (NSView *sub in root.subviews) {
+        NSView *found = DPFirstTabIn(sub, tabClass, match);
+        if (found) return found;
+    }
+    return nil;
+}
+
 NSView *DPFindTabIn(NSWindow *window, BOOL (^match)(NSView *tab)) {
-    const char *kinds[2] = {DPDiaTabView, DPDiaPinnedTab};
-    for (int i = 0; i < 2; i++)
-        for (NSView *tab in DPFindViews(kinds[i]))
-            if ((!window || tab.window == window) && !tab.isHiddenOrHasHiddenAncestor && match(tab)) return tab;
+    if (window && !window.isVisible) return nil;
+    Class kinds[2] = {DPClassNamed(DPDiaTabView), DPClassNamed(DPDiaPinnedTab)};
+    for (int k = 0; k < 2; k++) {
+        Class kind = kinds[k];
+        if (!kind) continue;
+        if (window) {
+            if (!window.contentView.hiddenOrHasHiddenAncestor) {
+                NSView *found = DPFirstTabIn(window.contentView, kind, match);
+                if (found) return found;
+            }
+            continue;
+        }
+        for (NSWindow *each in NSApp.windows) {
+            if (!each.isVisible || each.contentView.hiddenOrHasHiddenAncestor) continue;
+            NSView *found = DPFirstTabIn(each.contentView, kind, match);
+            if (found) return found;
+        }
+    }
     return nil;
 }
 

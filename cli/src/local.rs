@@ -292,23 +292,23 @@ const NO_DESKTOP: &str = "Couldn't write to ~/Desktop (Terminal may not have Des
 
 pub fn export(env: &Env, ui: &Ui, name: &str) -> Result<()> {
     let source = find(env, name)?;
-    let zip = format!(
-        "{}.zip",
-        source.file_stem().unwrap_or_default().to_string_lossy()
-    );
+    let stem = source.file_stem().unwrap_or_default().to_string_lossy();
+    // An earlier export of the same tweak is never overwritten.
     let desktop = env.home.join("Desktop");
-    let saved = match zip_to(&source, &desktop.join(&zip))? {
-        None => desktop.join(&zip),
+    let destination = first_free(&desktop, &stem, Some("zip"));
+    let saved = match zip_to(&source, &destination)? {
+        None => destination,
         Some(_) => {
             let here = std::env::current_dir().context(NO_DESKTOP)?;
-            if let Some(why) = zip_to(&source, &here.join(&zip))? {
+            let destination = first_free(&here, &stem, Some("zip"));
+            if let Some(why) = zip_to(&source, &destination)? {
                 bail!(
                     "{NO_DESKTOP}\nIt couldn't go in {} either: {why}",
                     here.display()
                 );
             }
             ui.warn(NO_DESKTOP);
-            here.join(&zip)
+            destination
         }
     };
     ui.success(format_args!("Exported {}.", saved.display()));
@@ -621,6 +621,20 @@ mod tests {
             .unwrap()
             .items()
             .is_empty());
+    }
+
+    #[test]
+    fn a_second_export_never_overwrites_the_first() {
+        let dir = tempfile::tempdir().unwrap();
+        let env = Env::at(dir.path());
+        write(&dir.path().join("local/My Tweak.m"), "// tweak\n");
+        fs::create_dir(dir.path().join("Desktop")).unwrap();
+
+        export(&env, &Ui::headless(true), "My Tweak").unwrap();
+        export(&env, &Ui::headless(true), "My Tweak").unwrap();
+
+        assert!(dir.path().join("Desktop/My Tweak.zip").exists());
+        assert!(dir.path().join("Desktop/My Tweak 2.zip").exists());
     }
 
     #[test]

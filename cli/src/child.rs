@@ -92,6 +92,7 @@ pub fn run(
         })?;
     let pid = child.id() as libc::pid_t;
     let mut stopping = false;
+    let mut stopped = false;
     let status = loop {
         if let Some(status) = child.try_wait()? {
             break status;
@@ -105,8 +106,10 @@ pub fn run(
                 spinner.set_message(message);
                 stopping = true;
             }
-            if stop {
+            // The step can take a minute: scan the process tree once, not every 50 ms.
+            if stop && !stopped {
                 stop_downloads(pid);
+                stopped = true;
             }
         }
         thread::sleep(Duration::from_millis(50));

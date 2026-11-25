@@ -185,7 +185,7 @@ static void DPPeekChip_prepareForReuse(NSView *self, SEL _cmd) {
 }
 
 static DPPeekCard *DPPeekChatCardFor(id webContents) {
-    if (!DPPeek.on || DPPeekFindingLink || !webContents) return nil;
+    if (!DPPeek.on || DPPeekFindingLink || !webContents || !DPPeekHasCards()) return nil;
     for (DPPeekCard *peek in DPPeekAllCards(nil)) {
         if (peek.closing || !peek.window || peek.isHiddenOrHasHiddenAncestor) continue;
         if (peek.source == webContents && peek.page && peek.page != webContents) return peek;
@@ -386,21 +386,38 @@ static id DPWeb_favicon(id self, SEL _cmd) {
     return DPCallOriginal(DPWeb_favicon, target);
 }
 
+// These sit on every JS, capture and title/url/favicon read in Dia, so they go in only once Peek is on.
+static void DPPeekEachWebHook(void (^visit)(SEL sel, IMP imp)) {
+    visit(@selector(executeJavascript:reason:completion:), (IMP)DPWeb_execReason);
+    visit(@selector(executeJavascript:completion:), (IMP)DPWeb_exec);
+    visit(@selector(selectedText), (IMP)DPWeb_selectedText);
+    visit(@selector(captureViewport:), (IMP)DPWeb_captureViewport);
+    visit(@selector(captureFullPage:), (IMP)DPWeb_captureFullPage);
+    visit(@selector(captureRegion:completion:), (IMP)DPWeb_captureRegion);
+    visit(@selector(contentsMimeType), (IMP)DPWeb_mimeType);
+    visit(@selector(pdfController), (IMP)DPWeb_pdfController);
+    visit(@selector(rootFrameAccessibilityTreeId), (IMP)DPWeb_a11yRoot);
+    visit(@selector(accessibilityTreeForTreeId:), (IMP)DPWeb_a11yTree);
+    visit(@selector(title), (IMP)DPWeb_title);
+    visit(@selector(url), (IMP)DPWeb_url);
+    visit(@selector(favicon), (IMP)DPWeb_favicon);
+}
+
+void DPPeekEnableChatContext(void) {
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ DPPeekEachWebHook(^(SEL sel, IMP imp) { DPHook(DPDiaWebContents, sel, imp); }); });
+}
+
+NSString *DPPeekChatContextProblem(void) {
+    Class cls = objc_getClass(DPDiaWebContents);
+    __block BOOL missing = NO;
+    DPPeekEachWebHook(^(SEL sel, IMP imp) { if (class_getInstanceMethod(cls, sel) && !DPIsHooked(cls, sel, imp)) missing = YES; });
+    return missing ? @"chat doesn't read the Peek page" : nil;
+}
+
 void DPPeekInstallChatContext(void) {
     DPHook(DPDiaAttachmentCell, @selector(layout), (IMP)DPPeekChip_layout);
     DPHook(DPDiaAttachmentCell, @selector(prepareForReuse), (IMP)DPPeekChip_prepareForReuse);
     DPHook(DPDiaPageContentExtraction, @selector(getExtractedContentForWebContents:completion:), (IMP)DPPageExtract_get);
-    DPHook(DPDiaWebContents, @selector(executeJavascript:reason:completion:), (IMP)DPWeb_execReason);
-    DPHook(DPDiaWebContents, @selector(executeJavascript:completion:), (IMP)DPWeb_exec);
-    DPHook(DPDiaWebContents, @selector(selectedText), (IMP)DPWeb_selectedText);
-    DPHook(DPDiaWebContents, @selector(captureViewport:), (IMP)DPWeb_captureViewport);
-    DPHook(DPDiaWebContents, @selector(captureFullPage:), (IMP)DPWeb_captureFullPage);
-    DPHook(DPDiaWebContents, @selector(captureRegion:completion:), (IMP)DPWeb_captureRegion);
-    DPHook(DPDiaWebContents, @selector(contentsMimeType), (IMP)DPWeb_mimeType);
-    DPHook(DPDiaWebContents, @selector(pdfController), (IMP)DPWeb_pdfController);
-    DPHook(DPDiaWebContents, @selector(rootFrameAccessibilityTreeId), (IMP)DPWeb_a11yRoot);
-    DPHook(DPDiaWebContents, @selector(accessibilityTreeForTreeId:), (IMP)DPWeb_a11yTree);
-    DPHook(DPDiaWebContents, @selector(title), (IMP)DPWeb_title);
-    DPHook(DPDiaWebContents, @selector(url), (IMP)DPWeb_url);
-    DPHook(DPDiaWebContents, @selector(favicon), (IMP)DPWeb_favicon);
+    if (DPPeek.on) DPPeekEnableChatContext();
 }

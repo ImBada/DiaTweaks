@@ -105,7 +105,7 @@ static NSString *DPUpdateSummary(DPUpdates *updates) {
 - (void)refresh {
     [self updatesDidChange];
     [self syncRows];
-    [DPUpdates.shared check:nil];
+    [DPUpdates.shared checkAutomatically:nil];
 }
 
 - (void)restore:(id)sender {

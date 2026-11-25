@@ -15,8 +15,10 @@ static const CGFloat DPZoneGap = 24, DPZoneReach = 20, DPZoneRoom = 90;
 @property (nonatomic) BOOL hovered;
 @end
 
-static NSPanel *DPZonePanel;
+static NSPanel *DPZonePanel, *DPZoneLeaving;
 static NSTimer *DPZoneRelease;
+static NSUInteger DPZoneTurn;
+NSTimeInterval DPPeekDragZoneFade = 0.35;
 
 static NSImage *DPZoneIcon(NSColor *color) {
     NSImageSymbolConfiguration *config = [[NSImageSymbolConfiguration configurationWithPointSize:16 weight:NSFontWeightSemibold]
@@ -168,10 +170,25 @@ void DPPeekHideDragZone(void) {
     [DPZoneRelease invalidate];
     DPZoneRelease = nil;
     [(DPPeekZone *)panel.contentView appear:NO];
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    DPZoneLeaving = panel;
+    NSUInteger turn = ++DPZoneTurn;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(DPPeekDragZoneFade * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if (turn != DPZoneTurn) return;
+        DPZoneLeaving = nil;
         [panel.parentWindow removeChildWindow:panel];
         [panel orderOut:nil];
     });
+}
+
+// A drag begun while the last zone is still fading out takes that panel over instead of stacking a second one.
+static NSPanel *DPZoneReusable(NSWindow *window) {
+    NSPanel *panel = DPZoneLeaving;
+    DPZoneLeaving = nil;
+    DPZoneTurn++;
+    if (panel && panel.parentWindow == window) return panel;
+    [panel.parentWindow removeChildWindow:panel];
+    [panel orderOut:nil];
+    return nil;
 }
 
 static void DPShowZone(NSWindow *window, NSPoint pointer) {
@@ -180,19 +197,28 @@ static void DPShowZone(NSWindow *window, NSPoint pointer) {
     CGFloat above = pointer.y + DPZoneGap + DPZoneCard.height / 2, below = pointer.y - DPZoneGap - DPZoneCard.height / 2;
     CGFloat y = above + DPZoneCard.height / 2 < NSMaxY([window convertRectToScreen:window.contentLayoutRect]) ? above : below;
     NSSize size = NSMakeSize(DPZoneCard.width + 2 * DPZoneRoom, DPZoneCard.height + 2 * DPZoneRoom);
-    NSPanel *panel = [[NSPanel alloc] initWithContentRect:NSMakeRect(pointer.x - size.width / 2, y - size.height / 2, size.width, size.height)
-                                                styleMask:NSWindowStyleMaskBorderless | NSWindowStyleMaskNonactivatingPanel
-                                                  backing:NSBackingStoreBuffered
-                                                    defer:NO];
-    panel.opaque = NO;
-    panel.backgroundColor = NSColor.clearColor;
-    panel.hasShadow = NO;
-    panel.releasedWhenClosed = NO;
-    panel.appearance = window.effectiveAppearance;
-    DPPeekZone *zone = [[DPPeekZone alloc] initWithFrame:(NSRect){NSZeroPoint, size} appearance:window.effectiveAppearance];
+    NSRect frame = NSMakeRect(pointer.x - size.width / 2, y - size.height / 2, size.width, size.height);
+    NSPanel *panel = DPZoneReusable(window);
+    DPPeekZone *zone = (DPPeekZone *)panel.contentView;
+    if (panel) {
+        [panel setFrame:frame display:NO];
+        [zone setHovered:NO];
+        [zone pull:CGPointZero];
+    } else {
+        panel = [[NSPanel alloc] initWithContentRect:frame
+                                           styleMask:NSWindowStyleMaskBorderless | NSWindowStyleMaskNonactivatingPanel
+                                             backing:NSBackingStoreBuffered
+                                               defer:NO];
+        panel.opaque = NO;
+        panel.backgroundColor = NSColor.clearColor;
+        panel.hasShadow = NO;
+        panel.releasedWhenClosed = NO;
+        panel.appearance = window.effectiveAppearance;
+        zone = [[DPPeekZone alloc] initWithFrame:(NSRect){NSZeroPoint, size} appearance:window.effectiveAppearance];
+        panel.contentView = zone;
+        [window addChildWindow:panel ordered:NSWindowAbove];
+    }
     zone.link = pointer;
-    panel.contentView = zone;
-    [window addChildWindow:panel ordered:NSWindowAbove];
     [zone appear:YES];
     DPZonePanel = panel;
     // A drop elsewhere ends the session only after the drag image slides home, so hide on release.

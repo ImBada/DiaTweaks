@@ -6,6 +6,7 @@ NSColor *DPColorFromHex(NSString *hex, NSString **canonical);
 NSColor *DPColorFromSixDigitHex(NSString *hex, NSString **canonical);
 NSString *DPHexFromColor(NSColor *color);
 NSArray *DPProfileGradientColors(NSColor *base, BOOL dark, double intensity);
+NSArray *DPProfileGradientColorsForHex(NSString *hex, BOOL dark, double intensity);
 
 NSString *DPNormalizedSpaceID(id value);
 NSString *DPSavedProfileHexForSpace(NSString *spaceID);

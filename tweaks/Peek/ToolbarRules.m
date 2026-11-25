@@ -92,19 +92,31 @@ static BOOL DPPeekCanReveal(DPPeekBarZone *zone) { return DPHideToolbar.on && DP
     if (_patches) [NSNotificationCenter.defaultCenter removeObserver:_patches];
 }
 
-// With Hide Toolbar off the bar is always pinned, so there is nothing to poll until a setting changes.
+// With Hide Toolbar off or the card parked, there is nothing to poll until a setting or tab changes.
 - (void)watchIfNeeded {
-    BOOL wanted = self.window && DPHideToolbar.on;
+    BOOL wanted = self.window && !self.peek.isHiddenOrHasHiddenAncestor && DPHideToolbar.on;
     if (wanted == (self.watch != nil)) return;
     [self.watch invalidate];
     self.watch = nil;
     if (!wanted) return;
     __weak DPPeekBarZone *weak = self;
-    self.watch = [NSTimer scheduledTimerWithTimeInterval:0.1 repeats:YES block:^(NSTimer *timer) {
+    self.watch = [NSTimer scheduledTimerWithTimeInterval:0.25 repeats:YES block:^(NSTimer *timer) {
         DPPeekBarZone *zone = weak;
         if (!zone) return [timer invalidate];
         [zone check];
     }];
+    self.watch.tolerance = 0.05;
+}
+
+- (void)viewDidHide {
+    [super viewDidHide];
+    [self watchIfNeeded];
+}
+
+- (void)viewDidUnhide {
+    [super viewDidUnhide];
+    [self watchIfNeeded];
+    if (self.window) [self check];
 }
 
 - (void)viewDidMoveToWindow {

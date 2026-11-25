@@ -2,6 +2,7 @@
 
 static char DPLineFrameKey;
 static const CGFloat DPCloseAllGap = 4;
+static Class DPHookedCloseAll;
 
 static CALayer *DPSeparatorLine(NSView *separator) {
     for (CALayer *layer in separator.layer.sublayers)
@@ -36,42 +37,113 @@ static void DPCloseAll_setHidden(NSView *self, SEL _cmd, BOOL hidden) {
     if (![self isKindOfClass:DPTidyBrush.class] && DPIsKind(self.superview, DPDiaTabListSeparator)) DPPlaceSeparatorBrush(self.superview);
 }
 
+typedef struct { NSRect frame; char kind; } DPTidyRow;
+enum { DPTidyRowNoCell, DPTidyRowTab, DPTidyRowOther };
+
+static NSInteger DPTidyLooseRows(const DPTidyRow *rows, NSUInteger count, NSInteger limit) {
+    NSMutableData *scratch = [NSMutableData dataWithLength:(count + 1) * (sizeof(double) + sizeof(NSInteger) + sizeof(NSUInteger))];
+    double *heights = scratch.mutableBytes;
+    NSInteger *counts = (NSInteger *)(heights + count + 1);
+    NSUInteger *holders = (NSUInteger *)(counts + count + 1), distinct = 0, holderCount = 0;
+    CGFloat shortest = CGFLOAT_MAX;
+    for (NSUInteger i = 0; i < count; i++) {
+        shortest = MIN(shortest, NSHeight(rows[i].frame));
+        if (rows[i].kind != DPTidyRowTab) continue;
+        double height = round(NSHeight(rows[i].frame));
+        NSUInteger at = 0;
+        while (at < distinct && heights[at] != height) at++;
+        if (at == distinct) heights[distinct++] = height;
+        counts[at]++;
+    }
+    if (!distinct) return 0;
+    NSUInteger best = 0;
+    for (NSUInteger i = 1; i < distinct; i++) if (counts[i] > counts[best]) best = i;
+    // Only a row taller than the shortest one can hold another.
+    for (NSUInteger i = 0; i < count; i++) if (NSHeight(rows[i].frame) > shortest + 1) holders[holderCount++] = i;
+    NSInteger loose = 0;
+    for (NSUInteger i = 0; i < count && loose < limit; i++) {
+        NSRect frame = rows[i].frame;
+        if (rows[i].kind == DPTidyRowNoCell ? fabs(NSHeight(frame) - heights[best]) > 1 : rows[i].kind != DPTidyRowTab) continue;
+        NSPoint middle = NSMakePoint(NSMidX(frame), NSMidY(frame));
+        BOOL inside = NO;
+        for (NSUInteger h = 0; h < holderCount && !inside; h++) {
+            NSRect other = rows[holders[h]].frame;
+            inside = NSHeight(other) > NSHeight(frame) + 1 && NSPointInRect(middle, other);
+        }
+        loose += !inside;
+    }
+    return loose;
+}
+
+static BOOL DPRowHeldBy(NSRect frame, const DPTidyRow *rows, const NSUInteger *holders, NSUInteger holderCount) {
+    NSPoint middle = NSMakePoint(NSMidX(frame), NSMidY(frame));
+    for (NSUInteger h = 0; h < holderCount; h++) {
+        NSRect other = rows[holders[h]].frame;
+        if (NSHeight(other) > NSHeight(frame) + 1 && NSPointInRect(middle, other)) return YES;
+    }
+    return NO;
+}
+
+static NSInteger DPTidyConfirmedTabs(const NSRect *tabs, NSUInteger tabCount, const DPTidyRow *rows, const NSUInteger *holders,
+                                     NSUInteger holderCount, CGFloat nextMinY) {
+    NSInteger loose = 0;
+    for (NSUInteger i = 0; i < tabCount && loose < DPTidyMinimumTabs; i++)
+        if (NSMidY(tabs[i]) < nextMinY && !DPRowHeldBy(tabs[i], rows, holders, holderCount)) loose++;
+    return loose;
+}
+
+// Stops counting at DPTidyMinimumTabs, which is all either caller asks.
 NSInteger DPTidyTabsBelowLine(NSView *list) {
     NSCollectionView *collection = (NSCollectionView *)DPTidyListScroll(list).documentView;
     if (![collection isKindOfClass:NSCollectionView.class]) return 0;
     NSView *separator = DPTidySeparatorIn(list);
     CGFloat line = separator ? NSMaxY([collection convertRect:separator.bounds fromView:separator]) - 0.5 : -CGFLOAT_MAX;
-    NSMutableArray<NSValue *> *frames = [NSMutableArray array];
-    NSMutableArray<NSNumber *> *isTab = [NSMutableArray array];
-    NSCountedSet<NSNumber *> *heights = [NSCountedSet set];
-    for (NSInteger section = 0; section < collection.numberOfSections; section++)
-        for (NSInteger item = 0; item < [collection numberOfItemsInSection:section]; item++) {
+    NSCollectionViewLayout *layout = collection.collectionViewLayout;
+    NSInteger sections = collection.numberOfSections;
+    NSMutableData *storage = [NSMutableData data], *holderData = [NSMutableData data];
+    NSUInteger count = 0, holderCount = 0, candidateCount = 0;
+    NSRect candidates[32];
+    BOOL monotonic = YES;
+    CGFloat lastMinY = -CGFLOAT_MAX, minSeenHeight = CGFLOAT_MAX;
+    for (NSInteger section = 0; section < sections; section++) {
+        NSInteger items = [collection numberOfItemsInSection:section];
+        if (items <= 0) continue;
+        [storage setLength:(count + (NSUInteger)items) * sizeof(DPTidyRow)];
+        [holderData setLength:(holderCount + (NSUInteger)items) * sizeof(NSUInteger)];
+        DPTidyRow *rows = storage.mutableBytes;
+        NSUInteger *holders = holderData.mutableBytes;
+        for (NSInteger item = 0; item < items; item++) {
             NSIndexPath *path = [NSIndexPath indexPathForItem:item inSection:section];
-            NSCollectionViewLayoutAttributes *attrs = [collection.collectionViewLayout layoutAttributesForItemAtIndexPath:path];
+            NSCollectionViewLayoutAttributes *attrs = [layout layoutAttributesForItemAtIndexPath:path];
             NSRect frame = attrs.frame;
             // Folded pinned tabs move below the line hidden/fading.
             if (attrs.hidden || attrs.alpha < 1 || NSMinY(frame) < line || NSHeight(frame) <= 0) continue;
+            if (NSMinY(frame) < lastMinY) monotonic = NO;
+            else lastMinY = NSMinY(frame);
+            if (monotonic && candidateCount >= (NSUInteger)DPTidyMinimumTabs
+                && DPTidyConfirmedTabs(candidates, candidateCount, rows, holders, holderCount, NSMinY(frame)) >= DPTidyMinimumTabs)
+                return DPTidyMinimumTabs;
             NSView *cell = [collection itemAtIndexPath:path].view;
-            BOOL tab = cell && strstr(object_getClassName(cell), "TabUI7TabView");
             // Exclude the trailing New Tab row when off screen.
-            if (!cell && section == collection.numberOfSections - 1 && item == [collection numberOfItemsInSection:section] - 1) continue;
-            [frames addObject:[NSValue valueWithRect:frame]];
-            [isTab addObject:cell ? @(tab) : (id)NSNull.null];
-            if (tab) [heights addObject:@(round(NSHeight(frame)))];
+            if (!cell && section == sections - 1 && item == items - 1) continue;
+            char kind = !cell ? DPTidyRowNoCell : strstr(object_getClassName(cell), "TabUI7TabView") ? DPTidyRowTab : DPTidyRowOther;
+            if (NSHeight(frame) < minSeenHeight) {
+                CGFloat oldMin = minSeenHeight;
+                minSeenHeight = NSHeight(frame);
+                for (NSUInteger prev = 0; prev < count; prev++)
+                    if (NSHeight(rows[prev].frame) <= oldMin + 1 && NSHeight(rows[prev].frame) > minSeenHeight + 1) holders[holderCount++] = prev;
+            }
+            if (NSHeight(frame) > minSeenHeight + 1) holders[holderCount++] = count;
+            rows[count++] = (DPTidyRow){frame, kind};
+            if (kind == DPTidyRowTab && candidateCount < sizeof(candidates) / sizeof(*candidates)
+                && !DPRowHeldBy(frame, rows, holders, holderCount))
+                candidates[candidateCount++] = frame;
         }
-    NSNumber *height = nil;
-    for (NSNumber *each in heights) if (!height || [heights countForObject:each] > [heights countForObject:height]) height = each;
-    if (!height) return 0;
-    NSInteger loose = 0;
-    for (NSUInteger i = 0; i < frames.count; i++) {
-        NSRect frame = frames[i].rectValue;
-        if (isTab[i] == (id)NSNull.null ? fabs(NSHeight(frame) - height.doubleValue) > 1 : !isTab[i].boolValue) continue;
-        BOOL inside = NO;
-        for (NSValue *other in frames)
-            inside |= NSHeight(other.rectValue) > NSHeight(frame) + 1 && NSPointInRect(NSMakePoint(NSMidX(frame), NSMidY(frame)), other.rectValue);
-        loose += !inside;
     }
-    return loose;
+    if (monotonic && candidateCount >= (NSUInteger)DPTidyMinimumTabs
+        && DPTidyConfirmedTabs(candidates, candidateCount, storage.bytes, holderData.bytes, holderCount, CGFLOAT_MAX) >= DPTidyMinimumTabs)
+        return DPTidyMinimumTabs;
+    return DPTidyLooseRows(storage.bytes, count, DPTidyMinimumTabs);
 }
 
 static NSView *DPListOf(NSView *view) {
@@ -83,7 +155,10 @@ void DPPlaceSeparatorBrush(NSView *separator) {
     DPTidyBrush *existing = DPBrushIn(separator, NO);
     if (!DPTidyTabs.on && !existing) return;
     NSView *closeAll = DPCloseAll(separator);
-    if (DPTidyTabs.on && closeAll) DPHookClass(object_getClass(closeAll), @selector(setHidden:), (IMP)DPCloseAll_setHidden);
+    if (DPTidyTabs.on && closeAll && object_getClass(closeAll) != DPHookedCloseAll) {
+        DPHookedCloseAll = object_getClass(closeAll);
+        DPHookClass(DPHookedCloseAll, @selector(setHidden:), (IMP)DPCloseAll_setHidden);
+    }
     BOOL shown = DPTidyTabs.on && closeAll && !closeAll.hidden && (DPTidyIsBusy() || DPTidyTabsBelowLine(DPListOf(separator)) >= DPTidyMinimumTabs);
     DPTidyBrush *brush = existing ?: DPBrushIn(separator, shown);
     CALayer *line = DPSeparatorLine(separator);
@@ -91,7 +166,7 @@ void DPPlaceSeparatorBrush(NSView *separator) {
     CGFloat right = closeAll ? NSMinX(closeAll.frame) - DPCloseAllGap : NSMaxX(separator.bounds) - 7;
     if (DPTidyTabs.on) {
         NSRect target = NSMakeRect(right - DPTidyBrushSize, round(NSMidY(separator.bounds) - DPTidyBrushSize / 2), DPTidyBrushSize, DPTidyBrushSize);
-        if (!NSEqualRects(brush.frame, target)) brush.frame = target;
+        if (brush && !NSEqualRects(brush.frame, target) && DPMayAdjust(brush)) brush.frame = target;
         if (brush.hidden != !shown) brush.hidden = !shown;
     } else {
         [brush removeFromSuperview];
@@ -99,15 +174,14 @@ void DPPlaceSeparatorBrush(NSView *separator) {
     if (!line) return;
     NSRect dia = [DPDiaValue(line, &DPLineFrameKey, [NSValue valueWithRect:line.frame]) rectValue], frame = dia;
     CGFloat trimmed = MIN(NSWidth(dia), MAX(0, right - DPTidyBrushSize - DPTidyLineGap - NSMinX(dia)));
-    if (shown) {
-        frame.size.width = trimmed;
-        DPOverride(line, &DPLineFrameKey, [NSValue valueWithRect:dia], [NSValue valueWithRect:frame]);
-    } else if (DPGet(line, &DPLineFrameKey)) {
-        DPSet(line, &DPLineFrameKey, nil);
-    }
-    if (!NSEqualRects(line.frame, frame)) {
+    if (shown) frame.size.width = trimmed;
+    BOOL adjusted = NSEqualRects(line.frame, frame);
+    if (!adjusted && DPMayAdjust(separator)) {
         DPWithoutAnimation(^{ line.frame = frame; });
+        adjusted = YES;
     }
+    if (shown && adjusted) DPOverride(line, &DPLineFrameKey, [NSValue valueWithRect:dia], [NSValue valueWithRect:frame]);
+    else if (DPGet(line, &DPLineFrameKey)) DPSet(line, &DPLineFrameKey, nil);
     DPTidyWave(separator.layer, line, line.backgroundColor, DPTidyTabs.on && DPTidyIsBusy());
 }
 

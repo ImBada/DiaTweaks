@@ -249,13 +249,17 @@ fn add_requirements(
     current: &[bool],
     wanted: &mut [bool],
 ) -> Result<()> {
+    // A tweak this command turns off stays off, even when another one it turns on needs it.
+    let turned_off: Vec<bool> = (0..wanted.len())
+        .map(|index| current[index] && !wanted[index])
+        .collect();
     for index in 0..wanted.len() {
         if !wanted[index] || current[index] {
             continue;
         }
         let mut needer = index;
         while let Some(required) = manifest.requirement(needer) {
-            if wanted[required] {
+            if wanted[required] || turned_off[required] {
                 break;
             }
             let question = format!(
@@ -383,6 +387,36 @@ mod tests {
         let mut wanted = [false, false, true];
         add_requirements(&Ui::headless(false), &manifest, &current, &mut wanted).unwrap();
         assert_eq!(wanted, [false, false, true]);
+    }
+
+    #[test]
+    fn requirements_never_turn_back_on_a_tweak_the_same_command_turned_off() {
+        let manifest = load_json(
+            r#"{
+                "version": 1,
+                "patches": [
+                    {"key": "hideToolbar", "title": "Hide Toolbar", "detail": "H", "defaultOn": false, "requires": null, "disabledBy": null},
+                    {"key": "showAddressField", "title": "Show Address Field", "detail": "S", "defaultOn": false, "requires": "hideToolbar", "disabledBy": null}
+                ]
+            }"#,
+        )
+        .unwrap();
+        let current = [true, false];
+
+        // `diatweaks toggle hideToolbar showAddressField`: the requirement must not come back on.
+        let mut wanted = [false, true];
+        add_requirements(&Ui::headless(true), &manifest, &current, &mut wanted).unwrap();
+        assert_eq!(wanted, [false, true]);
+        assert_eq!(
+            notes(&manifest, &current, &wanted),
+            vec!["Show Address Field does nothing while Hide Toolbar is off."]
+        );
+
+        // A requirement that was already off and isn't being turned off is still offered.
+        let current = [false, false];
+        let mut wanted = [false, true];
+        add_requirements(&Ui::headless(true), &manifest, &current, &mut wanted).unwrap();
+        assert_eq!(wanted, [true, true]);
     }
 
     #[test]

@@ -1,6 +1,7 @@
 #import "Peek.h"
 
 static void DPApplyPeekPinnedLinks(DPPatch *patch) {}
+static NSString *DPVerifyPeekPinnedLinks(DPPatch *patch) { return DPPeekPinnedLinksProblem(); }
 
 DP_PATCH(DPPeekPinnedLinks) {
     .key = @"peekPinnedLinks",
@@ -12,4 +13,5 @@ DP_PATCH(DPPeekPinnedLinks) {
     .requires = @"peek",
     .defaultOn = YES,
     .apply = DPApplyPeekPinnedLinks,
+    .verify = DPVerifyPeekPinnedLinks,
 };

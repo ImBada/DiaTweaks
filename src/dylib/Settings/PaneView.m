@@ -14,6 +14,7 @@ NSToolbarItemIdentifier const DPSearchItemIdentifier = @"DiaPatchesSearch";
 @implementation DPPaneView {
     NSScrollView *_contentScroll;
     NSMutableArray<DPPaneEntry *> *_stack;
+    BOOL _dirty;
 }
 
 - (instancetype)initWithTitle:(NSString *)title content:(NSView<DPPaneContent> *)content {
@@ -126,6 +127,32 @@ NSToolbarItemIdentifier const DPSearchItemIdentifier = @"DiaPatchesSearch";
 }
 
 - (void)patchesDidChange:(NSNotification *)notification {
+    // Both panes hear every change, so the one the user can't see only remembers that it is out of date.
+    if (self.hiddenOrHasHiddenAncestor) {
+        _dirty = YES;
+        return;
+    }
+    [self sync];
+}
+
+- (void)setHidden:(BOOL)hidden {
+    BOOL wasHidden = self.hidden;
+    [super setHidden:hidden];
+    // A hidden pane defers its rebuilds, so it catches up the moment it is shown again.
+    if (wasHidden && !self.hiddenOrHasHiddenAncestor) [self syncIfNeeded];
+}
+
+- (void)viewDidUnhide {
+    [super viewDidUnhide];
+    if (!self.hiddenOrHasHiddenAncestor) [self syncIfNeeded];
+}
+
+- (void)syncIfNeeded {
+    if (_dirty) [self sync];
+}
+
+- (void)sync {
+    _dirty = NO;
     [NSAnimationContext runAnimationGroup:^(NSAnimationContext *context) {
         context.allowsImplicitAnimation = YES;
         [self search];

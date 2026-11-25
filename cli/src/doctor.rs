@@ -1,7 +1,9 @@
 use std::{
     fmt::Display,
     fs::{self, File, OpenOptions},
+    io,
     os::fd::AsRawFd,
+    path::Path,
 };
 
 use anyhow::{bail, Result};
@@ -142,10 +144,19 @@ fn check_staged(env: &Env, report: &mut Report) {
         return report
             .problem("A DiaTweaks update stopped partway. Run `diatweaks update` to finish it.");
     }
-    let Some(_idle) = diapatch_idle(env) else {
-        return report.note(
+    let log = env.support.join("diapatch.log");
+    let _idle = match diapatch_idle(&log) {
+        DiapatchLock::Idle(idle) => idle,
+        DiapatchLock::Busy => return report.note(
             "A DiaTweaks update is running right now. Run `diatweaks doctor` again once it's done.",
-        );
+        ),
+        DiapatchLock::Unavailable(err) => {
+            return report.problem(format_args!(
+                "Couldn't tidy up {} because {} can't be opened: {err}",
+                tweaks.display(),
+                log.display()
+            ))
+        }
     };
     match fs::remove_dir_all(&tweaks) {
         Ok(()) => report.fine("Cleaned up what a finished DiaTweaks update left behind."),
@@ -156,14 +167,29 @@ fn check_staged(env: &Env, report: &mut Report) {
     }
 }
 
-// diapatch holds an exclusive flock on its log for the whole run.
-fn diapatch_idle(env: &Env) -> Option<File> {
-    let log = OpenOptions::new()
-        .append(true)
-        .create(true)
-        .open(env.support.join("diapatch.log"))
-        .ok()?;
-    (unsafe { libc::flock(log.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0).then_some(log)
+// diapatch holds an exclusive flock on its log for the whole run, so holding that lock means no run is underway.
+enum DiapatchLock {
+    // None: there's no log yet, so no run has ever started. A read-only check must not create one.
+    Idle(Option<File>),
+    Busy,
+    Unavailable(io::Error),
+}
+
+fn diapatch_idle(log: &Path) -> DiapatchLock {
+    let log = match OpenOptions::new().append(true).open(log) {
+        Ok(log) => log,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return DiapatchLock::Idle(None),
+        Err(err) => return DiapatchLock::Unavailable(err),
+    };
+    if unsafe { libc::flock(log.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
+        return DiapatchLock::Idle(Some(log));
+    }
+    let err = io::Error::last_os_error();
+    if err.kind() == io::ErrorKind::WouldBlock {
+        DiapatchLock::Busy
+    } else {
+        DiapatchLock::Unavailable(err)
+    }
 }
 
 fn check_state(env: &Env, report: &Report) {
@@ -204,13 +230,49 @@ mod tests {
         report.problems.clear();
         fs::remove_dir(env.staged()).unwrap();
         fs::remove_file(tweaks.join("release.plist")).unwrap();
-        let busy = diapatch_idle(&env).unwrap();
+        // A live exclusive flock on the log means an update is running, so the leftovers stay for now.
+        let log = dir.path().join("diapatch.log");
+        fs::write(&log, "").unwrap();
+        let busy = OpenOptions::new().append(true).open(&log).unwrap();
+        assert_eq!(
+            unsafe { libc::flock(busy.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) },
+            0
+        );
         check_staged(&env, &mut report);
         assert!(tweaks.exists());
         drop(busy);
         check_staged(&env, &mut report);
         assert!(!tweaks.exists());
         assert!(report.problems.is_empty());
+    }
+
+    #[test]
+    fn an_unreadable_log_is_a_permission_problem_not_a_running_update() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let env = Env::at(dir.path());
+        let ui = Ui::headless(false);
+        let mut report = Report {
+            ui: &ui,
+            problems: Vec::new(),
+        };
+        let tweaks = dir.path().join("staged/DiaTweaks");
+        fs::create_dir_all(&tweaks).unwrap();
+        fs::write(tweaks.join(".applying"), "").unwrap();
+        let log = dir.path().join("diapatch.log");
+        fs::write(&log, "").unwrap();
+        fs::set_permissions(&log, fs::Permissions::from_mode(0o000)).unwrap();
+
+        check_staged(&env, &mut report);
+        fs::set_permissions(&log, fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(
+            tweaks.exists(),
+            "leftovers stay while the log can't be read"
+        );
+        assert_eq!(report.problems.len(), 1, "{:?}", report.problems);
+        assert!(report.problems[0].contains("can't be opened"));
+        assert!(report.problems[0].contains("diapatch.log"));
     }
 
     #[test]

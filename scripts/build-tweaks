@@ -69,6 +69,34 @@ def mirror(source, target, names=None):
         mirror(os.path.join(source, name), os.path.join(target, name))
 
 
+def read_state(path):
+    try:
+        with open(path) as handle:
+            return {item["id"]: item for item in json.load(handle)["items"]}
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
+def built(found):
+    """The records the last build left behind, if nothing has changed since."""
+    state = os.path.join(HOME, "local-state.json")
+    try:
+        made = os.stat(state).st_mtime_ns
+    except FileNotFoundError:
+        return None
+    inputs = [TWEAKS, os.path.abspath(__file__)] + [os.path.join(BUILD, binary) for binary in ("diapatch", "DiaPatches.dylib")]
+    for files in found.values():
+        for file in files:
+            path = os.path.join(TWEAKS, file)
+            inputs += [path, os.path.dirname(path)]
+    for path in inputs:
+        info = stamp(path)
+        if not info or info[0] > made:
+            return None
+    saved = read_state(state)
+    return saved if saved and all(name in saved for name in found) else None
+
+
 def build(found):
     for binary in ("DiaPatches.dylib", "diapatch"):
         if not os.path.exists(os.path.join(BUILD, binary)):
@@ -81,14 +109,10 @@ def build(found):
         capture_output=True,
         text=True,
     )
-    try:
-        with open(os.path.join(HOME, "local-state.json")) as handle:
-            records = {item["id"]: item for item in json.load(handle)["items"]}
-    except (OSError, ValueError, KeyError):
-        records = {}
+    saved = read_state(os.path.join(HOME, "local-state.json")) or {}
     problems = []
     for name in found:
-        record = records.get(name)
+        record = saved.get(name)
         if not record:
             problems.append(f"{name} did not build")
         elif record.get("status") not in ("ready", "loaded") or record.get("error"):
@@ -96,7 +120,7 @@ def build(found):
     if result.returncode != 0 or problems:
         print(result.stdout + result.stderr, end="", file=sys.stderr)
         sys.exit("\n".join(problems) or "diapatch local build failed")
-    return records
+    return saved
 
 
 def index(found, records):
@@ -114,7 +138,8 @@ def main():
     if sys.argv[1:] and not check:
         sys.exit("usage: scripts/build-tweaks [--check]")
     found = scan() if os.path.isdir(TWEAKS) else {}
-    text = index(found, build(found) if found else {})
+    saved = (built(found) if check and found else None) or (build(found) if found else {})
+    text = index(found, saved)
     path = os.path.join(TWEAKS, "index.json")
     current = open(path, encoding="utf-8").read() if os.path.exists(path) else None
     if current == text:
@@ -122,8 +147,10 @@ def main():
     if check:
         sys.exit("tweaks/index.json is out of date: run make")
     os.makedirs(TWEAKS, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as handle:
+    # index.json is committed, so an interrupted write must not leave a truncated one behind.
+    with open(path + ".tmp", "w", encoding="utf-8") as handle:
         handle.write(text)
+    os.replace(path + ".tmp", path)
 
 
 main()

@@ -21,7 +21,7 @@ extern id DPMakePureSwiftSelection(NSString *primary, NSArray<NSString *> *all);
 extern id DPMakePureSwiftIDBox(NSString *raw);
 
 NSNotificationName const DPPatchesDidChangeNotification = @"DPPatchesDidChange";
-DPPatch DPLittleDia, DPLittleDiaTabLinks, DPPeekPinnedLinks;
+DPPatch DPLittleDia, DPLittleDiaTabLinks;
 DPPatch DPHideToolbar, DPRevealToolbarOnHover, DPShowLoadingProgress;
 DPPatch *const *DPPatches;
 NSUInteger DPPatchCount;
@@ -46,6 +46,7 @@ void DPPeekWarm(NSWindow *window, id source, NSURL *url) {}
 void DPPeekCool(void) {}
 void DPPeekCloseAll(void) {}
 NSArray<DPPeekCard *> *DPPeekAllCards(NSWindow *window) { return @[]; }
+BOOL DPPeekHasCards(void) { return NO; }
 void DPPeekInstallPages(void) {}
 void DPPeekInstallSelection(void) {}
 void DPPeekInstallZoom(void) {}
@@ -63,6 +64,10 @@ NSButton *DPMakeBarButton(NSString *symbol, NSString *label, NSString *key, void
 NSView *DPMakeDivider(void) { return [NSView new]; }
 void DPMatchPage(NSView *row, id page) {}
 NSView *DPPeekGlowFor(id page) { return [NSView new]; }
+
+static NSPasteboard *gCopyBoard;
+NSPasteboard *DPPeekPasteboard(void) { return gCopyBoard ?: [NSPasteboard pasteboardWithUniqueName]; }
+NSTimeInterval DPPeekLookAheadDelay(void) { return 0.01; }
 
 @implementation DPFillView
 @end
@@ -117,7 +122,7 @@ NSView *DPPeekGlowFor(id page) { return [NSView new]; }
 @end
 
 @interface DPKVOObservedPage : NSObject
-@property (nonatomic, copy) NSString *selectedText;
+@property (nonatomic, copy) NSString *selectedText, *title;
 @property (nonatomic) BOOL isLoading;
 @property (nonatomic, strong) NSURL *url;
 @end
@@ -218,6 +223,44 @@ int main(void) {
         DPPeekNavigate(opaquePage, DPPeekForward);
         DPPeekNavigate(opaquePage, DPPeekReload);
         CHECK(addr != nil, "Peek Address & Navigate survive page lacking KVC keys/selectors");
+
+        NSInteger generalChanges = NSPasteboard.generalPasteboard.changeCount;
+        gCopyBoard = [NSPasteboard pasteboardWithUniqueName];
+        NSMenu *copyMenu = [[NSMenu alloc] initWithTitle:@"Edit"];
+        NSMenuItem *copyURL = [[NSMenuItem alloc] initWithTitle:@"Copy URL" action:nil keyEquivalent:@"c"];
+        copyURL.keyEquivalentModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagShift;
+        NSMenuItem *copyMarkdown = [[NSMenuItem alloc] initWithTitle:@"Copy URL as Markdown" action:nil keyEquivalent:@"c"];
+        copyMarkdown.keyEquivalentModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagShift | NSEventModifierFlagOption;
+        [copyMenu addItem:copyURL];
+        [copyMenu addItem:copyMarkdown];
+        NSMenuItem *copyRoot = [[NSMenuItem alloc] initWithTitle:@"Edit" action:nil keyEquivalent:@""];
+        copyRoot.submenu = copyMenu;
+        NSMenu *copyMain = [NSMenu new];
+        [copyMain addItem:copyRoot];
+        NSMenu *savedMain = NSApp.mainMenu;
+        NSApp.mainMenu = copyMain;
+        DPKVOObservedPage *copyPage = [DPKVOObservedPage new];
+        copyPage.url = [NSURL URLWithString:@"https://copy.example/path"];
+        copyPage.title = @"Copy Example";
+        DPPeekCard *copyCard = [[DPPeekCard alloc] initWithFrame:NSMakeRect(0, 0, 200, 200)];
+        copyCard.page = (id<DPPeekPage>)copyPage;
+        NSEventModifierFlags copyMods = NSEventModifierFlagCommand | NSEventModifierFlagShift;
+        NSEvent *copyEvent = [NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:copyMods timestamp:0 windowNumber:0
+                                               context:nil characters:@"c" charactersIgnoringModifiers:@"c" isARepeat:NO keyCode:8];
+        CHECK(DPPeekCopyURL(copyCard, copyEvent) && [[gCopyBoard stringForType:NSPasteboardTypeString] isEqualToString:@"https://copy.example/path"],
+              "Copy URL writes the page URL to the pasteboard DPPeekPasteboard hands back");
+        NSEvent *markdownEvent = [NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:copyMods | NSEventModifierFlagOption
+                                                 timestamp:0 windowNumber:0 context:nil characters:@"c" charactersIgnoringModifiers:@"c"
+                                                 isARepeat:NO keyCode:8];
+        CHECK(DPPeekCopyURL(copyCard, markdownEvent) && [[gCopyBoard stringForType:NSPasteboardTypeString] isEqualToString:@"[Copy Example](https://copy.example/path)"],
+              "Copy URL as Markdown writes the title link to the scratch pasteboard");
+        CHECK(NSPasteboard.generalPasteboard.changeCount == generalChanges, "Peek's Copy URL tests never touch the operator's general pasteboard");
+        [gCopyBoard releaseGlobally];
+        gCopyBoard = nil;
+        NSApp.mainMenu = savedMain;
+        CHECK(fabs(DPPeekLookAheadDelay() - 0.01) < 1e-6, "Peek delay accessor honors test override");
+        CHECK(DPPeekPinnedLinks.verify && DPPeekPinnedLinks.verify(&DPPeekPinnedLinks) != nil,
+              "DPPeekPinnedLinks.verify catches a missing navigation-policy hook");
 
         __weak NSView *weakZone = nil;
         @autoreleasepool {

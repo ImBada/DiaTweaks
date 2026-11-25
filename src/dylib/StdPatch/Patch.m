@@ -15,8 +15,29 @@ static NSMutableDictionary<NSString *, NSString *> *DPAppliedChoices;
 
 NSNotificationName const DPPatchesDidChangeNotification = @"DPPatchesDidChange";
 
+// Settings asks this once per row and per requirement hop, so index it; a table a test sets by hand falls back to the scan.
+static NSDictionary<NSString *, NSValue *> *DPNamedIndex;
+static DPPatch *const *DPNamedSource;
+static NSUInteger DPNamedCount;
+
+static void DPIndexPatches(void) {
+    if (!DPPatchCount) {
+        DPNamedIndex = nil;
+        DPNamedSource = NULL;
+        DPNamedCount = 0;
+        return;
+    }
+    NSMutableDictionary<NSString *, NSValue *> *index = [NSMutableDictionary dictionaryWithCapacity:DPPatchCount];
+    for (NSUInteger i = 0; i < DPPatchCount; i++)
+        if (!index[DPPatches[i]->key]) index[DPPatches[i]->key] = [NSValue valueWithPointer:DPPatches[i]];
+    DPNamedIndex = index;
+    DPNamedSource = DPPatches;
+    DPNamedCount = DPPatchCount;
+}
+
 DPPatch *DPPatchNamed(NSString *key) {
     if (!key) return NULL;
+    if (DPNamedSource == DPPatches && DPNamedCount == DPPatchCount) return [DPNamedIndex[key] pointerValue];
     for (NSUInteger i = 0; i < DPPatchCount; i++) if ([DPPatches[i]->key isEqualToString:key]) return DPPatches[i];
     return NULL;
 }
@@ -47,16 +68,29 @@ static void DPAnimate(void) {
         CGFloat eased = done ? 1 : 1 - (1 + omega * elapsed) * exp(-omega * elapsed);
         for (NSUInteger i = 0; i < DPPatchCount; i++) DPPatches[i]->progress = from[i] + (DPPatches[i]->on - from[i]) * eased;
         // Tweaks share relayouts, so run each one once, and only while one of the tweaks using it is still easing.
+        static uintptr_t *seen;
+        static NSUInteger seenCap;
+        if (seenCap < DPPatchCount * 2) {
+            seenCap = 64;
+            while (seenCap < DPPatchCount * 2) seenCap *= 2;
+            seen = realloc(seen, seenCap * sizeof *seen);
+        }
+        BOOL cleared = NO;
+        NSUInteger mask = seenCap - 1;
         for (NSUInteger i = 0; i < DPPatchCount; i++) {
-            void (*relayout)(void) = DPPatches[i]->relayout;
-            if (!relayout) continue;
-            BOOL moving = NO, ran = NO;
-            for (NSUInteger j = 0; j < DPPatchCount; j++) {
-                if (DPPatches[j]->relayout != relayout) continue;
-                if (j < i) ran = YES;
-                if (from[j] != DPPatches[j]->on || DPPatches[j]->progress != DPPatches[j]->on) moving = YES;
+            DPPatch *patch = DPPatches[i];
+            void (*relayout)(void) = patch->relayout;
+            if (!relayout || (from[i] == patch->on && patch->progress == patch->on)) continue;
+            if (!cleared) {
+                memset(seen, 0, seenCap * sizeof *seen);
+                cleared = YES;
             }
-            if (moving && !ran) relayout();
+            uintptr_t key = (uintptr_t)relayout;
+            NSUInteger slot = ((key >> 2) * 2654435761u) & mask;
+            while (seen[slot] && seen[slot] != key) slot = (slot + 1) & mask;
+            if (seen[slot]) continue;
+            seen[slot] = key;
+            relayout();
         }
         if (done) {
             [t invalidate];
@@ -159,7 +193,7 @@ static void DPRecordChoice(DPPatch *patch) {
 }
 
 void DPSetChoice(DPPatch *patch, NSString *value) {
-    if (!patch || !patch->choice) return;
+    if (!patch || !patch->choice || ![value isKindOfClass:NSString.class]) return;
     [DPSettingsDefaults() setObject:value forKey:patch->choice];
     if (!DPSafeMode && !DPPausedAtLaunch && patch->on && patch->apply) {
         DPRecordChoice(patch);
@@ -187,6 +221,7 @@ static void DPReadPatches(BOOL includeLocal) {
     free((void *)DPPatches);
     DPPatches = sorted;
     DPPatchCount = total;
+    DPIndexPatches();
     if (local) DPLocalRepairLinks();
     // The section pass below overwrites `order`, so a reload first restores what each patch declared.
     if (!DPDeclaredOrders) DPDeclaredOrders = [NSMapTable strongToStrongObjectsMapTable];
@@ -329,6 +364,7 @@ BOOL DPWriteManifest(NSString *path) {
     for (NSUInteger i = 0; i < savedCount; i++) savedOrders[i] = saved[i]->order;
     DPPatches = NULL;
     DPPatchCount = 0;
+    DPIndexPatches();
     DPReadPatches(NO);
     NSMutableArray<NSDictionary *> *patches = [NSMutableArray arrayWithCapacity:DPPatchCount];
     for (NSUInteger i = 0; i < DPPatchCount; i++) {
@@ -360,5 +396,6 @@ BOOL DPWriteManifest(NSString *path) {
     DPPatchCount = savedCount;
     for (NSUInteger i = 0; i < savedCount; i++) saved[i]->order = savedOrders[i];
     free(savedOrders);
+    DPIndexPatches();
     return wrote;
 }

@@ -8,20 +8,26 @@ static NSArray *DPPinnedCmdClickList(id object, SEL sel) {
     return [list isKindOfClass:NSArray.class] ? list : @[];
 }
 
-// Favorite icons aren't pinned rows, so ask the scripting tabs whether the page is pinned.
+// Favorite icons aren't pinned rows, so ask the scripting tabs whether the page is pinned. The page's own window
+// answers if it lists the address; another window's copy only counts when the own window doesn't say.
 static BOOL DPPinnedCmdClickOnIcon(id page) {
     NSURL *pageURL = DPValueForKey(page, @"url");
     NSString *url = [pageURL isKindOfClass:NSURL.class] ? pageURL.absoluteString : nil;
     if (!url.length) return NO;
-    BOOL pinned = NO;
-    for (id window in DPPinnedCmdClickList(NSApp.delegate, @selector(appleScriptWindows)))
+    NSString *own = DPBrowserWindow(DPBrowserOfContents(page)).identifier;
+    BOOL ownListed = NO, ownPinned = NO, pinned = NO;
+    for (id window in DPPinnedCmdClickList(NSApp.delegate, @selector(appleScriptWindows))) {
+        BOOL mine = own && [DPValueForKey(window, @"windowId") isEqual:own];
         for (id tab in DPPinnedCmdClickList(window, @selector(appleScriptTabs))) {
             NSString *address = [tab respondsToSelector:@selector(URL)] ? DPText(DPMsg(tab, @selector(URL))) : nil;
             if (![address isEqual:url]) continue;
-            if (![tab respondsToSelector:@selector(isPinned)] || !DPMsgBool(tab, @selector(isPinned))) return NO;
-            pinned = YES;
+            BOOL isPinned = [tab respondsToSelector:@selector(isPinned)] && DPMsgBool(tab, @selector(isPinned));
+            pinned |= isPinned;
+            ownListed |= mine;
+            ownPinned |= mine && isPinned;
         }
-    return pinned;
+    }
+    return ownListed ? ownPinned : pinned;
 }
 
 // The page's own window, not the key one: another window's selected pinned row would answer for it.
@@ -50,14 +56,22 @@ static NSView *DPPinnedCmdClickTabForPage(NSWindow *window, id page) {
 }
 
 static NSView *DPPinnedCmdClickTabInAnyWindow(id page, NSWindow **owner) {
-    NSWindow *key = NSApp.keyWindow;
-    NSView *tab = key ? DPPinnedCmdClickTabForPage(key, page) : nil;
+    NSWindow *own = page ? DPBrowserWindow(DPBrowserOfContents(page)) : nil;
+    NSView *tab = own ? DPPinnedCmdClickTabForPage(own, page) : nil;
     if (tab) {
-        if (owner) *owner = key;
+        if (owner) *owner = own;
         return tab;
     }
+    NSWindow *key = NSApp.keyWindow;
+    if (key && key != own) {
+        tab = DPPinnedCmdClickTabForPage(key, page);
+        if (tab) {
+            if (owner) *owner = key;
+            return tab;
+        }
+    }
     for (NSWindow *window in NSApp.orderedWindows) {
-        if (window == key) continue;
+        if (window == own || window == key) continue;
         tab = DPPinnedCmdClickTabForPage(window, page);
         if (tab) {
             if (owner) *owner = window;
@@ -83,8 +97,10 @@ static void DPPinnedCmdClickUnpin(id page, int tries) {
     if (item && DPPinnedCmdClickTabForPage(owner, page) == tab)
         return (void)[item.menu performActionForItemAtIndex:[item.menu indexOfItem:item]];
     if (tries <= 0) return;
+    __weak id weakPage = page;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 20), dispatch_get_main_queue(), ^{
-        DPPinnedCmdClickUnpin(page, tries - 1);
+        id live = weakPage;
+        if (live) DPPinnedCmdClickUnpin(live, tries - 1);
     });
 }
 
@@ -93,7 +109,11 @@ static void DPWebContent_didCreate(id self, SEL _cmd, id webContents, id newWebC
         && DPPinnedCmdClickSourcePinned(webContents);
     DPCallOriginal(DPWebContent_didCreate, self, webContents, newWebContent, url, disposition);
     if (!wanted) return;
-    dispatch_async(dispatch_get_main_queue(), ^{ DPPinnedCmdClickUnpin(newWebContent, 20); });
+    __weak id weakNew = newWebContent;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        id live = weakNew;
+        if (live) DPPinnedCmdClickUnpin(live, 5);
+    });
 }
 
 static void DPInstallPinnedCmdClick(void) {

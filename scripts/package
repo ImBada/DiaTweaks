@@ -2,8 +2,15 @@
 # Name and contents are what diapatch self-update expects.
 set -eu
 cd "$(dirname "$0")/.."
-make -s -j"$(sysctl -n hw.ncpu 2>/dev/null || echo 4)"
-cargo build --release --quiet --manifest-path cli/Cargo.toml
+# The two builds share no inputs, so they run side by side; both exit statuses still decide the result.
+make -s -j"$(sysctl -n hw.ncpu 2>/dev/null || echo 4)" &
+tweaks=$!
+cargo build --release --quiet --manifest-path cli/Cargo.toml &
+rustbuild=$!
+failed=
+wait "$tweaks" || failed=1
+wait "$rustbuild" || failed=1
+[ -z "$failed" ] || exit 1
 stage=$(mktemp -d)
 trap 'rm -rf "$stage"' EXIT
 trap 'exit 130' INT TERM

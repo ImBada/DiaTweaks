@@ -217,9 +217,30 @@ static int gSubviewReads;
 @implementation _TtC15BoostCommandBar11ToolbarView
 @end
 
+static int gLabelReads;
+
 @interface _TtC15BoostCommandBar13ToolbarButton : NSView
 @end
 @implementation _TtC15BoostCommandBar13ToolbarButton
+- (NSString *)accessibilityLabel { gLabelReads++; return [super accessibilityLabel]; }
+@end
+
+static int gMaterialReads;
+
+@interface DPCountingEffect : NSVisualEffectView
+@end
+@implementation DPCountingEffect
+- (NSVisualEffectMaterial)material { gMaterialReads++; return [super material]; }
+@end
+
+@interface DPCountingStack : NSStackView
+@property NSInteger priorityCalls;
+@end
+@implementation DPCountingStack
+- (void)setVisibilityPriority:(NSStackViewVisibilityPriority)priority forView:(NSView *)view {
+    self.priorityCalls++;
+    [super setVisibilityPriority:priority forView:view];
+}
 @end
 
 @interface _TtC20AssistantPanelUIBase22AssistantPanelRootView : NSView
@@ -291,6 +312,7 @@ int main(void) {
         DPHookClass(NSApp.class, @selector(windows), (IMP)DPApp_windows);
         DPHookClass(NSApp.class, @selector(orderedWindows), (IMP)DPApp_orderedWindows);
 
+        Class tileCls = objc_getClass(DPDiaWindowBackgroundTile);
         IMP layerShadow = class_getMethodImplementation(CALayer.class, @selector(setShadowPath:));
         DPWindowCorners.install();
         CHECK(class_getMethodImplementation(CALayer.class, @selector(setShadowPath:)) == layerShadow,
@@ -564,6 +586,21 @@ int main(void) {
         CHECK([privLayer1.colors isEqual:privColors], "PrivateWindowTheme off restores Dia's private colors after following a profile");
         gFakeWindows = @[ normalWin, privWin ];
 
+        DPPrivateWindowTheme.on = YES;
+        DPPrivateWindowTheme.apply(&DPPrivateWindowTheme);
+        privLayer1.colors = privColors;
+        [privGrad1 updateLayer];
+        CHECK([privLayer1.colors isEqual:privColors], "a gradient repaint doesn't theme layers inside AppKit's display pass");
+        [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.05]];
+        CHECK([privLayer1.colors isEqual:normalColors], "and the next run loop turn themes it");
+        privLayer1.colors = privColors;
+        [normGrad updateLayer];
+        CHECK([privLayer1.colors isEqual:privColors], "a normal window's repaint leaves other windows' layers alone");
+        [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.05]];
+        CHECK([privLayer1.colors isEqual:normalColors], "and themes them on the next turn");
+        DPPrivateWindowTheme.on = NO;
+        DPPrivateWindowTheme.apply(&DPPrivateWindowTheme);
+
         _TtC10TabSidebar17SidebarHeaderView *tlHeader = [[_TtC10TabSidebar17SidebarHeaderView alloc] initWithFrame:NSMakeRect(0, 0, 220, 40)];
         NSStackView *tlStack = [[NSStackView alloc] initWithFrame:NSMakeRect(16, 4, 200, 32)];
         _TtC5ARCUI21WindowStandardButtons *lights = [[_TtC5ARCUI21WindowStandardButtons alloc] initWithFrame:NSMakeRect(0, 0, 52, 16)];
@@ -593,6 +630,21 @@ int main(void) {
         [tlHeader layout];
         DPHideTrafficLights.on = NO;
         [tlHeader layout];
+
+        _TtC10TabSidebar17SidebarHeaderView *countHeader = [[_TtC10TabSidebar17SidebarHeaderView alloc] initWithFrame:NSMakeRect(0, 0, 220, 40)];
+        DPCountingStack *countStack = [[DPCountingStack alloc] initWithFrame:NSMakeRect(16, 4, 200, 32)];
+        _TtC5ARCUI21WindowStandardButtons *countLights = [[_TtC5ARCUI21WindowStandardButtons alloc] initWithFrame:NSMakeRect(0, 0, 52, 16)];
+        [countStack addArrangedSubview:countLights];
+        [countHeader addSubview:countStack];
+        [win.contentView addSubview:countHeader];
+        DPHideTrafficLights.on = YES;
+        [countHeader layout];
+        for (int i = 0; i < 100; i++) [countHeader layout];
+        CHECK(countStack.priorityCalls == 1, "101 sidebar header layouts write the visibility priority once");
+        DPHideTrafficLights.on = NO;
+        [countHeader layout];
+        [countHeader layout];
+        CHECK(countStack.priorityCalls == 2, "turning it off writes the other priority once");
 
         _TtCC7TabList11TabListView14CollectionView *col = [[_TtCC7TabList11TabListView14CollectionView alloc] initWithFrame:NSMakeRect(0, 0, 200, 200)];
         _TtC7TabList27TabListCollectionViewLayout *layout = [_TtC7TabList27TabListCollectionViewLayout new];
@@ -687,6 +739,66 @@ int main(void) {
                                               timestamp:4 windowNumber:dragWin.windowNumber context:nil eventNumber:4 clickCount:1 pressure:1];
         CHECK(DPDragMouse(sameDrag) == nil && DPPressed == nil && gWindowDragCalls == 1,
               "same-window drag beyond slop starts performWindowDragWithEvent:");
+        // #621: a toolbar hit test runs on every mouse move; it must not rescan every button's accessibility label.
+        [gFakeDefaults setBool:NO forKey:@"commandBarChatLocked"];
+        DPCompactWithChat.on = NO;
+        DPCompactCommandBar.on = YES;
+        _TtC15BoostCommandBar8RootView *hitRoot = [[_TtC15BoostCommandBar8RootView alloc] initWithFrame:NSMakeRect(0, 0, 600, 120)];
+        NSView *hitMid = [[NSView alloc] initWithFrame:hitRoot.bounds];
+        _TtC15BoostCommandBar11ToolbarView *hitToolbar = [[_TtC15BoostCommandBar11ToolbarView alloc] initWithFrame:NSMakeRect(0, 80, 600, 40)];
+        _TtC15BoostCommandBar13ToolbarButton *hitA = [[_TtC15BoostCommandBar13ToolbarButton alloc] initWithFrame:NSMakeRect(0, 0, 40, 40)];
+        _TtC15BoostCommandBar13ToolbarButton *hitB = [[_TtC15BoostCommandBar13ToolbarButton alloc] initWithFrame:NSMakeRect(48, 0, 40, 40)];
+        NSStackView *hitStack = [NSStackView stackViewWithViews:@[ hitA, hitB ]];
+        hitStack.frame = NSMakeRect(0, 0, 600, 40);
+        [hitToolbar addSubview:hitStack];
+        [hitMid addSubview:hitToolbar];
+        [hitRoot addSubview:hitMid];
+        [pop addSubview:hitRoot];
+        hitA.accessibilityLabel = @"Add files";
+        hitB.accessibilityLabel = @"Dictation";
+        gLabelReads = 0;
+        for (int i = 0; i < 500; i++) [hitToolbar hitTest:NSMakePoint(20, 100)];
+        CHECK(gLabelReads == 2, "500 mouse-move hit tests read the buttons' labels once, not once per move");
+        [hitA setAccessibilityLabel:@"Add files only available when you have chat usage"];
+        CHECK([gFakeDefaults boolForKey:@"commandBarChatLocked"] && DPCompactToolbar(hitRoot) == hitToolbar,
+              "a new label still tells the toolbar the chat is locked");
+        hitA.accessibilityLabel = @"Add files";
+        [gFakeDefaults setBool:NO forKey:@"commandBarChatLocked"];
+        [hitRoot removeFromSuperview];
+
+        // #622: the background tile repaints on every resize frame; a pass with nothing new must not touch the effects.
+        _TtC6Window14PlatformWindow *tileWin = DPMakeBrowserWindow(NO, NO);
+        gFakeWindows = @[ tileWin ];
+        DPWindowMaterial.on = YES;
+        gMaterialChoice = @"material.7";
+        NSView *tileHost = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 300, 200)];
+        DPCountingEffect *tileEffect = [[DPCountingEffect alloc] initWithFrame:NSMakeRect(0, 0, 300, 200)];
+        _TtC15WindowTreatment31WindowBackgroundOverlayTintView *tileTint =
+            [[_TtC15WindowTreatment31WindowBackgroundOverlayTintView alloc] initWithFrame:tileHost.bounds];
+        _TtC5ARCUI19BackgroundColorView *tileWash = [[_TtC5ARCUI19BackgroundColorView alloc] initWithFrame:tileTint.bounds];
+        NSView *tile = [[tileCls alloc] initWithFrame:tileTint.bounds];
+        [tileTint addSubview:tileWash];
+        [tileTint addSubview:tile];
+        [tileHost addSubview:tileTint];
+        [tileWin.contentView addSubview:tileEffect];
+        [tileWin.contentView addSubview:tileHost];
+        [tile updateLayer];
+        [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.05]];
+        CHECK(tileWash.hidden && tileEffect.material == NSVisualEffectMaterialSidebar,
+              "WindowMaterial applies to the tint a background tile finds, even before the theme frame lays out");
+        gMaterialReads = 0;
+        for (int i = 0; i < 100; i++) [tile updateLayer];
+        [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.05]];
+        CHECK(gMaterialReads == 0, "100 tile repaints with nothing new never re-read the sidebar's effects");
+        gMaterialChoice = @"material.9";
+        [tile updateLayer];
+        [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.05]];
+        CHECK(gMaterialReads > 0 && tileEffect.material == 9, "a new choice is applied");
+        gMaterialChoice = @"material.7";
+        DPWindowMaterial.on = NO;
+        [tile updateLayer];
+        [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.05]];
+        [tileWin close];
         (void)gIsPrivate;
 
         if (failures) return 1;

@@ -9,7 +9,6 @@ static const CGFloat DPInset = 6, DPGap = 2, DPButton = 28, DPAddressHeight = 30
 @property (nonatomic, weak) id page;
 @property (nonatomic, strong) NSView *row, *divider, *address, *glow;
 @property (nonatomic, strong) NSArray<NSButton *> *buttons;
-@property (nonatomic, strong) NSTimer *watch;
 @property (nonatomic, strong) id clicks;
 @end
 
@@ -69,15 +68,11 @@ static const CGFloat DPInset = 6, DPGap = 2, DPButton = 28, DPAddressHeight = 30
 
 - (void)viewDidMoveToWindow {
     [super viewDidMoveToWindow];
-    [self.watch invalidate];
-    self.watch = nil;
     if (self.clicks) [NSEvent removeMonitor:self.clicks];
     self.clicks = nil;
     if (!self.window) return;
+    [self refresh];
     __weak DPPeekToolbar *weak = self;
-    self.watch = [NSTimer scheduledTimerWithTimeInterval:0.25 repeats:YES block:^(NSTimer *timer) {
-        if (weak) [weak refresh]; else [timer invalidate];
-    }];
     // Dia's toolbar under the card takes clicks by where they land, whatever is on top, so route them to this bar first.
     self.clicks = [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskLeftMouseDown handler:^NSEvent *(NSEvent *event) {
         DPPeekToolbar *bar = weak;
@@ -95,6 +90,11 @@ static const CGFloat DPInset = 6, DPGap = 2, DPButton = 28, DPAddressHeight = 30
     }];
 }
 
+- (void)viewDidUnhide {
+    [super viewDidUnhide];
+    if (self.window) [self refresh];
+}
+
 - (BOOL)closing {
     for (NSView *view = self.superview; view; view = view.superview)
         if ([view isKindOfClass:DPPeekCard.class]) return ((DPPeekCard *)view).closing;
@@ -102,7 +102,6 @@ static const CGFloat DPInset = 6, DPGap = 2, DPButton = 28, DPAddressHeight = 30
 }
 
 - (void)dealloc {
-    [_watch invalidate];
     if (_clicks) [NSEvent removeMonitor:_clicks];
 }
 

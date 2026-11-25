@@ -9,7 +9,7 @@
 extern DPPatch DPCommandBar, DPCommandBarBlur, DPCommandBarDarken, DPCommandBarShadow, DPCommandBarInteractive, DPCommandBarKeepText;
 char DPOverlayKey;
 static char DPLayoutKey, DPHomeKey, DPRecentKey, DPBlankKey, DPSplitKey, DPOwnBarKey, DPLeftTextKey, DPClosedAtKey, DPNewGroupAtKey, DPSeenKey, DPSeenSetKey, DPKeptSetKey;
-static CGFloat DPAnchorHeight;
+static char DPAnchorKey, DPShadeShapeKey;
 
 static NSString *const DPHeightKey = @"commandBarHeight", *const DPDarknessKey = @"commandBarDarkness",
                 *const DPBlurRadiusKey = @"commandBarBlurRadius", *const DPBlurWindowKey = @"commandBarBlurWindow",
@@ -128,8 +128,15 @@ static BOOL DPInSplit(NSView *view) {
     return NO;
 }
 
+// Every keystroke and every row of suggestions asks for the bar's text view; the panel keeps it until Dia replaces one.
 NSTextView *DPBarText(DPCommandBarOverlay *overlay) {
-    return (NSTextView *)DPFindView(overlay.panel, ^BOOL(NSView *view) { return [view isKindOfClass:NSTextView.class]; });
+    static NSMapTable<DPCommandBarOverlay *, NSTextView *> *texts;
+    if (!texts) texts = [NSMapTable weakToWeakObjectsMapTable];
+    NSTextView *text = [texts objectForKey:overlay];
+    if (text && [text isDescendantOf:overlay.panel]) return text;
+    text = (NSTextView *)DPFindView(overlay.panel, ^BOOL(NSView *view) { return [view isKindOfClass:NSTextView.class]; });
+    if (text) [texts setObject:text forKey:overlay];
+    return text;
 }
 
 void DPFocusBar(DPCommandBarOverlay *overlay) {
@@ -239,19 +246,44 @@ static NSView *DPAddShade(NSWindow *window, BOOL blur) {
 
 static void DPUpdatePanelShadow(NSView *panel) {
     if (!panel || !DPCommandBarShadow.on) return (void)(panel.shadow = nil);
+    NSColor *color = [NSColor colorWithWhite:0 alpha:MIN(MAX(DPTuned(DPShadowIntensityKey), 0), 0.8)];
+    if ([panel.shadow.shadowColor isEqual:color]) return;
     NSShadow *shadow = [NSShadow new];
-    shadow.shadowColor = [NSColor colorWithWhite:0 alpha:MIN(MAX(DPTuned(DPShadowIntensityKey), 0), 0.8)];
+    shadow.shadowColor = color;
     shadow.shadowBlurRadius = 32;
     panel.shadow = shadow;
 }
 
-void DPShowShade(DPCommandBarOverlay *overlay) {
-    DPRemoveShade(overlay);
+// The settings sliders call this on every tick, so change the shade's values in place instead of building it again.
+static void DPRefreshShade(DPCommandBarOverlay *overlay) {
+    Class backdropCls = objc_getClass("CABackdropLayer");
+    for (NSView *view in @[ overlay.windowBlur ?: NSNull.null, overlay.shade ?: NSNull.null ]) {
+        if (![view isKindOfClass:NSView.class]) continue;
+        for (CALayer *layer in view.layer.sublayers) {
+            if (backdropCls && [layer isKindOfClass:backdropCls])
+                DPSetValueForKey(((NSArray *)layer.filters).firstObject, @"inputRadius", @(DPTuned(DPBlurRadiusKey)));
+            else layer.backgroundColor = [NSColor colorWithWhite:0 alpha:DPTuned(DPDarknessKey)].CGColor;
+        }
+    }
     DPUpdatePanelShadow(overlay.panel);
+}
+
+void DPShowShade(DPCommandBarOverlay *overlay) {
     NSString *returnID = DPTabID(overlay.returnTab);
-    if (!returnID || [(NSSet *)DPGet(overlay.host, &DPBlankKey) containsObject:returnID]) return;
-    overlay.windowBlur = DPAddWindowBlur(overlay.panel);
-    overlay.shade = DPAddShade(overlay.host, !overlay.windowBlur);
+    BOOL show = returnID && ![(NSSet *)DPGet(overlay.host, &DPBlankKey) containsObject:returnID];
+    BOOL blur = show && DPCommandBarBlur.on && DPTuned(DPBlurWindowKey);
+    BOOL darken = show && DPCommandBarDarken.on;
+    NSArray *shape = @[ @(blur), @(darken) ];
+    BOOL built = overlay.shade != nil || overlay.windowBlur != nil;
+    if (built != show || ![DPGet(overlay, &DPShadeShapeKey) isEqual:shape]) {
+        DPRemoveShade(overlay);
+        DPSet(overlay, &DPShadeShapeKey, shape);
+        if (show) {
+            overlay.windowBlur = blur ? DPAddWindowBlur(overlay.panel) : nil;
+            overlay.shade = DPAddShade(overlay.host, !overlay.windowBlur);
+        }
+    }
+    DPRefreshShade(overlay);
 }
 
 static void DPFitText(DPCommandBarOverlay *overlay, NSTextView *text);
@@ -266,11 +298,12 @@ static void DPFitText(DPCommandBarOverlay *overlay, NSTextView *text);
 
 - (BOOL)isFlipped { return YES; }
 
-// ⌘L's popover reports another collapsed height than the new tab bar, so both place their top from the new tab bar's one-line height.
+// ⌘L's popover reports another collapsed height than the new tab bar, so both place their top from that window's new tab bar height.
 - (NSRect)frameForPanelSize:(NSSize)size {
     if (DPIsKind(self.page, DPDiaPopover)) {
         size.width = MIN(652, NSWidth((DPCardIn(self.host) ?: self).bounds) - 28);
-        return DPBarFrame(self, size, DPAnchorHeight ?: size.height - DPSuggestionsHeight(self.panel));
+        CGFloat anchor = self.host ? [DPGet(self.host, &DPAnchorKey) doubleValue] : 0;
+        return DPBarFrame(self, size, anchor ?: size.height - DPSuggestionsHeight(self.panel));
     }
     // Measure the bar directly because tweaks may clip the panel and launch restore lays it out narrow first.
     NSView *bar = DPFindView(self.panel, ^BOOL(NSView *view) { return DPIsKind(view, DPDiaCommandBar); });
@@ -278,7 +311,7 @@ static void DPFitText(DPCommandBarOverlay *overlay, NSTextView *text);
         self.collapsedWidth = NSWidth(bar.frame);
         self.collapsedHeight = NSHeight(bar.frame) - DPSuggestionsHeight(self.panel) - self.extraHeight;
     }
-    DPAnchorHeight = self.collapsedHeight;
+    if (self.host) DPSet(self.host, &DPAnchorKey, @(self.collapsedHeight));
     return DPBarFrame(self, size, self.collapsedHeight);
 }
 
@@ -995,6 +1028,7 @@ static void DPPopover_viewDidMoveToWindow(NSView *self, SEL _cmd) {
 
 static void DPContentPane_viewDidMoveToWindow(NSView *self, SEL _cmd) {
     DPCallOriginal(DPContentPane_viewDidMoveToWindow, self);
+    if (!DPCommandBar.on) return;
     __weak NSWindow *window = self.window;
     if (!window) return;
     id scriptWindow = DPScriptWindow(window);
@@ -1027,11 +1061,11 @@ static void DPStrip_viewDidMoveToWindow(NSView *self, SEL _cmd) {
 static void DPNewTabPage_viewDidMoveToWindow(NSView *self, SEL _cmd) {
     DPCallOriginal(DPNewTabPage_viewDidMoveToWindow, self);
     NSWindow *window = self.window;
-    if (!window) return;
+    if (!window || !DPCommandBar.on) return;
     id scriptWindow = DPScriptWindow(window);
     BOOL seen;
     NSString *active = DPNoteActiveTab(window, scriptWindow, &seen);
-    if (!DPCommandBar.on || DPAdoptSpare(window, self)) return;
+    if (DPAdoptSpare(window, self)) return;
     NSString *previous = DPPreviousTabID(window);
     NSMutableSet<NSString *> *blanks = DPGet(window, &DPBlankKey);
     DPCommandBarOverlay *overlay = DPGet(window, &DPOverlayKey);
@@ -1093,6 +1127,13 @@ static void DPApplyCommandBar(DPPatch *patch) {
             DPDropSpare(window);
             DPClearCatchUp(window);
             DPFinishHandOver(window);
+            // Nothing maintains the bar's tab bookkeeping while it is off, so start fresh when it comes back.
+            DPSet(window, &DPSeenKey, nil);
+            DPSet(window, &DPSeenSetKey, nil);
+            DPSet(window, &DPKeptSetKey, nil);
+            DPSet(window, &DPRecentKey, nil);
+            DPSet(window, &DPSplitKey, nil);
+            DPSet(window, &DPAnchorKey, nil);
         }
         DPCommandBarOverlay *overlay = DPGet(window, &DPOverlayKey);
         if (!overlay) continue;
@@ -1106,7 +1147,6 @@ static void DPApplyCommandBar(DPPatch *patch) {
         if (tab && !nowhereToGo) DPCloseTab(tab);
     }
     if (!on) {
-        DPAnchorHeight = 0;
         DPCleanHideTab();
         DPUpdateSpareTimer();
         Class pageCls = objc_getClass(DPDiaNewTabPage);

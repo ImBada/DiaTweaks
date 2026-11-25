@@ -1,9 +1,11 @@
 #import "StdPatch/StdPatch.h"
 #import "Commands/GroupTabs/GroupTabs.h"
 #import "Patches/CommandBar/Tabs.h"
+#import <dlfcn.h>
 
 extern DPPatch DPUndoCloseTab;
 static BOOL DPJustClosed;
+static __weak NSWindow *DPJustClosedWindow;
 static id DPEventMonitor;
 
 static NSMenuItem *DPReopenItem(void) {
@@ -13,11 +15,31 @@ static NSMenuItem *DPReopenItem(void) {
     return nil;
 }
 
+static NSWindow *DPClosedPageWindow(id page) {
+    static id (*browserOf)(id);
+    static NSWindow *(*windowOf)(id);
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        browserOf = dlsym(RTLD_DEFAULT, "DPBrowserOfContents");
+        windowOf = dlsym(RTLD_DEFAULT, "DPBrowserWindow");
+    });
+    if (browserOf && windowOf) {
+        NSWindow *window = windowOf(browserOf(page));
+        if (window) return window;
+    }
+    id view = DPValueForKey(page, @"nativeView");
+    return [view isKindOfClass:NSView.class] ? ((NSView *)view).window : nil;
+}
+
 // Not -close: Peek closes its pages with it, and that must not arm Undo.
 static void DPPage_close(id self, SEL _cmd, NSInteger timing) {
+    NSWindow *window = DPUndoCloseTab.on ? DPClosedPageWindow(self) : nil;
     DPCallOriginal(DPPage_close, self, timing);
     if (!DPUndoCloseTab.on) return;
-    if (!DPTakeOwnClose()) DPJustClosed = YES;
+    if (!DPTakeOwnClose()) {
+        DPJustClosed = YES;
+        DPJustClosedWindow = window;
+    }
     DPForgetGroupingUndo();
 }
 
@@ -31,11 +53,15 @@ static NSDictionary *DPDefaultUndoShortcut(void) { return @{ @"keyCode" : @6, @"
 static NSEvent *DPUndoEvent(NSEvent *event) {
     if (!DPUndoCloseTab.on || !DPJustClosed) {
         DPJustClosed = NO;
+        DPJustClosedWindow = nil;
         return event;
     }
-    BOOL undo = event.type == NSEventTypeKeyDown && DPShortcutMatches(event, &DPUndoCloseTab)
+    NSWindow *closedIn = DPJustClosedWindow;
+    BOOL sameWindow = !closedIn || !event.window || event.window == closedIn;
+    BOOL undo = sameWindow && event.type == NSEventTypeKeyDown && DPShortcutMatches(event, &DPUndoCloseTab)
         && !DPCanUndoGrouping() && !DPEditingWithUndo(event.window);
     DPJustClosed = NO;
+    DPJustClosedWindow = nil;
     NSMenuItem *reopen = undo ? DPReopenItem() : nil;
     if (!reopen) return event;
     [reopen.menu performActionForItemAtIndex:[reopen.menu indexOfItem:reopen]];
@@ -43,7 +69,10 @@ static NSEvent *DPUndoEvent(NSEvent *event) {
 }
 
 static void DPApplyUndoCloseTab(DPPatch *patch) {
-    if (!patch->on) DPJustClosed = NO;
+    if (!patch->on) {
+        DPJustClosed = NO;
+        DPJustClosedWindow = nil;
+    }
     DPSyncMonitor(&DPEventMonitor, patch->on, NSEventMaskKeyDown | NSEventMaskLeftMouseDown | NSEventMaskRightMouseDown | NSEventMaskOtherMouseDown,
                   ^NSEvent *(NSEvent *event) { return DPUndoEvent(event); });
 }

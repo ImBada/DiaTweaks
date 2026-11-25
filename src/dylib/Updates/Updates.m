@@ -1,4 +1,5 @@
 #import "Updates/Updates.h"
+#import "SafeMode/SafeMode.h"
 #include <sys/stat.h>
 #include <sys/xattr.h>
 
@@ -107,6 +108,7 @@ void DPHandOffAndQuit(NSArray<NSString *> *args) {
     NSTimer *_progress;
     NSDictionary *_found;
     NSMutableDictionary<NSString *, id> *_pretend;
+    CFTimeInterval _lastAutoCheck;
 }
 
 + (instancetype)shared {
@@ -166,6 +168,22 @@ void DPHandOffAndQuit(NSArray<NSString *> *args) {
             [self check:nil];
         }
     });
+}
+
+- (void)checkAutomatically:(void (^)(void))done {
+    if (DPPaused || DPSafeMode || DPPausedAtLaunch) {
+        if (done) done();
+        return;
+    }
+    // Home asks on every visit and launch asks once, so one check a minute covers both.
+    CFTimeInterval now = CACurrentMediaTime();
+    if (_lastAutoCheck && now - _lastAutoCheck < 60) {
+        if (_checking && done) [_checked addObject:[done copy]];
+        else if (done) done();
+        return;
+    }
+    _lastAutoCheck = now;
+    [self check:done];
 }
 
 - (NSDictionary *)found {
@@ -395,12 +413,15 @@ void DPInstallUpdates(void) {
     DPOnLaunch(^{
         DPOnMenuItem(nil, @"Check for Updates", ^{ DPShowUpdateAlert(); });
         if (DPAutoLevelOf(DPDia) == DPAutoOff && DPAutoLevelOf(DPTweaks) == DPAutoOff) return;
-        DPUpdates *updates = DPUpdates.shared;
-        [updates check:^{
-            for (NSString *part in DPParts())
-                if (DPAutoLevelOf(part) >= DPAutoDownload && !DPIsLocalBuild(part) && [updates available:part] && ![updates failed:part])
-                    [updates download:part then:nil];
-        }];
+        // Dia builds its windows and tabs first, and a paused launch never reaches the network at all.
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            DPUpdates *updates = DPUpdates.shared;
+            [updates checkAutomatically:^{
+                for (NSString *part in DPParts())
+                    if (DPAutoLevelOf(part) >= DPAutoDownload && !DPIsLocalBuild(part) && [updates available:part] && ![updates failed:part])
+                        [updates download:part then:nil];
+            }];
+        });
     });
     DPOnQuit(^{ DPInstallOnQuit(); });
 }

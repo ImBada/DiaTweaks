@@ -63,6 +63,11 @@ static void pumpUntil(BOOL (^done)(void), NSTimeInterval timeout) {
         [NSRunLoop.mainRunLoop runMode:NSDefaultRunLoopMode beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
 }
 
+static NSUInteger countInvocations(NSString *path, NSString *needle) {
+    NSString *log = [NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:nil];
+    return [[log componentsSeparatedByString:needle] count] - 1;
+}
+
 static void writeStubCLI(NSString *path, NSString *script) {
     [NSFileManager.defaultManager createDirectoryAtPath:path.stringByDeletingLastPathComponent withIntermediateDirectories:YES attributes:nil error:nil];
     [script writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:nil];
@@ -223,6 +228,34 @@ int main(void) {
         pumpUntil(^BOOL { return finished == 4; }, 5);
         NSString *checkLog = [NSString stringWithContentsOfFile:logFile encoding:NSUTF8StringEncoding error:nil];
         expect(finished == 4 && [checkLog componentsSeparatedByString:@"check --json"].count == 2, @"overlapping checks share one diapatch run and all hear back");
+
+        // Home and the launch ask for a check, so mine respect Pause and never run twice a minute; Check Now never waits.
+        writeStubCLI(cli, [NSString stringWithFormat:@"#!/bin/sh\necho \"$*\" >> \"%@\"\nsleep 0.1\nprintf '{\"dia\":null,\"tweaks\":{\"latest\":\"v1.2.0\",\"available\":true}}'\n", logFile]);
+        [@"" writeToFile:logFile atomically:YES encoding:NSUTF8StringEncoding error:nil];
+        DPPaused = YES;
+        __block BOOL pausedDone = NO;
+        [updates checkAutomatically:^{ pausedDone = YES; }];
+        usleep(300000);
+        pumpUntil(^BOOL { return !updates.checking; }, 2);
+        expect(pausedDone && countInvocations(logFile, @"check --json") == 0, @"an automatic check makes no calls while tweaks are paused and still finishes");
+        DPPaused = NO;
+        __block BOOL autoChecked = NO, autoCallback = NO;
+        [updates checkAutomatically:^{ autoCallback = YES; }];
+        pumpUntil(^BOOL {
+            BOOL done = countInvocations(logFile, @"check --json") > 0 && !updates.checking && autoCallback;
+            if (done) autoChecked = YES;
+            return done;
+        }, 5);
+        expect(autoChecked, @"an automatic check runs when nothing is paused");
+        __block BOOL throttledDone = NO;
+        [updates checkAutomatically:^{ throttledDone = YES; }];
+        usleep(300000);
+        pumpUntil(^BOOL { return !updates.checking; }, 2);
+        expect(throttledDone && countInvocations(logFile, @"check --json") == 1, @"a second automatic check within a minute is skipped and still calls done");
+        __block BOOL manualChecked = NO;
+        [updates check:^{ manualChecked = YES; }];
+        pumpUntil(^BOOL { return manualChecked; }, 5);
+        expect(countInvocations(logFile, @"check --json") == 2, @"Check Now is never throttled");
 
         for (NSString *garbage in @[ @"[1,2,3]", @"not json at all", @"", @"7", @"null", @"{\"dia\":\"text\",\"tweaks\":[1]}", @"{\"dia\":{\"latest\":[1],\"available\":\"yes\",\"staged\":7,\"size\":\"big\",\"error\":3}}" ]) {
             writeStubCLI(cli, [NSString stringWithFormat:@"#!/bin/sh\nprintf '%%s' '%@'\n", garbage]);

@@ -3,6 +3,7 @@
 #import "StdPatch/StdPatch.h"
 #import "Patches/DeleteProfileMenu/DeleteProfileMenu.h"
 #import "runloop.h"
+#import "watchdog.h"
 
 // Dia isn't here, so every class the tweak touches is faked: a window whose profiles live in Dia's scripting
 // layer, a sidebar whose right-click menu is Dia's, a Settings window built inside sendAction:, and a Profiles
@@ -493,14 +494,24 @@ static void DPTestSettingsTakesOver(void) {
     Expect(gSettings.fakeVisible && gSettings.orderOuts == 0, @"leaving the Settings the user opened alone");
 }
 
+static NSString *gDeleteScratch, *gDeleteDomain;
+static void DPCleanDeleteScratch(void) {
+    if (gDeleteDomain) [NSUserDefaults.standardUserDefaults removePersistentDomainForName:gDeleteDomain];
+    if (gDeleteScratch) [NSFileManager.defaultManager removeItemAtPath:gDeleteScratch error:NULL];
+}
+
 int main(void) {
     @autoreleasepool {
         [NSApplication sharedApplication];
         NSString *scratch = [NSTemporaryDirectory() stringByAppendingPathComponent:[NSString stringWithFormat:@"dp-delete-profile-%d", getpid()]];
         [NSFileManager.defaultManager createDirectoryAtPath:scratch withIntermediateDirectories:YES attributes:nil error:NULL];
         setenv("DIAPATCH_HOME", scratch.fileSystemRepresentation, 1);
-        NSString *domain = [NSString stringWithFormat:@"com.diapatches.test.delete-profile.%d", getpid()];
+        NSString *domain = [scratch stringByAppendingPathComponent:@"com.diapatches"];
         setenv("DIATWEAKS_DOMAIN", domain.fileSystemRepresentation, 1);
+        gDeleteScratch = scratch;
+        gDeleteDomain = domain;
+        DPOnTestCleanup(DPCleanDeleteScratch);
+        DPArmTestWatchdog(30);
 
         gKeep = [NSMutableArray array];
         gHosts = [NSMutableArray array];
@@ -522,8 +533,6 @@ int main(void) {
         DPTestTurnOff();
         DPTestSettingsTakesOver();
 
-        [NSFileManager.defaultManager removeItemAtPath:scratch error:NULL];
-        [DPSettingsDefaults() removePersistentDomainForName:domain];
         if (failures) printf("%d delete-profile-menu checks failed\n", failures);
         else printf("delete-profile-menu: all checks passed\n");
         return failures ? 1 : 0;

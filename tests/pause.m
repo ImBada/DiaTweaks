@@ -1,9 +1,16 @@
 #import <dlfcn.h>
 #import <objc/runtime.h>
 #import "StdPatch/StdPatch.h"
+#import "watchdog.h"
 
 // An absolute path keeps the plist in the test's folder: cfprefsd rewrites a removed ~/Library/Preferences domain later.
-static NSString *DPPauseTestDomain;
+static NSString *DPPauseTestDomain, *DPPauseScratch;
+
+static void DPCleanPauseScratch(void) {
+    if (!DPPauseScratch) return;
+    [NSUserDefaults.standardUserDefaults removePersistentDomainForName:DPPauseTestDomain];
+    [NSFileManager.defaultManager removeItemAtPath:DPPauseScratch error:nil];
+}
 
 @interface NSUserDefaults (DPPauseTest)
 - (instancetype)dp_pauseInitWithSuiteName:(NSString *)suite;
@@ -57,6 +64,7 @@ void DPRunCLI(NSArray<NSString *> *args, void (^completion)(NSString *output)) {
     return shared;
 }
 - (void)check:(void (^)(void))done {}
+- (void)checkAutomatically:(void (^)(void))done {}
 - (BOOL)available:(NSString *)part { return NO; }
 - (BOOL)staged:(NSString *)part { return NO; }
 - (BOOL)downloading:(NSString *)part { return NO; }
@@ -205,6 +213,9 @@ int main(void) {
         NSString *support = [temporary stringByAppendingPathComponent:@"support"];
         const char *homeDir = [temporary stringByAppendingPathComponent:@"home"].fileSystemRepresentation;
         DPPauseTestDomain = [temporary stringByAppendingPathComponent:@"defaults"];
+        DPPauseScratch = temporary;
+        DPOnTestCleanup(DPCleanPauseScratch);
+        DPArmTestWatchdog(30);
         setenv("DIAPATCH_HOME", homeDir, 1);
         setenv("DIATWEAKS_DOMAIN", DPPauseTestDomain.fileSystemRepresentation, 1);
         setenv("DIAPATCH_CATALOG_URL", [temporary stringByAppendingPathComponent:@"catalog"].fileSystemRepresentation, 1);
@@ -403,9 +414,6 @@ int main(void) {
         NSEvent *backspace = [NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:0 timestamp:0 windowNumber:shortcutWindow.windowNumber context:nil characters:@"\x7f" charactersIgnoringModifiers:@"\x7f" isARepeat:NO keyCode:kVK_Delete];
         [clashButton record:backspace];
         expect(clashButton.monitor == nil && [clashButton.label.stringValue isEqual:@"Add new…"], @"Backspace clears shortcut and stops recording");
-
-        [NSUserDefaults.standardUserDefaults removePersistentDomainForName:DPPauseTestDomain];
-        [NSFileManager.defaultManager removeItemAtPath:temporary error:nil];
     }
     if (!failures) printf("all pause checks passed\n");
     return failures ? 1 : 0;

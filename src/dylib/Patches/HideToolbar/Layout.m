@@ -3,14 +3,17 @@
 #import "Patches/LittleDia/LittleDia.h"
 
 NSHashTable<NSView *> *DPPanes;
-static char DPFrameKey, DPFillsKey;
+static char DPFrameKey, DPFillsKey, DPLittleDiaHidKey;
 
 NSRect DPLaidOutFrame(NSView *view) {
-    return [DPDiaValue(view, &DPFrameKey, @(view.frame)) rectValue];
+    NSArray *saved = DPGet(view, &DPFrameKey);
+    return saved && NSEqualRects([saved[1] rectValue], view.frame) ? [saved[0] rectValue] : view.frame;
 }
 
 static void DPAssignFrame(NSView *view, NSRect laidOut, NSRect frame) {
-    DPOverride(view, &DPFrameKey, @(laidOut), @(frame));
+    NSArray *saved = DPGet(view, &DPFrameKey);
+    if (!saved || !NSEqualRects([saved[0] rectValue], laidOut) || !NSEqualRects([saved[1] rectValue], frame))
+        DPOverride(view, &DPFrameKey, @(laidOut), @(frame));
     if (!NSEqualRects(view.frame, frame)) view.frame = frame;
 }
 
@@ -77,13 +80,18 @@ void DPApplyToolbarOpacity(DPToolbarHover *hover) {
 void DPApplyToolbar(NSView *pane) {
     BOOL active = DPHideToolbar.on || DPHideToolbar.progress > 0;
     DPToolbarHover *hover = [DPToolbarHover forPane:pane];
-    if (!active && !hover.touched && !DPLittleDiaIsOver(pane.window)) return;
+    BOOL over = DPLittleDiaIsOver(pane.window);
+    if (!active && !hover.touched && !over && !DPGet(pane, &DPLittleDiaHidKey)) return;
     NSView *bar = DPSubview(pane, DPDiaToolbar);
     if (!bar) return;
     if (!active && !hover.touched) {
-        if (bar.alphaValue != 0) bar.alphaValue = 0;
+        // With the tweak off only Little Dia hides the bars, so remember that we hid them and give them back after it closes.
+        BOOL hid = DPGet(pane, &DPLittleDiaHidKey) != nil;
+        if (over == hid) return;
         NSView *bookmarks = DPBookmarksUnder(pane, bar);
-        if (bookmarks && bookmarks.alphaValue != 0) bookmarks.alphaValue = 0;
+        DPSet(pane, &DPLittleDiaHidKey, over ? @YES : nil);
+        if (bar.alphaValue != !over) bar.alphaValue = !over;
+        if (bookmarks && bookmarks.alphaValue != !over) bookmarks.alphaValue = !over;
         return;
     }
 

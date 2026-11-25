@@ -14,15 +14,16 @@ static NSView *DPPageTopUnder(NSEvent *event) {
     if (!card) card = NSClassFromString(@"DPPeekCard");
     NSView *content = window.contentView;
     NSPoint hitPoint = content.superview ? [content.superview convertPoint:event.locationInWindow fromView:nil] : event.locationInWindow;
-    NSView *hit = [content hitTest:hitPoint];
     Class pageHost = objc_getClass("WebContentsHostView");
-    return DPFindView(content, ^BOOL(NSView *view) {
-        if (![view isKindOfClass:pageHost] || view.isHiddenOrHasHiddenAncestor) return NO;
-        for (NSView *up = view; up; up = up.superview) if ([up isKindOfClass:card]) return NO;
+    // Only the page under the pointer can match, so walk up from it rather than search every view in the window.
+    for (NSView *view = [content hitTest:hitPoint]; view && view != content.superview; view = view.superview) {
+        if (![view isKindOfClass:pageHost] || view.isHiddenOrHasHiddenAncestor) continue;
+        for (NSView *up = view; up; up = up.superview) if ([up isKindOfClass:card]) return nil;
         NSPoint point = [view convertPoint:event.locationInWindow fromView:nil];
         CGFloat fromTop = view.isFlipped ? point.y : NSHeight(view.bounds) - point.y;
-        return NSPointInRect(point, view.bounds) && fromTop <= DPDragBand && point.x <= NSMaxX(view.bounds) - DPDragScroller && [hit isDescendantOf:view];
-    });
+        if (NSPointInRect(point, view.bounds) && fromTop <= DPDragBand && point.x <= NSMaxX(view.bounds) - DPDragScroller) return view;
+    }
+    return nil;
 }
 
 static NSEvent *DPDragMouse(NSEvent *event) {

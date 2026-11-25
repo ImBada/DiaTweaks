@@ -5,6 +5,7 @@ extern DPPatch DPCompactCommandBar, DPCompactWithChat;
 
 NSView *DPCommandBarPart(NSView *commandBar, const char *className);
 BOOL DPChatLocked(NSView *view);
+void DPForgetChatLocked(NSView *toolbar);
 NSView *DPCompactToolbar(NSView *commandBar);
 void DPRememberChatLocked(BOOL locked);
 NSView *DPGoButton(NSView *toolbar);
