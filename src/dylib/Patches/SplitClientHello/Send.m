@@ -2,14 +2,14 @@
 #import "Write.h"
 
 _Atomic bool DPSplitting;
-static bool gCheckSecondary;
+static _Atomic bool gCheckSecondary;
 
 extern DPSendResult DPRealSendto(int fd, const void *buffer, size_t length, int flags, const struct sockaddr *address,
                                  socklen_t addressLength) __asm__("_sendto");
 
 __attribute__((noinline)) static DPSendResult DPSendHello(int fd, const void *buffer, size_t length, int flags) {
     DPSendResult result;
-    if (!DPSendSplit(fd, buffer, length, flags, arc4random(), DPRealSendto, gCheckSecondary, &result))
+    if (!DPSendSplit(fd, buffer, length, flags, arc4random(), DPRealSendto, atomic_load_explicit(&gCheckSecondary, memory_order_relaxed), &result))
         return DPRealSendto(fd, buffer, length, flags, NULL, 0);
     static atomic_flag logged = ATOMIC_FLAG_INIT;
     if (result.sent >= 0 && !atomic_flag_test_and_set(&logged)) NSLog(@"DiaPatches: Split TLS ClientHello is splitting ClientHellos");
@@ -31,5 +31,5 @@ __attribute__((used, section("__DATA,__interpose"))) static const struct { const
 void DPInstallSplitSend(void) {
     NSOperatingSystemVersion v = NSProcessInfo.processInfo.operatingSystemVersion;
     long version = v.majorVersion * 10000 + v.minorVersion * 100 + v.patchVersion;
-    gCheckSecondary = version >= 130300 && version < 260100;
+    atomic_store_explicit(&gCheckSecondary, version >= 130300 && version < 260100, memory_order_relaxed);
 }

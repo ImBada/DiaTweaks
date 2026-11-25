@@ -2,10 +2,11 @@
 #import "AgentWriter.h"
 #include <sys/socket.h>
 
-NSUInteger DPAgentFrameLimit = 64 * 1024 * 1024;
+NSUInteger DPAgentFrameLimit = 4 * 1024 * 1024;
 
+// Filters see the frame only for the call, as it is reused for the next one.
 static NSData *DPFilterFrame(NSArray *filters, NSData *frame, DPAgentReply reply) {
-    NSData *output = [frame copy];
+    NSData *output = frame;
     for (DPAgentFilter filter in filters) {
         NSData *next;
         @try { next = filter(output, reply); } @catch (NSException *exception) { return frame; }
@@ -41,7 +42,8 @@ static void DPForwardAgent(int source, DPAgentWriter *destination, DPAgentWriter
             }
             if (!passing && line.length + (NSUInteger)(stop - part) > DPAgentFrameLimit) {
                 if (line.length && ![destination write:line.bytes length:line.length]) return;
-                line = [NSMutableData new];
+                if (line.length > 65536) line = [NSMutableData new];
+                else line.length = 0;
                 passing = YES;
             }
             if (passing) {
@@ -51,7 +53,7 @@ static void DPForwardAgent(int source, DPAgentWriter *destination, DPAgentWriter
                 if (newline) {
                     NSData *output = DPFilterFrame(filters, line, reply);
                     if (output) {
-                        NSMutableData *frame = [output mutableCopy];
+                        NSMutableData *frame = output == line ? line : [output mutableCopy];
                         [frame appendBytes:"\n" length:1];
                         if (![destination write:frame.bytes length:frame.length]) return;
                     }
@@ -59,7 +61,8 @@ static void DPForwardAgent(int source, DPAgentWriter *destination, DPAgentWriter
             }
             if (newline) {
                 inFrame = NO;
-                if (line.length) line = [NSMutableData new];
+                if (line.length > 65536) line = [NSMutableData new];
+                else line.length = 0;
             }
             part = stop;
         }

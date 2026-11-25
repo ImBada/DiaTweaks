@@ -3,8 +3,8 @@
 #import <objc/message.h>
 
 static Class DPDialogPanelClass, DPDialogButtonClass, DPDialogPanelVCClass, DPDialogPanelWCClass;
-static char DPDismissedKey, DPHandledKey, DPDeclineButtonKey, DPHiddenAtLoadKey;
-static BOOL DPHidAtLoad;
+static char DPDismissedKey, DPHandledKey, DPDeclineButtonKey;
+static NSMapTable<NSView *, NSView *> *DPHiddenAtLoad;  // Each prompt hidden in viewDidLoad, with the overlay holding it.
 
 static BOOL DPSuppressConnectPrompts(void) {
     return DPHideConnectAppPrompts.on || DPTurnOffAI.on;
@@ -64,18 +64,22 @@ static NSView *DPConnectPromptIn(NSView *root, NSButton **declineOut) {
     return panel;
 }
 
+// A weak table's count never drops as its entries die, so the table is dropped once no prompt in it is left.
 static void DPRestoreHiddenAtLoadIn(NSView *root) {
-    if (!root || !DPHidAtLoad) return;
-    DPFindView(root, ^BOOL(NSView *view) {
-        NSView *host = DPGet(view, &DPHiddenAtLoadKey);
-        if (!host) return NO;
-        DPSet(view, &DPHiddenAtLoadKey, nil);
+    if (!root || !DPHiddenAtLoad) return;
+    NSArray<NSView *> *panels = DPHiddenAtLoad.keyEnumerator.allObjects;
+    NSUInteger left = panels.count;
+    for (NSView *view in panels) {
+        if (![view isDescendantOf:root]) continue;
+        NSView *host = [DPHiddenAtLoad objectForKey:view];
+        [DPHiddenAtLoad removeObjectForKey:view];
+        left--;
         if (![DPGet(view, &DPDismissedKey) boolValue]) {
             host.hidden = NO;
             view.hidden = NO;
         }
-        return NO;
-    });
+    }
+    if (!left) DPHiddenAtLoad = nil;
 }
 
 static void DPHidePromptWindow(NSWindow *window, NSView *panel) {
@@ -169,8 +173,8 @@ static void DPDialogPanelVC_viewDidLoad(NSViewController *self, SEL _cmd) {
     NSButton *decline = nil;
     NSView *panel = DPConnectPromptIn(self.view, &decline);
     if (!panel) return;
-    DPHidAtLoad = YES;
-    DPSet(panel, &DPHiddenAtLoadKey, self.view);
+    if (!DPHiddenAtLoad) DPHiddenAtLoad = [NSMapTable weakToWeakObjectsMapTable];
+    [DPHiddenAtLoad setObject:self.view forKey:panel];
     self.view.hidden = YES;
     panel.hidden = YES;
 }

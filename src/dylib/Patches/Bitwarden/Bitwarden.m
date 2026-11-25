@@ -72,7 +72,6 @@ static void DPApplyBitwarden(DPPatch *patch) { DPRegisterHost(patch->on); }
 
 DP_PATCH(DPBitwarden) {
     .key = @"bitwarden",
-    .experimental = YES,
     .order = 103,
     .title = @"Allow Bitwarden",
     .detail = @"Unlock the Bitwarden extension with the Bitwarden app, such as with Touch ID. Bitwarden only sets this up for browsers it knows, so this adds the file Dia reads when it’s missing, and takes away only that file.",

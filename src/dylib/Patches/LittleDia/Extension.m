@@ -60,6 +60,17 @@ static NSString *gExtensionID;
 static NSError *gWriteError;
 static NSTimeInterval gLaunchedAt;
 static const NSTimeInterval DPLaunchTime = 20;
+static int gReadyCache = -1;
+static BOOL gReadyQueued;
+
+static void DPWatchReadyCache(void) {
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        [NSNotificationCenter.defaultCenter addObserverForName:DPPatchesDidChangeNotification object:nil queue:nil usingBlock:^(NSNotification *note) {
+            gReadyCache = -1;
+        }];
+    });
+}
 
 static NSString *DPExtensionID(NSString *folder) {
     unsigned char digest[CC_SHA256_DIGEST_LENGTH];
@@ -79,6 +90,7 @@ static NSDictionary<NSString *, NSString *> *DPExtensionFiles(void) {
 }
 
 BOOL DPWriteLittleDiaExtension(BOOL on) {
+    gReadyCache = -1;
     NSString *folder = DPExtensionFolder(), *parent = folder.stringByDeletingLastPathComponent;
     NSFileManager *files = NSFileManager.defaultManager;
     for (NSString *name in [files contentsOfDirectoryAtPath:parent error:nil])
@@ -106,6 +118,8 @@ NSString *DPLittleDiaExtensionProblem(void) {
 }
 
 void DPInstallLittleDiaExtension(void) {
+    DPWatchReadyCache();
+    gReadyCache = -1;
     gLaunchedAt = NSProcessInfo.processInfo.systemUptime;
     if (!DPLittleDia.on) DPDropExtension(DPExtensionFolder());
     if (!DPWriteLittleDiaExtension(DPLittleDia.on) || !DPLittleDia.on) return;
@@ -129,7 +143,7 @@ static BOOL DPBrowserReady(id browser) {
 }
 
 // DPLinkArrived orders hidden Dia windows out before routing, leaving orderedWindows empty.
-static id DPLittleDiaBrowser(void) {
+static id DPLittleDiaBrowser(BOOL readyOnly) {
     id browser = DPCommandBrowser();
     if (browser && DPBrowserReady(browser)) return browser;
     id fallback = browser;
@@ -144,22 +158,36 @@ static id DPLittleDiaBrowser(void) {
         if (candidate && DPBrowserReady(candidate)) return candidate;
         if (!fallback) fallback = candidate;
     }
-    return fallback;
+    return readyOnly ? nil : fallback;
 }
 
 // No browser means a launch with no window yet, but only for a while: later it's Dia with every window closed.
 BOOL DPLittleDiaStarting(void) {
-    id extensions = DPExtensions(DPLittleDiaBrowser());
+    id extensions = DPExtensions(DPLittleDiaBrowser(NO));
     if (!extensions) return gExtensionID && NSProcessInfo.processInfo.systemUptime - gLaunchedAt < DPLaunchTime;
     return gExtensionID && [extensions respondsToSelector:@selector(isExtensionSystemReady)] && !DPMsgBool(extensions, @selector(isExtensionSystemReady));
 }
 
 // Chromium crashes on input for an extension that isn't loaded and on, as after it's turned off in Extensions.
-BOOL DPLittleDiaReady(void) { return DPBrowserReady(DPLittleDiaBrowser()); }
+BOOL DPLittleDiaReady(void) {
+    DPWatchReadyCache();
+    if (gReadyCache < 0) {
+        gReadyCache = DPLittleDiaBrowser(YES) ? 1 : 0;
+        if (!gReadyQueued) {
+            gReadyQueued = YES;
+            CFRunLoopPerformBlock(CFRunLoopGetMain(), kCFRunLoopCommonModes, ^{
+                gReadyQueued = NO;
+                gReadyCache = -1;
+            });
+            CFRunLoopWakeUp(CFRunLoopGetMain());
+        }
+    }
+    return gReadyCache != 0;
+}
 
 BOOL DPSendToLittleDia(NSDictionary *request) {
-    id browser = DPLittleDiaBrowser();
-    if (!DPBrowserReady(browser)) return NO;
+    id browser = DPLittleDiaBrowser(YES);
+    if (!browser) return NO;
     NSData *json = [NSJSONSerialization dataWithJSONObject:request options:0 error:nil];
     NSString *text = json ? [[NSString alloc] initWithData:json encoding:NSUTF8StringEncoding] : nil;
     if (!text) return NO;

@@ -79,6 +79,9 @@ static NSAttributedString *DPPlaceholder_get(NSTextView *self, SEL _cmd) {
 }
 
 static NSHashTable<NSMenuItem *> *DPAIItems;
+static NSSet<NSString *> *DPAIShortcuts;
+static BOOL DPAIPlainShortcuts;
+static id DPAIKeyMonitor;
 static char DPDiaHiddenKey;
 
 static void DPItem_setHidden(NSMenuItem *self, SEL _cmd, BOOL hidden) {
@@ -87,12 +90,23 @@ static void DPItem_setHidden(NSMenuItem *self, SEL _cmd, BOOL hidden) {
     DPCallOriginal(DPItem_setHidden, self, hidden || (ai && DPTurnOffAI.on));
 }
 
+static void DPItem_setKeyEquivalent(NSMenuItem *self, SEL _cmd, NSString *key) {
+    DPCallOriginal(DPItem_setKeyEquivalent, self, key);
+    if ([DPAIItems containsObject:self]) DPAIShortcuts = nil;
+}
+
+static void DPItem_setKeyEquivalentModifierMask(NSMenuItem *self, SEL _cmd, NSEventModifierFlags mask) {
+    DPCallOriginal(DPItem_setKeyEquivalentModifierMask, self, mask);
+    if ([DPAIItems containsObject:self]) DPAIShortcuts = nil;
+}
+
 static void DPTrack(NSMenuItem *item) {
     if (!DPIsAITitle(item.title)) return;
     if (![DPAIItems containsObject:item]) {
         DPSet(item, &DPDiaHiddenKey, @(item.hidden));
         [DPAIItems addObject:item];
     }
+    DPAIShortcuts = nil;
     BOOL diaHidden = [DPGet(item, &DPDiaHiddenKey) boolValue];
     BOOL wantHidden = diaHidden || DPTurnOffAI.on;
     if (item.hidden != wantHidden) item.hidden = diaHidden;
@@ -116,14 +130,33 @@ static void DPMenu_insertItem(NSMenu *self, SEL _cmd, NSMenuItem *item, NSIntege
 }
 
 static const NSEventModifierFlags DPModifiers = NSEventModifierFlagCommand | NSEventModifierFlagControl | NSEventModifierFlagOption | NSEventModifierFlagShift;
+static const NSEventModifierFlags DPChordModifiers = NSEventModifierFlagCommand | NSEventModifierFlagControl | NSEventModifierFlagOption;
+
+static NSString *DPSignShortcut(NSEventModifierFlags mods, NSString *key) {
+    return key.length ? [NSString stringWithFormat:@"%lx:%@", (unsigned long)(mods & DPModifiers), key.lowercaseString] : nil;
+}
+
+static NSSet<NSString *> *DPAIShortcutSet(void) {
+    if (DPAIShortcuts) return DPAIShortcuts;
+    NSMutableSet<NSString *> *set = [NSMutableSet set];
+    BOOL plain = NO;
+    for (NSMenuItem *item in DPAIItems) {
+        NSString *signedKey = DPSignShortcut(item.keyEquivalentModifierMask, item.keyEquivalent);
+        if (!signedKey) continue;
+        [set addObject:signedKey];
+        if (!(item.keyEquivalentModifierMask & DPChordModifiers)) plain = YES;
+    }
+    DPAIPlainShortcuts = plain;
+    return DPAIShortcuts = [set copy];
+}
 
 // Dia dispatches shortcuts ahead of menus, so hidden AI items must be blocked here.
 static BOOL DPIsAIShortcut(NSEvent *event) {
     NSEventModifierFlags mods = event.modifierFlags & DPModifiers;
-    NSString *key = event.charactersIgnoringModifiers.lowercaseString;
-    for (NSMenuItem *item in DPAIItems) {
-        if (!item.keyEquivalent.length || (item.keyEquivalentModifierMask & DPModifiers) != mods) continue;
-        if ([item.keyEquivalent.lowercaseString isEqual:key]) return YES;
+    NSSet<NSString *> *shortcuts = DPAIShortcutSet();
+    if ((mods & DPChordModifiers) || DPAIPlainShortcuts) {
+        NSString *signedKey = DPSignShortcut(mods, event.charactersIgnoringModifiers);
+        if (signedKey && [shortcuts containsObject:signedKey]) return YES;
     }
     if ((event.keyCode != 36 && event.keyCode != 76) || mods != (NSEventModifierFlagCommand | NSEventModifierFlagControl)) return NO;
     return [NSStringFromClass([event.window.firstResponder class]) hasPrefix:@"_TtCC15BoostCommandBar"];
@@ -151,29 +184,38 @@ static void DPOfferRelaunch(DPPatch *patch) {
     if ([alert runModal] == NSAlertFirstButtonReturn) DPHandOffAndQuit(@[ @"apply" ]);
 }
 
+static void DPSyncAIMonitor(void) {
+    DPSyncMonitor(&DPAIKeyMonitor, DPTurnOffAI.on, NSEventMaskKeyDown, ^NSEvent *(NSEvent *event) {
+        return DPTurnOffAI.on && !DPShortcutRecording() && DPIsAIShortcut(event) ? nil : event;
+    });
+}
+
 static void DPInstallTurnOffAI(void) {
     DPCutOffAIServers();
     DPAIItems = [NSHashTable weakObjectsHashTable];
+    DPAIShortcuts = nil;
     DPPlaceholderViews = [NSHashTable weakObjectsHashTable];
     DPMorningBriefs = [NSHashTable weakObjectsHashTable];
     DPChatSidebars = [NSHashTable weakObjectsHashTable];
     DPHookClass(NSMenu.class, @selector(addItem:), (IMP)DPMenu_addItem);
     DPHookClass(NSMenu.class, @selector(insertItem:atIndex:), (IMP)DPMenu_insertItem);
     DPHookClass(NSMenuItem.class, @selector(setHidden:), (IMP)DPItem_setHidden);
+    DPHookClass(NSMenuItem.class, @selector(setKeyEquivalent:), (IMP)DPItem_setKeyEquivalent);
+    DPHookClass(NSMenuItem.class, @selector(setKeyEquivalentModifierMask:), (IMP)DPItem_setKeyEquivalentModifierMask);
     DPHook(DPDiaCapabilitiesToolbar, @selector(layout), (IMP)DPHost_layout);
     DPHook(DPDiaTabCardActions, @selector(layout), (IMP)DPHost_layout);
     DPHook(DPDiaSettingsHeader, @selector(layout), (IMP)DPSettingsHeader_layout);
     DPHook(DPDiaPlaceholderText, @selector(placeholderAttributedString), (IMP)DPPlaceholder_get);
     DPHook(DPDiaChatSidebar, @selector(viewWillLayout), (IMP)DPChatSidebar_viewWillLayout);
     DPInstallAIRows();
-    [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskKeyDown handler:^NSEvent *(NSEvent *event) {
-        return DPTurnOffAI.on && !DPShortcutRecording() && DPIsAIShortcut(event) ? nil : event;
-    }];
+    DPSyncAIMonitor();
     DPOnLaunch(^{ DPTrackMenu(NSApp.mainMenu); });
 }
 
 static void DPApplyTurnOffAI(DPPatch *patch) {
     DPApplyHides(patch);
+    DPAIShortcuts = nil;
+    DPSyncAIMonitor();
     for (NSMenuItem *item in DPAIItems.allObjects) DPTrack(item);
     for (NSTextView *view in DPPlaceholderViews.allObjects) view.needsDisplay = YES;
     for (NSView *section in DPMorningBriefs.allObjects) DPHideBrief(section);

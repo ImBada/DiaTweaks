@@ -5,6 +5,7 @@ extern DPPatch DPSavePageAs;
 static const NSInteger DPWebContentsVisible = 2;
 static NSHashTable *DPPages;
 static NSMenuItem *DPSaveItem;
+static id DPSaveKeyMonitor;
 
 static NSDictionary *DPDefaultSaveShortcut(void) {
     return @{ @"keyCode" : @1, @"modifiers" : @(NSEventModifierFlagOption | NSEventModifierFlagCommand), @"key" : @"S" };
@@ -44,19 +45,22 @@ static void DPShowSaveItem(BOOL shown) {
     [file insertItem:DPSaveItem atIndex:print >= 0 ? print : file.numberOfItems];
 }
 
+static void DPApplySavePageAs(DPPatch *patch) {
+    DPShowSaveItem(patch->on);
+    DPSyncMonitor(&DPSaveKeyMonitor, patch->on, NSEventMaskKeyDown, ^NSEvent *(NSEvent *event) {
+        if (!DPSavePageAs.on || !DPShortcutMatches(event, &DPSavePageAs) || !DPFrontPage()) return event;
+        if (!event.isARepeat) DPSaveFrontPage();
+        return nil;
+    });
+}
+
 static void DPInstallSavePageAs(void) {
     DPPages = [NSHashTable weakObjectsHashTable];
     DPHook(DPDiaWebContents, @selector(setVisibility:), (IMP)DPPage_setVisibility);
     DPSaveItem = DPMenuItem(@"Save Page As…", ^{ DPSaveFrontPage(); });
     DPOnLaunch(^{ DPShowSaveItem(DPSavePageAs.on); });
-    [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskKeyDown handler:^NSEvent *(NSEvent *event) {
-        if (!DPSavePageAs.on || !DPShortcutMatches(event, &DPSavePageAs) || !DPFrontPage()) return event;
-        if (!event.isARepeat) DPSaveFrontPage();
-        return nil;
-    }];
+    DPApplySavePageAs(&DPSavePageAs);
 }
-
-static void DPApplySavePageAs(DPPatch *patch) { DPShowSaveItem(patch->on); }
 
 static NSString *DPVerifySavePageAs(DPPatch *patch) {
     NSMenu *file = [NSApp.mainMenu itemWithTitle:@"File"].submenu;

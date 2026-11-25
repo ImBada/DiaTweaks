@@ -261,16 +261,29 @@ static int gHelperAlerts;
 @end
 
 // Apple's own binaries may only launch from where they're installed, so the stand-in processes are copies of this test.
-static pid_t spawnIdleCopy(NSString *path) {
+static pid_t spawnCopyWithArg(NSString *path, const char *arg, BOOL blockTerm) {
     NSFileManager *fm = NSFileManager.defaultManager;
     [fm createDirectoryAtPath:path.stringByDeletingLastPathComponent withIntermediateDirectories:YES attributes:nil error:nil];
     [fm removeItemAtPath:path error:nil];
     NSCAssert([fm copyItemAtPath:NSBundle.mainBundle.executablePath toPath:path error:nil], @"copy test to %@", path);
+    posix_spawnattr_t attr;
+    posix_spawnattr_init(&attr);
+    if (blockTerm) {
+        sigset_t mask;
+        sigemptyset(&mask);
+        sigaddset(&mask, SIGTERM);
+        posix_spawnattr_setsigmask(&attr, &mask);
+        posix_spawnattr_setflags(&attr, POSIX_SPAWN_SETSIGMASK);
+    }
     pid_t pid = 0;
-    const char *argv[] = { path.fileSystemRepresentation, "--idle", NULL };
-    NSCAssert(posix_spawn(&pid, argv[0], NULL, NULL, (char *const *)argv, NULL) == 0, @"spawn %@", path);
+    const char *argv[] = { path.fileSystemRepresentation, arg, NULL };
+    int rc = posix_spawn(&pid, argv[0], NULL, &attr, (char *const *)argv, NULL);
+    posix_spawnattr_destroy(&attr);
+    NSCAssert(rc == 0, @"spawn %@", path);
     return pid;
 }
+
+static pid_t spawnIdleCopy(NSString *path) { return spawnCopyWithArg(path, "--idle", NO); }
 
 static void testPasskeysTrustOnlyTheirHelper(void) {
     gAppSupportRoot = makeTempDir();
@@ -314,6 +327,58 @@ static void testPasskeysTrustOnlyTheirHelper(void) {
     }
     method_exchangeImplementations(add, capture);
     method_exchangeImplementations(runModal, count);
+    unlockAndRemove(gAppSupportRoot);
+}
+
+static void testICloudPasswordsStopsOnlyStagedDia(void) {
+    const char *pristine = "/Users/x/Library/Application Support/DiaPatches/pristine/Dia.app/Contents/MacOS/Dia";
+    NSCAssert(DPIsStagedDia(pristine, pristine), @"the pristine Dia is the one to stop");
+    NSCAssert(DPIsStagedDia("/Applications/.DiaTweaks/Dia.app/Contents/MacOS/Dia", pristine), @"a staged Dia is stopped");
+    NSCAssert(!DPIsStagedDia("/Applications/.DiaTweaks/Dia.app/Contents/MacOS/Dia Helper", pristine), @"a helper beside Dia is left alone");
+    NSCAssert(!DPIsStagedDia("/Applications/.DiaTweaks/bin/diapatch", pristine), @"anything else staged is left alone");
+    NSCAssert(!DPIsStagedDia("/Applications/.DiaTweaksOld/Dia.app/Contents/MacOS/Dia", pristine), @"a folder that only shares the prefix is left alone");
+    NSCAssert(!DPIsStagedDia("/Applications/Dia.app/Contents/MacOS/Dia", pristine), @"the installed Dia is left alone");
+    NSCAssert(!DPIsStagedDia("/Contents/MacOS/Dia", pristine), @"a bare executable name is left alone");
+
+    gAppSupportRoot = makeTempDir();
+    pid_t quiet = spawnIdleCopy(DPAppSupport(@"Elsewhere/Dia.app/Contents/MacOS/Dia"));
+    DPStopOriginalDia();
+    NSCAssert(kill(quiet, 0) == 0, @"stopping with no original Dia running leaves other processes alone");
+
+    pid_t stale = spawnIdleCopy(DPAppSupport(@"DiaPatches/pristine/Dia.app/Contents/MacOS/Dia"));
+    __block int status = 0;
+    dispatch_semaphore_t reaped = dispatch_semaphore_create(0);
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        waitpid(stale, &status, 0);
+        dispatch_semaphore_signal(reaped);
+    });
+    NSDate *start = NSDate.date;
+    DPStopOriginalDia();
+    NSTimeInterval took = -start.timeIntervalSinceNow;
+    NSCAssert(!dispatch_semaphore_wait(reaped, dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC)), @"the original Dia is stopped");
+    NSCAssert(WIFSIGNALED(status) && WTERMSIG(status) == SIGTERM, @"the original Dia is asked to quit before it is killed, got status %d", status);
+    NSCAssert(took < 0.2, @"a Dia that quits when asked costs no wait for the kill, took %.3fs", took);
+    NSCAssert(kill(quiet, 0) == 0, @"a process outside the original Dia survives");
+
+    pid_t stubborn = spawnCopyWithArg(DPAppSupport(@"DiaPatches/pristine/Dia.app/Contents/MacOS/Dia"), "--idle", YES);
+    __block int stubbornStatus = 0;
+    dispatch_semaphore_t stubbornReaped = dispatch_semaphore_create(0);
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        waitpid(stubborn, &stubbornStatus, 0);
+        dispatch_semaphore_signal(stubbornReaped);
+    });
+    DPICloudPasswords.on = NO;
+    NSDate *installStart = NSDate.date;
+    DPICloudPasswords.install();
+    NSTimeInterval installTook = -installStart.timeIntervalSinceNow;
+    NSCAssert(installTook < 0.08, @"DPInstallICloudPasswords dispatches wait off the main thread so launch never stalls, took %.3fs", installTook);
+    NSCAssert(!dispatch_semaphore_wait(stubbornReaped, dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC)),
+              @"background cleanup escalates to SIGKILL when original Dia ignores SIGTERM");
+    NSCAssert(WIFSIGNALED(stubbornStatus) && WTERMSIG(stubbornStatus) == SIGKILL,
+              @"stubborn original Dia is reaped by SIGKILL after SIGTERM grace period, got %d", stubbornStatus);
+
+    kill(quiet, SIGKILL);
+    waitpid(quiet, NULL, 0);
     unlockAndRemove(gAppSupportRoot);
 }
 
@@ -638,6 +703,7 @@ int main(int argc, char **argv) {
         testHostFolderFallback();
         testPasskeysChromelessAndTransition();
         testPasskeysTrustOnlyTheirHelper();
+        testICloudPasswordsStopsOnlyStagedDia();
         testICloudPasswordsTemplatesAndChromeless();
         testBitwardenAndOnePasswordChromeless();
         testProtonPass();

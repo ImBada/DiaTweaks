@@ -45,7 +45,31 @@ void DPOnLaunch(void (^block)(void)) {}
 - (void)browser:(id)browser didCreateNewWebContents:(id)page isActive:(BOOL)active {}
 @end
 
+@interface FakeRoutePage : NSObject
+@property (nonatomic, strong) NSURL *url;
+@property (nonatomic, copy) NSString *title;
+@property BOOL canGoBack, canGoForward;
+@end
+@implementation FakeRoutePage
+@end
+
+@interface FakePopupBrowser : NSObject
+@end
+@implementation FakePopupBrowser
+- (long)type { return 2; }
+@end
+
 static void DPApp_activate(NSApplication *self, SEL _cmd, BOOL flag) {}
+
+static FakeRoutePage *DPCreatedPage(NSString *address) {
+    static _TtC3ADK15ChromiumBrowser *delegate;
+    static FakePopupBrowser *browser;
+    if (!delegate) delegate = [_TtC3ADK15ChromiumBrowser new], browser = [FakePopupBrowser new];
+    FakeRoutePage *page = [FakeRoutePage new];
+    page.url = address ? [NSURL URLWithString:address] : nil;
+    [delegate browser:browser didCreateNewWebContents:page isActive:YES];
+    return page;
+}
 
 static _TtC5Popup19PlatformPopupWindow *DPNewPopup(void) {
     _TtC5Popup19PlatformPopupWindow *window = [[_TtC5Popup19PlatformPopupWindow alloc] initWithContentRect:NSMakeRect(-30000, -30000, 400, 300)
@@ -162,6 +186,69 @@ int main(void) {
         CHECK(![nilProxy respondsToSelector:@selector(length)], "nil-target DPStayingLink does not abort on respondsToSelector:");
         CHECK(![nilProxy isKindOfClass:NSString.class] && ![nilProxy conformsToProtocol:@protocol(NSCopying)],
               "nil-target DPStayingLink safely returns NO for kind/protocol checks");
+
+        DPLittleDia.on = YES;
+        DPWindowsAwaitingPage = [NSPointerArray weakObjectsPointerArray];  // The windows above never get a page.
+        CHECK(!DPExpected.count && !DPPendingPages.count, "no request or page is left pending before the claiming tests");
+        NSRect frameA = NSMakeRect(-30000, -30000, 500, 400), frameB = NSMakeRect(-29000, -30000, 600, 300);
+        void (^expecting)(NSRect, NSString *) = ^(NSRect frame, NSString *address) {
+            DPExpectLittleDiaWindow(frame, address ? @{@"url" : address} : @{}, ^{}, nil);
+        };
+        void (^becomeKey)(NSWindow *) = ^(NSWindow *window) {
+            ((_TtC5Popup19PlatformPopupWindow *)window).fakeKey = YES;
+            [NSNotificationCenter.defaultCenter postNotificationName:NSWindowDidBecomeKeyNotification object:window];
+        };
+
+        _TtC5Popup19PlatformPopupWindow *preexisting = DPNewPopup();
+        becomeKey(preexisting);
+        expecting(frameA, @"https://a.example/x");
+        becomeKey(preexisting);
+        CHECK(!DPIsLittleDiaWindow(preexisting) && DPExpected.count == 1, "a popup that was already open before the request is not claimed");
+        FakeRoutePage *oauth = DPCreatedPage(@"https://accounts.example/oauth");
+        _TtC5Popup19PlatformPopupWindow *foreign = DPNewPopup();
+        becomeKey(foreign);
+        CHECK(!DPIsLittleDiaWindow(foreign), "a popup whose page is another site's is not claimed");
+        CHECK(DPExpected.count == 1 && DPPendingPages.count == 1, "the refused popup leaves the request and pages as they were");
+        FakeRoutePage *pageA = DPCreatedPage(@"https://a.example/x");
+        becomeKey(foreign);
+        CHECK(!DPIsLittleDiaWindow(foreign) && DPExpected.count == 1, "refocusing a refused popup after the real page arrives still leaves it alone");
+        _TtC5Popup19PlatformPopupWindow *wa = DPNewPopup();
+        becomeKey(wa);
+        CHECK(DPIsLittleDiaWindow(wa) && DPLittleDiaPage(wa) == pageA && NSEqualRects(wa.frame, frameA), "the request's own page and frame go to the window that follows");
+        CHECK(DPStaysInLittleDia(pageA, DPForegroundTab) && !DPStaysInLittleDia(oauth, DPForegroundTab), "DPStaysInLittleDia matches the claimed Little Dia page in O(1)");
+        CHECK(!DPExpected.count && !DPPendingPages.count && DPLittleDiaPage(foreign) != oauth, "the unrelated page is dropped with the last request");
+
+        expecting(frameA, @"https://a.example/x");
+        expecting(frameB, @"https://b.example/y");
+        FakeRoutePage *pageB = DPCreatedPage(@"https://b.example/y");
+        pageA = DPCreatedPage(@"https://a.example/x");
+        _TtC5Popup19PlatformPopupWindow *wb = DPNewPopup();
+        becomeKey(wb);
+        CHECK(DPLittleDiaPage(wb) == pageB && NSEqualRects(wb.frame, frameB), "pages that arrive out of order keep their own request's frame");
+        wa = DPNewPopup();
+        becomeKey(wa);
+        CHECK(DPLittleDiaPage(wa) == pageA && NSEqualRects(wa.frame, frameA), "the other request still gets its own page and frame");
+
+        expecting(frameA, @"https://a.example/x");
+        expecting(frameB, @"https://b.example/y");
+        wa = DPNewPopup();
+        becomeKey(wa);
+        wb = DPNewPopup();
+        becomeKey(wb);
+        CHECK(NSEqualRects(wa.frame, frameA) && NSEqualRects(wb.frame, frameB), "windows that appear before their pages take the requests in order");
+        pageB = DPCreatedPage(@"https://B.example/y#top");
+        pageA = DPCreatedPage(@"https://a.example/x");
+        CHECK(DPLittleDiaPage(wa) == pageA && DPLittleDiaPage(wb) == pageB, "each waiting window takes the page that has its request's address");
+
+        expecting(frameA, @"https://a.example/x");
+        expecting(frameB, nil);
+        FakeRoutePage *loading = DPCreatedPage(nil), *known = DPCreatedPage(@"https://a.example/x");
+        wa = DPNewPopup();
+        becomeKey(wa);
+        wb = DPNewPopup();
+        becomeKey(wb);
+        CHECK(DPLittleDiaPage(wa) == known && DPLittleDiaPage(wb) == loading, "a page without an address, or a request without one, still pairs in order");
+        CHECK(!DPExpected.count && !DPPendingPages.count && !DPWindowsAwaitingPage.count, "nothing is left pending after the claiming tests");
 
         BOOL survived = YES;
         @try {

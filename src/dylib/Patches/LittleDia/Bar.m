@@ -41,10 +41,22 @@ static NSColor *DPPageColor(id page) {
     return nil;
 }
 
-static char DPColorKey;
+static char DPColorKey, DPColorURLKey;
+static NSMapTable<NSView *, id> *DPColorPages;
 
 void DPMatchPage(NSView *row, id page) {
-    NSColor *color = DPPageColor(page), *current = DPGet(row, &DPColorKey);
+    if (!row) return;
+    NSString *url = [page respondsToSelector:@selector(url)] ? [((id (*)(id, SEL))objc_msgSend)(page, @selector(url)) description] : nil;
+    if (page && url.length && [DPColorPages objectForKey:row] == page && [url isEqualToString:DPGet(row, &DPColorURLKey)]) return;
+    if (!page) {
+        [DPColorPages removeObjectForKey:row];
+        DPSet(row, &DPColorURLKey, nil);
+    } else {
+        if (!DPColorPages) DPColorPages = [NSMapTable weakToWeakObjectsMapTable];
+        [DPColorPages setObject:page forKey:row];
+        DPSet(row, &DPColorURLKey, url);
+    }
+    NSColor *color = page ? DPPageColor(page) : nil, *current = DPGet(row, &DPColorKey);
     if ([current isEqual:color] || (!color && !current)) return;
     DPSet(row, &DPColorKey, color);
     row.wantsLayer = YES;
@@ -299,7 +311,7 @@ static DPLittleBar *DPMakeBar(NSView *title) {
     bar.address = DPMakeAddressView(title);
     bar.divider = DPMakeDivider();
     __weak DPLittleBar *weakBar = bar;
-    bar.timer = [NSTimer scheduledTimerWithTimeInterval:0.25 repeats:YES block:^(NSTimer *timer) {
+    bar.timer = [NSTimer scheduledTimerWithTimeInterval:1.0 repeats:YES block:^(NSTimer *timer) {
         DPLittleBar *live = weakBar;
         if (!live.title) return [timer invalidate];
         if (!DPLittleDia.on) return DPRemoveBar(live.title);

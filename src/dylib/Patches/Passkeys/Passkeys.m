@@ -132,7 +132,6 @@ static void DPApplyPasskeys(DPPatch *patch) {
 
 DP_PATCH(DPPasskeys) {
     .key = @"passkeys",
-    .experimental = YES,
     .order = 100,
     .title = @"Allow iCloud Passkeys",
     .detail = @"Sign in to sites with passkeys saved in Apple Passwords. A patched Dia can’t reach them, so the original Dia that DiaTweaks keeps opens behind the Touch ID prompt, then quits. A password manager with passkeys of its own, such as Proton Pass, keeps its prompt.",

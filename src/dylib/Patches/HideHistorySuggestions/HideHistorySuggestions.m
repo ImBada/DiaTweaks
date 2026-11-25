@@ -25,14 +25,14 @@ static id DPWithoutHistory(id result) {
     if (!rawPerProvider && !rawCombined) return result;
     NSPredicate *kept = [NSPredicate predicateWithBlock:^BOOL(id match, id _) { return !DPFromHistory(match); }];
     NSDictionary<NSString *, NSArray *> *perProvider = rawPerProvider;
-    NSMutableDictionary *filtered = [NSMutableDictionary dictionaryWithCapacity:perProvider.count];
+    NSMutableDictionary *filtered = perProvider ? [NSMutableDictionary dictionaryWithCapacity:perProvider.count] : nil;
     for (NSString *provider in perProvider) {
         id list = perProvider[provider];
         if (![list isKindOfClass:NSArray.class]) continue;
         NSArray *matches = [list filteredArrayUsingPredicate:kept];
         if (matches.count) filtered[provider] = matches;
     }
-    NSArray *combined = [(NSArray *)rawCombined filteredArrayUsingPredicate:kept] ?: @[];
+    NSArray *combined = rawCombined ? ([(NSArray *)rawCombined filteredArrayUsingPredicate:kept] ?: @[]) : nil;
     return ((id (*)(id, SEL, id, id))objc_msgSend)([[result class] alloc], make, combined, filtered);
 }
 

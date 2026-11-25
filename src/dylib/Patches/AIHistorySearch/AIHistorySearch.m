@@ -72,17 +72,19 @@ static BOOL DPSearched;
 NSUInteger DPFindSitesIn(const uint32_t *text, NSUInteger words, const DPWord *signature, NSUInteger length,
                          uint32_t **sites, NSUInteger siteIndex, NSUInteger capacity) {
     if (!text || !signature || length < 1 || words < length) return 0;
-    NSUInteger count = 0;
-    for (NSUInteger i = 0; i + length <= words; i++) {
+    const uint32_t firstValue = signature[0].value, firstMask = signature[0].mask;
+    NSUInteger count = 0, limit = words - length;
+    for (NSUInteger i = 0; i <= limit; i++) {
+        if ((text[i] & firstMask) != firstValue) continue;
         BOOL match = YES;
-        for (NSUInteger j = 0; j < length; j++)
+        for (NSUInteger j = 1; j < length; j++)
             if ((text[i + j] & signature[j].mask) != signature[j].value) {
                 match = NO;
                 break;
             }
         if (!match) continue;
         if (count < capacity) sites[count] = (uint32_t *)(text + i + siteIndex);
-        count++;
+        if (++count > capacity) break;
     }
     return count;
 }

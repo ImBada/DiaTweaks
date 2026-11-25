@@ -1,3 +1,4 @@
+#include <time.h>
 #import <objc/runtime.h>
 #import "StdPatch/StdPatch.h"
 
@@ -79,6 +80,31 @@ int main(void) {
         memcpy(dupBuf, code + syncStart, DPSyncSignatureCount * sizeof(uint32_t));
         memcpy(dupBuf + 64, code + syncStart, DPSyncSignatureCount * sizeof(uint32_t));
         check("DPFindSitesIn reports an ambiguous duplicate sync match", DPFindSitesIn(dupBuf, 128, DPSyncSignature, DPSyncSignatureCount, syncSites, DPSyncSiteIndex, 1) == 2);
+
+        NSUInteger benchWords = (4 * 1024 * 1024) / sizeof(uint32_t);
+        uint32_t *benchBuf = malloc(benchWords * sizeof(uint32_t));
+        check("allocate 4 MB synthetic __text buffer", benchBuf != NULL);
+        if (benchBuf) {
+            for (NSUInteger i = 0; i < benchWords; i++) benchBuf[i] = (i & 31) == 0 ? 0x94000001u : 0xd503201fu;
+            NSUInteger plantedSync = benchWords - 96, plantedAsync0 = benchWords / 2, plantedAsync1 = benchWords - 48;
+            memcpy((uint8_t *)(benchBuf + plantedSync - 2) + 1, &DPSyncSignature[0].value, sizeof(uint32_t));
+            for (NSUInteger i = 0; i < DPSyncSignatureCount; i++) benchBuf[plantedSync + i] = DPSyncSignature[i].value;
+            for (NSUInteger i = 0; i < DPAsyncSignatureCount; i++) {
+                benchBuf[plantedAsync0 + i] = DPAsyncSignature[i].value;
+                benchBuf[plantedAsync1 + i] = DPAsyncSignature[i].value;
+            }
+            uint32_t *foundSync[1] = {NULL}, *foundAsync[DPAsyncSites] = {NULL, NULL};
+            uint64_t t0 = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
+            NSUInteger sc = DPFindSitesIn(benchBuf, benchWords, DPSyncSignature, DPSyncSignatureCount, foundSync, DPSyncSiteIndex, 1);
+            NSUInteger ac = DPFindSitesIn(benchBuf, benchWords, DPAsyncSignature, DPAsyncSignatureCount, foundAsync, DPAsyncSiteIndex, DPAsyncSites);
+            double elapsedMs = (double)(clock_gettime_nsec_np(CLOCK_UPTIME_RAW) - t0) / 1e6;
+            check("4 MB scan finds planted sync and async sites",
+                  sc == 1 && ac == DPAsyncSites && foundSync[0] == benchBuf + plantedSync + DPSyncSiteIndex
+                  && foundAsync[0] == benchBuf + plantedAsync0 + DPAsyncSiteIndex
+                  && foundAsync[1] == benchBuf + plantedAsync1 + DPAsyncSiteIndex);
+            check("4 MB __text scan completes under 30 ms even with ASan+UBSan", elapsedMs < 30.0);
+            free(benchBuf);
+        }
 
         DPSyncSite = NULL;
         DPAsyncSiteCount = 0;

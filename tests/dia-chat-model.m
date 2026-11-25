@@ -369,6 +369,33 @@ static void TestRelayFilters(void) {
     StopRelay(relay, done);
     DPAgentFrameLimit = limit;
     DPSetAgentFilters(@"t", nil, nil);
+
+    CHECK(DPAgentFrameLimit == 4 * 1024 * 1024, "a frame is buffered up to 4 MB, not 64");
+    DPSetAgentFilters(@"t", ^NSData *(NSData *line, DPAgentReply reply) { return Upper(line, reply); }, nil);
+    relay = StartRelay(&done);
+    NSMutableData *large = [NSMutableData dataWithData:Bytes([@"" stringByPaddingToLength:2 * 1024 * 1024 withString:@"a" startingAtIndex:0])];
+    [large appendData:Bytes(@"\n")];
+    NSMutableData *over = [NSMutableData dataWithData:Bytes([@"" stringByPaddingToLength:DPAgentFrameLimit + 1000 withString:@"b" startingAtIndex:0])];
+    [over appendData:Bytes(@"\nsmall\n")];
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        WriteAll(relay.app, large);
+        WriteAll(relay.app, over);
+    });
+    NSMutableData *shouted = [NSMutableData dataWithData:Bytes([@"" stringByPaddingToLength:2 * 1024 * 1024 withString:@"A" startingAtIndex:0])];
+    [shouted appendData:Bytes(@"\n")];
+    CHECK([ReadExactly(relay.agent, shouted.length) isEqual:shouted], "a 2 MB frame is still filtered");
+    expected = [NSMutableData dataWithData:over];
+    [(NSMutableData *)expected replaceBytesInRange:NSMakeRange(over.length - 6, 5) withBytes:"SMALL"];
+    CHECK([ReadExactly(relay.agent, expected.length) isEqual:expected], "a frame past the limit passes unmodified and the next frame is filtered again");
+    StopRelay(relay, done);
+
+    DPSetAgentFilters(@"t", ^NSData *(NSData *line, DPAgentReply reply) { return line; }, nil);
+    relay = StartRelay(&done);
+    NSData *kept = Bytes([NSString stringWithFormat:@"%@\n\nx\n%@\nend\n", [@"" stringByPaddingToLength:100000 withString:@"m" startingAtIndex:0], [@"" stringByPaddingToLength:300 withString:@"n" startingAtIndex:0]]);
+    WriteAll(relay.app, kept);
+    CHECK([ReadExactly(relay.agent, kept.length) isEqual:kept], "frames a filter returns unchanged arrive whole, whatever length the frame before had");
+    StopRelay(relay, done);
+    DPSetAgentFilters(@"t", nil, nil);
 }
 
 static int OpenDescriptors(void) {

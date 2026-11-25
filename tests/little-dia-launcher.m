@@ -54,6 +54,75 @@ void DPOnLaunch(void (^block)(void)) { block(); }
 
 #import "Patches/LittleDia/Launcher.m"
 #import "Patches/LittleDia/NewWindow.m"
+#import "Patches/LittleDia/Profile.m"
+
+BOOL DPIsLittleDiaWindow(NSWindow *window) { return YES; }
+id DPLittleDiaPage(NSWindow *window) { return nil; }
+NSString *DPLittleDiaProfileName(NSWindow *window) { return @"Personal"; }
+BOOL DPSendToLittleDia(NSDictionary *request) { return YES; }
+NSDictionary *DPLittleDiaTab(NSWindow *window, NSString *action) { return @{}; }
+void DPPromoteLittleDiaWindow(NSWindow *window) {}
+void DPLittleDiaGo(NSWindow *window, SEL action) {}
+void DPBringBackPutAway(NSWindow *little) {}
+NSString *DPLittleDiaURL(NSWindow *window) { return @"https://example.com"; }
+NSView *DPMakeAddressView(NSView *title) { return [NSView new]; }
+void DPRefreshAddressView(NSView *view) {}
+BOOL DPIsKind(id object, const char *className) { return object && [NSStringFromClass([object class]) isEqualToString:@(className)]; }
+NSView *DPFindView(NSView *root, BOOL (^match)(NSView *view)) {
+    if (!root) return nil;
+    if (match(root)) return root;
+    for (NSView *sub in root.subviews) {
+        NSView *found = DPFindView(sub, match);
+        if (found) return found;
+    }
+    return nil;
+}
+NSArray<NSView *> *DPFindViews(const char *className) { return @[]; }
+BOOL DPHasLabel(NSView *view, NSString *label) { return [view.accessibilityLabel isEqualToString:label]; }
+id DPGet(id object, const void *key) { return object ? objc_getAssociatedObject(object, key) : nil; }
+void DPSet(id object, const void *key, id value) { if (object) objc_setAssociatedObject(object, key, value, OBJC_ASSOCIATION_RETAIN_NONATOMIC); }
+void DPHook(const char *className, SEL sel, IMP replacement) {}
+IMP DPPushOriginalIMP(id object, SEL sel, IMP replacement, DPHookFrame *frame) { return (IMP)abort; }
+void DPPopOriginalIMP(DPHookFrame *frame) {}
+
+#import "Patches/LittleDia/Bar.m"
+
+@interface CountingBarMenuDelegate : NSObject <NSMenuDelegate>
+@property NSInteger updates;
+@end
+@implementation CountingBarMenuDelegate
+- (void)menuNeedsUpdate:(NSMenu *)menu { self.updates++; }
+@end
+
+@interface FakeBarAppDelegate : NSObject <NSApplicationDelegate>
+@property (nonatomic, strong) NSArray *appleScriptWindows;
+@end
+@implementation FakeBarAppDelegate
+@end
+
+@interface FakeRGBAColor : NSObject
+@property float r, g, b, a;
+@end
+@implementation FakeRGBAColor
+@end
+
+@interface FakeColorPage : NSObject
+@property (nonatomic, strong) NSURL *url;
+@property (nonatomic, strong) FakeRGBAColor *bg;
+@property NSInteger colorReads;
+@end
+@implementation FakeColorPage
+- (id)rootBackgroundColor {
+    self.colorReads++;
+    return self.bg;
+}
+@end
+
+static NSMenu *gPoppedBarMenu;
+static BOOL DPMenu_captureBarPopUp(NSMenu *self, SEL _cmd, NSMenuItem *item, NSPoint location, NSView *view) {
+    gPoppedBarMenu = self;
+    return YES;
+}
 
 static int failures;
 #define CHECK(cond, msg) do { if (!(cond)) { printf("FAIL: %s\n", msg); failures++; } } while (0)
@@ -168,6 +237,63 @@ int main(void) {
         gReady = YES;
         [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.8]];
         CHECK([DPFileMenu() indexOfItem:gItem] >= 0, "turning Little Dia back on shows New Little Dia Window within a second, not after the slow poll");
+
+        DPSwapMethod(NSMenu.class, @selector(popUpMenuPositioningItem:atLocation:inView:), (IMP)DPMenu_captureBarPopUp);
+        NSArray<NSString *> *names = @[ @"Personal", @"Work", @"Study", @"Travel" ];
+        NSMutableArray *scriptProfiles = [NSMutableArray array];
+        for (NSString *n in names) [scriptProfiles addObject:@{ @"name" : n }];
+        FakeBarAppDelegate *appDel = [FakeBarAppDelegate new];
+        appDel.appleScriptWindows = @[ @{ @"windowId" : @"w1", @"appleScriptProfiles" : scriptProfiles } ];
+        NSApp.delegate = appDel;
+
+        NSImage *img = [[NSImage alloc] initWithSize:NSMakeSize(16, 16)];
+        NSMenu *moveMenu = [[NSMenu alloc] initWithTitle:@"Move to Profile"];
+        for (NSString *n in names) {
+            NSMenuItem *it = [[NSMenuItem alloc] initWithTitle:n action:nil keyEquivalent:@""];
+            it.image = img;
+            [moveMenu addItem:it];
+        }
+        CountingBarMenuDelegate *moveDel = [CountingBarMenuDelegate new];
+        moveMenu.delegate = moveDel;
+
+        NSMenu *tabsMenu = [[NSMenu alloc] initWithTitle:@"Tabs"];
+        NSMenuItem *moveRoot = [[NSMenuItem alloc] initWithTitle:@"Move to Profile" action:nil keyEquivalent:@""];
+        moveRoot.submenu = moveMenu;
+        [tabsMenu addItem:moveRoot];
+        CountingBarMenuDelegate *tabsDel = [CountingBarMenuDelegate new];
+        tabsMenu.delegate = tabsDel;
+        NSMenuItem *tabsRoot = [[NSMenuItem alloc] initWithTitle:@"Tabs" action:nil keyEquivalent:@""];
+        tabsRoot.submenu = tabsMenu;
+        [mainMenu addItem:tabsRoot];
+
+        NSButton *profBtn = DPMakeProfilesButton();
+        DPShowProfiles(profBtn);
+        CHECK(tabsDel.updates == 1 && moveDel.updates == 1, "DPShowProfiles updates Tabs and Move to Profile menus once total, not once per profile");
+        CHECK(gPoppedBarMenu.numberOfItems == 4 && gPoppedBarMenu.itemArray[0].image == img && gPoppedBarMenu.itemArray[3].image == img,
+              "DPShowProfiles attaches every profile image from the hoisted submenu");
+
+        NSView *barRow = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 400, 40)];
+        NSView *titleView = [[NSView alloc] initWithFrame:NSMakeRect(80, 6, 200, 28)];
+        [barRow addSubview:titleView];
+        DPLittleBar *bar = DPMakeBar(titleView);
+        CHECK(fabs(bar.timer.timeInterval - 1.0) < 0.001, "DPMakeBar schedules its safety timer at 1.0 s, not 0.25 s");
+        [bar.timer invalidate];
+
+        FakeRGBAColor *dark = [FakeRGBAColor new];
+        dark.r = 0.1f; dark.g = 0.1f; dark.b = 0.15f; dark.a = 1.0f;
+        FakeColorPage *page = [FakeColorPage new];
+        page.url = [NSURL URLWithString:@"https://example.com/one"];
+        page.bg = dark;
+        DPMatchPage(barRow, page);
+        CHECK(page.colorReads == 1 && barRow.layer.backgroundColor != NULL, "first DPMatchPage samples page color and tints bar");
+        DPMatchPage(barRow, page);
+        DPMatchPage(barRow, page);
+        CHECK(page.colorReads == 1, "repeated DPMatchPage with unchanged URL skips DPPageColor Chromium calls");
+        page.url = [NSURL URLWithString:@"https://example.com/two"];
+        DPMatchPage(barRow, page);
+        CHECK(page.colorReads == 2, "changing page URL re-samples DPPageColor");
+        DPMatchPage(barRow, nil);
+        CHECK(barRow.layer.backgroundColor == NULL && barRow.appearance == nil, "DPMatchPage(row, nil) clears bar tint and appearance");
 
         if (failures) return 1;
         puts("PASS: Little Dia launcher opens, resolves URLs and searches, and dismisses cleanly");

@@ -101,11 +101,16 @@ static BOOL DPEscapeCloses(NSEvent *event) {
     return YES;
 }
 
-static void DPInstallEscape(void) {
-    [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskKeyDown handler:^NSEvent *(NSEvent *event) {
+static id gEscapeMonitor;
+
+void DPSyncLittleDiaEscape(void) {
+    DPSyncMonitor(&gEscapeMonitor, DPLittleDia.on && DPLittleDiaEscape.on, NSEventMaskKeyDown, ^NSEvent *(NSEvent *event) {
         return DPEscapeCloses(event) ? nil : event;
-    }];
+    });
 }
+
+static void DPApplyEscape(DPPatch *patch) { DPSyncLittleDiaEscape(); }
+static void DPInstallEscape(void) { DPSyncLittleDiaEscape(); }
 
 DP_PATCH(DPLittleDiaEscape) {
     .key = @"littleDiaEscapeCloses",
@@ -117,6 +122,7 @@ DP_PATCH(DPLittleDiaEscape) {
     .tint = @"systemMintColor",
     .requires = @"littleDia",
     .install = DPInstallEscape,
+    .apply = DPApplyEscape,
 };
 
 DP_PATCH(DPLittleDiaFollowRules) {

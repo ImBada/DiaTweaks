@@ -2,6 +2,7 @@
 #import "Patches/HideToolbar/HideToolbar.h"
 
 static NSMapTable<NSWindow *, NSWindow *> *gOver;
+static id gClickMonitor;
 
 static NSArray<NSView *> *DPToolbars(NSWindow *window) {
     NSMutableArray<NSView *> *bars = [NSMutableArray array];
@@ -53,16 +54,20 @@ void DPPutLittleDiaOver(NSWindow *little, NSWindow *window) {
     DPFadeToolbars(window, YES);
 }
 
+void DPSyncLittleDiaOver(void) {
+    NSEventMask clicks = NSEventMaskLeftMouseDown | NSEventMaskRightMouseDown | NSEventMaskOtherMouseDown;
+    DPSyncMonitor(&gClickMonitor, DPLittleDia.on, clicks, ^NSEvent *(NSEvent *event) {
+        if (!DPLittleDia.on || !DPLittleDiaIsOver(event.window)) return event;
+        [[gOver objectForKey:event.window] performClose:nil];
+        return nil;
+    });
+}
+
 void DPInstallLittleDiaOver(void) {
     gOver = [NSMapTable weakToWeakObjectsMapTable];
     for (NSNotificationName name in @[ NSWindowWillCloseNotification, NSWindowWillMiniaturizeNotification ])
         [NSNotificationCenter.defaultCenter addObserverForName:name object:nil queue:nil usingBlock:^(NSNotification *note) {
             if (gOver.count && DPIsLittleDiaWindow(note.object)) DPUncover(note.object);
         }];
-    NSEventMask clicks = NSEventMaskLeftMouseDown | NSEventMaskRightMouseDown | NSEventMaskOtherMouseDown;
-    [NSEvent addLocalMonitorForEventsMatchingMask:clicks handler:^NSEvent *(NSEvent *event) {
-        if (!DPLittleDia.on || !DPLittleDiaIsOver(event.window)) return event;
-        [[gOver objectForKey:event.window] performClose:nil];
-        return nil;
-    }];
+    DPSyncLittleDiaOver();
 }

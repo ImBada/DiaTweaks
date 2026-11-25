@@ -66,7 +66,9 @@ static BOOL DPOpenFramed(NSURL *url, NSRect frame, NSDictionary *noted, void (^m
                               @"width" : @(llround(NSWidth(frame))), @"height" : @(llround(NSHeight(frame))),
                               @"until" : @(until)};
     if (!DPSendToLittleDia(request)) return NO;
-    DPExpectLittleDiaWindow(frame, noted, missed, claimed);
+    NSMutableDictionary *expected = [noted mutableCopy] ?: [NSMutableDictionary dictionary];
+    expected[@"url"] = address;
+    DPExpectLittleDiaWindow(frame, expected, missed, claimed);
     return YES;
 }
 

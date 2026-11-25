@@ -5,6 +5,7 @@ extern DPPatch DPMouseBackForward;
 
 static const NSInteger DPWebContentsHidden = 0;
 static NSHashTable *DPPages;
+static id DPMouseMonitor;
 
 static BOOL DPCanSteer(id page) {
     static const char *const needs[] = {"nativeView", "visibility", "hasFocus", "canGoBack", "canGoForward", "navigationController"};
@@ -59,17 +60,22 @@ static void DPGo(id page, NSInteger offset) {
     if ([controller respondsToSelector:go]) ((void (*)(id, SEL))objc_msgSend)(controller, go);
 }
 
-static void DPInstallMouseBackForward(void) {
-    DPPages = [NSHashTable weakObjectsHashTable];
-    DPHook(DPDiaWebContents, @selector(setVisibility:), (IMP)DPPage_setVisibility);
-    [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskOtherMouseDown | NSEventMaskOtherMouseUp | NSEventMaskSwipe handler:^NSEvent *(NSEvent *event) {
+static void DPApplyMouseBackForward(DPPatch *patch) {
+    NSEventMask mask = NSEventMaskOtherMouseDown | NSEventMaskOtherMouseUp | NSEventMaskSwipe;
+    DPSyncMonitor(&DPMouseMonitor, patch->on, mask, ^NSEvent *(NSEvent *event) {
         if (!DPMouseBackForward.on) return event;
         NSInteger offset = DPOffset(event);
         id page = offset ? DPPageAt(event) : nil;
         if (!page) return event;
         if (event.type != NSEventTypeOtherMouseDown) DPGo(page, offset);
         return nil;
-    }];
+    });
+}
+
+static void DPInstallMouseBackForward(void) {
+    DPPages = [NSHashTable weakObjectsHashTable];
+    DPHook(DPDiaWebContents, @selector(setVisibility:), (IMP)DPPage_setVisibility);
+    DPApplyMouseBackForward(&DPMouseBackForward);
 }
 
 static NSString *DPVerifyMouseBackForward(DPPatch *patch) {
@@ -92,5 +98,6 @@ DP_PATCH(DPMouseBackForward) {
     .section = @"Page",
     .classes = DPClasses(DPDiaWebContents, DPDiaNavigationController),
     .install = DPInstallMouseBackForward,
+    .apply = DPApplyMouseBackForward,
     .verify = DPVerifyMouseBackForward,
 };

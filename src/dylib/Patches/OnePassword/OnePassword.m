@@ -38,7 +38,6 @@ static NSString *DPOnePasswordProblem(DPPatch *patch) {
 
 DP_PATCH(DPOnePassword) {
     .key = @"onePassword",
-    .experimental = YES,
     .order = 102,
     .title = @"Allow 1Password",
     .detail = @"Connect the 1Password extension to the 1Password app. The app turns away a patched Dia, so each time the extension connects, the original Dia runs hidden for a moment to start the app’s helper, then quits.",

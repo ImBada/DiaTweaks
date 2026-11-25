@@ -20,6 +20,8 @@ static void DPApplyLittleDia(DPPatch *patch) {
         DPUncoverAllLittleDia();
         DPRestoreLittleDiaStack();
     }
+    DPSyncLittleDiaOver();
+    DPSyncLittleDiaEscape();
     DPRefreshLittleDiaWindows();
     DPRefreshLittleDiaNewWindow();
     if (patch->on && !gLoadedOn) DPWriteLittleDiaExtension(YES);

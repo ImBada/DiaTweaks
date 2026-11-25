@@ -5,9 +5,11 @@
 #define DPDiaSuggestionCell    "_TtC15BoostCommandBar23SuggestionTableViewCell"
 #define DPDiaIconContainer     "_TtC15BoostCommandBar17IconContainerView"
 
-static char DPAIRowsKey, DPPickKey;
+static char DPAIRowsKey, DPPickKey, DPAIPendingKey, DPAIRowMemoKey;
 static CFTimeInterval gArrowAt;
+static BOOL gFinding;
 static NSHashTable<NSTableView *> *DPAITables;
+static NSMapTable<NSView *, NSImageView *> *DPSuggestionIcons;
 
 static BOOL DPFoldsRows(NSTableView *table) {
     id owner = table.delegate;
@@ -15,21 +17,10 @@ static BOOL DPFoldsRows(NSTableView *table) {
         || DPIsKind(owner, DPDiaPreferencesTable);
 }
 
-static BOOL DPIsAIRowView(NSTableView *table, NSView *row) {
-    BOOL sidebar = DPIsKind(table.delegate, DPDiaSettingsSidebar), suggestions = DPIsKind(table.delegate, DPDiaCommandBarSuggestions);
-    return DPFindView(row, ^BOOL(NSView *view) {
-        if ([view isKindOfClass:NSImageView.class]) return [view.accessibilityLabel isEqual:@"chat"];
-        // Suggestion text can start with "Chat with" too: only the icon says it's chat.
-        if (suggestions) return NO;
-        NSString *text = [view isKindOfClass:NSTextField.class] ? [(NSTextField *)view stringValue] : view.accessibilityLabel;
-        if (sidebar) return [text isEqual:@"Apps"] || [text isEqual:@"Skills"];
-        return DPIsAITitle(text);
-    }) != nil;
+// The long lists make a row view only as it scrolls in, so their AI rows are hidden as the views appear instead of making every one now.
+static BOOL DPFillsLazily(NSTableView *table) {
+    return DPIsKind(table.delegate, DPDiaShortcutsPane) || DPIsKind(table.delegate, DPDiaPreferencesTable);
 }
-
-static BOOL DPArrowJustPressed(void) { return CACurrentMediaTime() - gArrowAt < 0.3; }
-
-static NSString *DPTrimmed(NSString *text) { return [text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet]; }
 
 static id DPFirstOfClass(NSView *root, Class cls) {
     return DPFindView(root, ^BOOL(NSView *view) { return [view isKindOfClass:cls]; });
@@ -38,6 +29,42 @@ static id DPFirstOfClass(NSView *root, Class cls) {
 static NSView *DPFirstOfKind(NSView *root, const char *className) {
     return DPFindView(root, ^BOOL(NSView *view) { return DPIsKind(view, className); });
 }
+
+static NSImageView *DPIconIn(NSView *root) {
+    return DPFirstOfClass(DPFirstOfKind(root, DPDiaIconContainer), NSImageView.class);
+}
+
+static BOOL DPIsAIRowView(NSTableView *table, NSView *row) {
+    BOOL suggestions = DPIsKind(table.delegate, DPDiaCommandBarSuggestions);
+    if (suggestions) {
+        NSImageView *icon = [DPSuggestionIcons objectForKey:row];
+        if (icon && [icon isDescendantOf:row]) return [icon.accessibilityLabel isEqual:@"chat"];
+        icon = DPIconIn(row);
+        if (icon) {
+            if (!DPSuggestionIcons) DPSuggestionIcons = [NSMapTable weakToWeakObjectsMapTable];
+            [DPSuggestionIcons setObject:icon forKey:row];
+            return [icon.accessibilityLabel isEqual:@"chat"];
+        }
+    } else {
+        NSNumber *memo = DPGet(row, &DPAIRowMemoKey);
+        if (memo) return memo.boolValue;
+    }
+    BOOL sidebar = !suggestions && DPIsKind(table.delegate, DPDiaSettingsSidebar);
+    BOOL matched = DPFindView(row, ^BOOL(NSView *view) {
+        if ([view isKindOfClass:NSImageView.class]) return [view.accessibilityLabel isEqual:@"chat"];
+        // Suggestion text can start with "Chat with" too: only the icon says it's chat.
+        if (suggestions) return NO;
+        NSString *text = [view isKindOfClass:NSTextField.class] ? [(NSTextField *)view stringValue] : view.accessibilityLabel;
+        if (sidebar) return [text isEqual:@"Apps"] || [text isEqual:@"Skills"];
+        return DPIsAITitle(text);
+    }) != nil;
+    if (!suggestions) DPSet(row, &DPAIRowMemoKey, @(matched));
+    return matched;
+}
+
+static BOOL DPArrowJustPressed(void) { return CACurrentMediaTime() - gArrowAt < 0.3; }
+
+static NSString *DPTrimmed(NSString *text) { return [text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet]; }
 
 static NSView *DPBarOf(NSView *view) {
     while (view && !DPIsKind(view, DPDiaCommandBar)) view = view.superview;
@@ -55,10 +82,6 @@ static NSView *DPTypedCell(NSTableView *table, NSString *typed) {
             return cell;
     }
     return nil;
-}
-
-static NSImageView *DPIconIn(NSView *root) {
-    return DPFirstOfClass(DPFirstOfKind(root, DPDiaIconContainer), NSImageView.class);
 }
 
 static NSString *DPTrailingName(NSView *cell, NSString *typed) {
@@ -130,17 +153,24 @@ static void DPUnhideAIRows(NSTableView *table, BOOL ours) {
 
 // Asking a table for a row view during an update throws, and hidden rows have none: unhide, look, hide.
 static void DPFindAIRows(NSTableView *table) {
-    static BOOL finding;
-    if (finding) return;
-    finding = YES;
+    if (gFinding) return;
+    gFinding = YES;
     NSMutableIndexSet *rows = [NSMutableIndexSet indexSet];
     BOOL hidden = [DPGet(table, &DPAIRowsKey) count] > 0;
+    BOOL lazily = DPFillsLazily(table);
+    DPSet(table, &DPAIPendingKey, nil);
     @try {
         DPUnhideAIRows(table, hidden);
         hidden = NO;
-        for (NSInteger row = 0; DPTurnOffAI.on && row < table.numberOfRows; row++) {
-            NSView *view = [table rowViewAtRow:row makeIfNecessary:YES];
-            if (view && DPIsAIRowView(table, view)) [rows addIndex:row];
+        if (DPTurnOffAI.on && lazily) {
+            [table enumerateAvailableRowViewsUsingBlock:^(NSTableRowView *view, NSInteger row) {
+                if (row >= 0 && DPIsAIRowView(table, view)) [rows addIndex:row];
+            }];
+        } else {
+            for (NSInteger row = 0; DPTurnOffAI.on && row < table.numberOfRows; row++) {
+                NSView *view = [table rowViewAtRow:row makeIfNecessary:YES];
+                if (view && DPIsAIRowView(table, view)) [rows addIndex:row];
+            }
         }
         hidden = rows.count > 0;
         if (hidden) [table hideRowsAtIndexes:rows withAnimation:NSTableViewAnimationEffectNone];
@@ -148,7 +178,7 @@ static void DPFindAIRows(NSTableView *table) {
         @try { DPUnhideAIRows(table, hidden); hidden = NO; } @catch (NSException *again) {}
         rows = hidden ? [table.hiddenRowIndexes mutableCopy] : [NSMutableIndexSet indexSet];
     } @finally {
-        finding = NO;
+        gFinding = NO;
     }
     BOOL changed = ![rows isEqualToIndexSet:DPGet(table, &DPAIRowsKey) ?: [NSIndexSet indexSet]];
     DPSet(table, &DPAIRowsKey, rows);
@@ -173,18 +203,85 @@ CGFloat DPHiddenSuggestionsHeight(NSView *suggestions) {
     return height;
 }
 
-static void DPRefreshAIRows(NSTableView *table) {
-    if ((DPTurnOffAI.on || [DPGet(table, &DPAIRowsKey) count]) && DPFoldsRows(table)) DPFindAIRows(table);
+static void DPScanAvailableAIRows(NSTableView *table) {
+    if (gFinding) return;
+    gFinding = YES;
+    NSMutableIndexSet *added = [NSMutableIndexSet indexSet];
+    @try {
+        [table enumerateAvailableRowViewsUsingBlock:^(NSTableRowView *view, NSInteger row) {
+            if (row >= 0 && ![table.hiddenRowIndexes containsIndex:row] && DPIsAIRowView(table, view)) [added addIndex:row];
+        }];
+        if (added.count) [table hideRowsAtIndexes:added withAnimation:NSTableViewAnimationEffectNone];
+    } @catch (NSException *exception) {} @finally {
+        gFinding = NO;
+    }
+    NSIndexSet *rows = [table.hiddenRowIndexes copy] ?: [NSIndexSet indexSet];
+    DPSet(table, &DPAIRowsKey, rows);
+    if (!DPAITables) DPAITables = [NSHashTable weakObjectsHashTable];
+    if (rows.count) [DPAITables addObject:table];
+    else [DPAITables removeObject:table];
+}
+
+static void DPRefreshAIRows(NSTableView *table, BOOL full) {
+    if (!(DPTurnOffAI.on || [DPGet(table, &DPAIRowsKey) count]) || !DPFoldsRows(table)) return;
+    if (!full && DPTurnOffAI.on && DPFillsLazily(table)) DPScanAvailableAIRows(table);
+    else DPFindAIRows(table);
 }
 
 static void DPTable_endUpdates(NSTableView *self, SEL _cmd) {
     DPCallOriginal(DPTable_endUpdates, self);
-    DPRefreshAIRows(self);
+    DPRefreshAIRows(self, NO);
 }
 
 static void DPTable_reloadData(NSTableView *self, SEL _cmd) {
     DPCallOriginal(DPTable_reloadData, self);
-    DPRefreshAIRows(self);
+    DPRefreshAIRows(self, YES);
+}
+
+static void DPRowView_prepareForReuse(NSTableRowView *self, SEL _cmd) {
+    DPSet(self, &DPAIRowMemoKey, nil);
+    DPCallOriginal(DPRowView_prepareForReuse, self);
+}
+
+static void DPCellView_prepareForReuse(NSTableCellView *self, SEL _cmd) {
+    if (self.superview) DPSet(self.superview, &DPAIRowMemoKey, nil);
+    DPCallOriginal(DPCellView_prepareForReuse, self);
+}
+
+static void DPRowView_didAddSubview(NSTableRowView *self, SEL _cmd, NSView *subview) {
+    DPSet(self, &DPAIRowMemoKey, nil);
+    DPCallOriginal(DPRowView_didAddSubview, self, subview);
+}
+
+// Hiding a row while the table is still making its views crashes AppKit, so a new AI row waits for the layout pass that follows, before anything is drawn.
+static void DPTable_didAddSubview(NSTableView *self, SEL _cmd, NSView *subview) {
+    DPCallOriginal(DPTable_didAddSubview, self, subview);
+    if (!DPTurnOffAI.on || ![subview isKindOfClass:NSTableRowView.class] || !DPFillsLazily(self)) return;
+    NSHashTable<NSView *> *pending = DPGet(self, &DPAIPendingKey);
+    if (!pending) DPSet(self, &DPAIPendingKey, pending = [NSHashTable weakObjectsHashTable]);
+    [pending addObject:subview];
+    self.needsLayout = YES;
+}
+
+static void DPTable_layout(NSTableView *self, SEL _cmd) {
+    DPCallOriginal(DPTable_layout, self);
+    NSHashTable<NSView *> *pending = DPGet(self, &DPAIPendingKey);
+    if (!pending) return;
+    DPSet(self, &DPAIPendingKey, nil);
+    NSMutableIndexSet *added = [NSMutableIndexSet indexSet];
+    for (NSView *view in pending.allObjects) {
+        if (!DPTurnOffAI.on) break;
+        NSInteger row = [self rowForView:view];
+        if (row >= 0 && DPIsAIRowView(self, view)) [added addIndex:row];
+    }
+    if (!added.count) return;
+    NSMutableIndexSet *rows = [DPGet(self, &DPAIRowsKey) mutableCopy] ?: [NSMutableIndexSet indexSet];
+    [rows addIndexes:added];
+    DPSet(self, &DPAIRowsKey, rows);
+    if (!DPAITables) DPAITables = [NSHashTable weakObjectsHashTable];
+    [DPAITables addObject:self];
+    gFinding = YES;
+    @try { [self hideRowsAtIndexes:added withAnimation:NSTableViewAnimationEffectNone]; } @catch (NSException *exception) {} @finally { gFinding = NO; }
 }
 
 // An arrow onto the chat row moves on; Dia's own pick of it must not, or the field fills with the next suggestion.
@@ -217,8 +314,13 @@ void DPApplyAIRows(void) {
 
 void DPInstallAIRows(void) {
     DPAITables = [NSHashTable weakObjectsHashTable];
+    DPHookClass(NSTableRowView.class, @selector(prepareForReuse), (IMP)DPRowView_prepareForReuse);
+    DPHookClass(NSTableRowView.class, @selector(didAddSubview:), (IMP)DPRowView_didAddSubview);
+    DPHookClass(NSTableCellView.class, @selector(prepareForReuse), (IMP)DPCellView_prepareForReuse);
     DPHookClass(NSTableView.class, @selector(endUpdates), (IMP)DPTable_endUpdates);
     DPHookClass(NSTableView.class, @selector(reloadData), (IMP)DPTable_reloadData);
+    DPHookClass(NSTableView.class, @selector(didAddSubview:), (IMP)DPTable_didAddSubview);
+    DPHookClass(NSTableView.class, @selector(layout), (IMP)DPTable_layout);
     DPHookClass(NSTableView.class, @selector(selectRowIndexes:byExtendingSelection:), (IMP)DPTable_selectRows);
     DPHook(DPDiaCommandBarText, @selector(textView:doCommandBySelector:), (IMP)DPInput_command);
 }

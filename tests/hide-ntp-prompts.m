@@ -7,8 +7,24 @@ BOOL DPTesting = YES;
 #import "Patches/HideTrialButton/HideTrialButton.m"
 #import "Patches/HideSetupSuggestions/HideSetupSuggestions.m"
 #import "Patches/HideDefaultBrowserBanner/HideDefaultBrowserBanner.m"
+#import "Patches/HideHistorySuggestions/HideHistorySuggestions.m"
 #import "StdPatch/Hide.m"
 #import "StdPatch/HideHosts.m"
+
+@interface DPFakeHistoryResult : NSObject
+@property(nonatomic, strong) NSArray *combinedMatches;
+@property(nonatomic, strong) NSDictionary *perProviderMatches;
+- (instancetype)init:(NSArray *)combined perProviderMatches:(NSDictionary *)perProvider;
+@end
+@implementation DPFakeHistoryResult
+- (instancetype)init:(NSArray *)combined perProviderMatches:(NSDictionary *)perProvider {
+    if ((self = [super init])) {
+        _combinedMatches = combined;
+        _perProviderMatches = perProvider;
+    }
+    return self;
+}
+@end
 
 @interface _TtC13NavigationBar17NavigationBarView : NSView
 @end
@@ -271,6 +287,25 @@ int main(void) {
         DPPatchCount = 1;
         check("a new patch table is matched from scratch", DPHider(trial) == &DPHideTrialButton && !DPHider([[DPInnerButton alloc] initWithFrame:NSZeroRect]));
         DPHideTrialButton.on = NO;
+
+        NSDictionary *hist = @{ @"hasTabMatch" : @NO, @"providerType" : @"HistoryURL", @"matchType" : @"history-url" };
+        NSDictionary *search = @{ @"hasTabMatch" : @NO, @"providerType" : @"Search", @"matchType" : @"search-what-you-typed" };
+        NSDictionary *typed = @{ @"hasTabMatch" : @NO, @"providerType" : @"HistoryURL", @"matchType" : @"url-what-you-typed" };
+        DPFakeHistoryResult *streaming = [[DPFakeHistoryResult alloc] init:nil perProviderMatches:@{ @"HistoryURL" : @[ hist ], @"Search" : @[ search ] }];
+        DPFakeHistoryResult *filteredStreaming = DPWithoutHistory(streaming);
+        check("per-provider-only autocomplete result preserves nil combinedMatches", filteredStreaming.combinedMatches == nil);
+        check("per-provider-only autocomplete result strips history provider and keeps search",
+              !filteredStreaming.perProviderMatches[@"HistoryURL"] && [filteredStreaming.perProviderMatches[@"Search"] isEqual:@[ search ]]);
+
+        DPFakeHistoryResult *combinedOnly = [[DPFakeHistoryResult alloc] init:@[ hist, typed ] perProviderMatches:nil];
+        DPFakeHistoryResult *filteredCombined = DPWithoutHistory(combinedOnly);
+        check("combined-only autocomplete result preserves nil perProviderMatches and keeps url-what-you-typed",
+              filteredCombined.perProviderMatches == nil && [filteredCombined.combinedMatches isEqual:@[ typed ]]);
+
+        DPFakeHistoryResult *allHist = [[DPFakeHistoryResult alloc] init:@[ hist ] perProviderMatches:@{ @"HistoryURL" : @[ hist ] }];
+        DPFakeHistoryResult *filteredEmpty = DPWithoutHistory(allHist);
+        check("non-nil combinedMatches with only history becomes empty array, not nil",
+              filteredEmpty.combinedMatches != nil && filteredEmpty.combinedMatches.count == 0 && filteredEmpty.perProviderMatches.count == 0);
 
         if (failures) printf("%d failure(s)\n", failures);
         else printf("hide-ntp-prompts: all checks passed\n");

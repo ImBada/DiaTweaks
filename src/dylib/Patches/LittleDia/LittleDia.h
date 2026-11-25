@@ -20,6 +20,7 @@ NSSize DPLittleDiaSize(void);
 NSRect DPLittleDiaSavedFrame(void);
 void DPSaveLittleDiaFrame(NSRect frame);
 NSArray<NSView *> *DPLittleDiaRows(void);
+void DPSyncLittleDiaEscape(void);
 
 void DPInstallLittleDiaRoute(void);
 void DPOpenLinkInLittleDia(NSURL *url);
@@ -50,6 +51,7 @@ void DPRefreshLittleDiaWindows(void);
 void DPPromoteLittleDiaWindow(NSWindow *window);
 
 void DPInstallLittleDiaOver(void);
+void DPSyncLittleDiaOver(void);
 void DPPutLittleDiaOver(NSWindow *little, NSWindow *window);
 BOOL DPLittleDiaIsOver(NSWindow *window);
 void DPUncoverAllLittleDia(void);

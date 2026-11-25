@@ -9,6 +9,9 @@ static id capture(id self, SEL cmd, NSEventMask mask, NSEvent *(^handler)(NSEven
     NSCAssert(mask == (NSEventMaskOtherMouseDown | NSEventMaskOtherMouseUp | NSEventMaskSwipe), @"side buttons and driver swipes");
     return monitor = [handler copy];
 }
+static void uncapture(id self, SEL cmd, id token) {
+    if (token == monitor) monitor = nil;
+}
 
 @interface ArcWebContentsNavigationController : NSObject
 @property NSInteger index;
@@ -56,9 +59,12 @@ int main(void) {
     @autoreleasepool {
         [NSApplication sharedApplication];
         DPHookClass(object_getClass(NSEvent.class), @selector(addLocalMonitorForEventsMatchingMask:handler:), (IMP)capture);
+        DPHookClass(object_getClass(NSEvent.class), @selector(removeMonitor:), (IMP)uncapture);
         DPHookClass(object_getClass(NSEvent.class), @selector(mouseLocation), (IMP)mouseLocation);
         DPHookClass(object_getClass(NSWindow.class), @selector(windowNumberAtPoint:belowWindowWithWindowNumber:), (IMP)windowNumberAtPoint);
+        DPMouseBackForward.on = NO;
         DPInstallMouseBackForward();
+        NSCAssert(!monitor, @"off-state installs no mouse monitor");
         NSCAssert(!DPVerifyMouseBackForward(&DPMouseBackForward), @"required Dia methods exist");
         NSWindow *window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 800, 600)
             styleMask:NSWindowStyleMaskTitled backing:NSBackingStoreBuffered defer:NO];
@@ -68,8 +74,15 @@ int main(void) {
         MouseEvent *event = [MouseEvent new];
         event.window = window; event.locationInWindow = NSMakePoint(600, 300);
         event.buttonNumber = 3; event.type = NSEventTypeOtherMouseUp;
-        NSCAssert(monitor(event) == event, @"disabled patch preserves input");
         DPMouseBackForward.on = YES;
+        DPMouseBackForward.apply(&DPMouseBackForward);
+        NSCAssert(monitor != nil, @"turning on installs mouse monitor");
+        DPMouseBackForward.on = NO;
+        NSCAssert(monitor(event) == event, @"disabled patch preserves input");
+        DPMouseBackForward.apply(&DPMouseBackForward);
+        NSCAssert(!monitor, @"applying off-state removes mouse monitor");
+        DPMouseBackForward.on = YES;
+        DPMouseBackForward.apply(&DPMouseBackForward);
         for (NSInteger button = 0; button <= 5; button++) {
             NSInteger before = right.navigationController.index;
             event.buttonNumber = button;

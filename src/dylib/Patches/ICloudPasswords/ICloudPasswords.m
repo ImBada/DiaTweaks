@@ -116,26 +116,50 @@ static NSString *DPICloudPasswordsProblem(DPPatch *patch) {
     return DPRelayProblem() ?: DPHostProblem(manifest, @"com.apple.passwordmanager");
 }
 
-// A lingering pristine Dia from a prior hand-off blocks Dia's launch check.
+// Only Dia itself, never a helper that sits beside it.
+static BOOL DPIsStagedDia(const char *path, const char *pristine) {
+    static const char root[] = "/Applications/.DiaTweaks/", executable[] = "/Contents/MacOS/Dia";
+    size_t length = strlen(path), prefix = sizeof root - 1, tail = sizeof executable - 1;
+    return !strcmp(path, pristine) || (!strncmp(path, root, prefix) && length > prefix + tail && !strcmp(path + length - tail, executable));
+}
+
+static BOOL DPAllGone(pid_t *pids, int count, int polls) {
+    for (int poll = 0; poll < polls; poll++) {
+        BOOL gone = YES;
+        for (int i = 0; i < count; i++) {
+            if (pids[i] && kill(pids[i], 0) == 0) gone = NO;
+            else pids[i] = 0;
+        }
+        if (gone) return YES;
+        usleep(10000);
+    }
+    return NO;
+}
+
+// A lingering pristine Dia from a prior hand-off blocks Dia's launch check; stop it off the main thread so launch never stalls.
 static void DPStopOriginalDia(void) {
     char path[PROC_PIDPATHINFO_MAXSIZE];
-    NSString *pristine = DPAppSupport(@"DiaPatches/pristine/Dia.app/Contents/MacOS/Dia").stringByResolvingSymlinksInPath;
+    char real[PATH_MAX];
+    const char *given = DPAppSupport(@"DiaPatches/pristine/Dia.app/Contents/MacOS/Dia").fileSystemRepresentation, *pristine = realpath(given, real) ?: given;
     int listed = proc_listallpids(NULL, 0);
     int capacity = (listed > 0 ? listed : 0) + 64;
     pid_t *pids = calloc((size_t)capacity, sizeof *pids);
     if (!pids) return;
-    int count = proc_listallpids(pids, capacity * (int)sizeof *pids);
+    int count = proc_listallpids(pids, capacity * (int)sizeof *pids), found = 0;
     if (count > capacity) count = capacity;
-    for (int i = 0; i < count; i++) {
-        if (pids[i] == getpid() || proc_pidpath(pids[i], path, sizeof path) <= 0 || (strcmp(path, pristine.fileSystemRepresentation) && ![@(path) hasPrefix:@"/Applications/.DiaTweaks/"])) continue;
-        kill(pids[i], SIGKILL);
-        for (int tries = 0; tries < 50 && kill(pids[i], 0) == 0; tries++) usleep(20000);
+    for (int i = 0; i < count; i++)
+        if (pids[i] != getpid() && proc_pidpath(pids[i], path, sizeof path) > 0 && DPIsStagedDia(path, pristine)) pids[found++] = pids[i];
+    for (int i = 0; i < found; i++) kill(pids[i], SIGTERM);
+    if (found && !DPAllGone(pids, found, 25)) {
+        for (int i = 0; i < found; i++)
+            if (pids[i]) kill(pids[i], SIGKILL);
+        DPAllGone(pids, found, 25);
     }
     free(pids);
 }
 
 static void DPInstallICloudPasswords(void) {
-    DPStopOriginalDia();
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{ DPStopOriginalDia(); });
     DPRegisterHosts(DPICloudPasswords.on);
 }
 
@@ -143,7 +167,6 @@ static void DPApplyICloudPasswords(DPPatch *patch) { DPRegisterHosts(patch->on);
 
 DP_PATCH(DPICloudPasswords) {
     .key = @"icloudPasswords",
-    .experimental = YES,
     .order = 101,
     .title = @"Allow iCloud Passwords",
     .detail = @"AutoFill passwords from Apple Passwords with the iCloud Passwords, Better Passwords or Open Passwords extension. A patched Dia can’t start Apple’s helper, so each time one connects, the original Dia that DiaTweaks keeps opens briefly, without windows, to start it.",

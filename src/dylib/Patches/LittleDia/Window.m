@@ -2,14 +2,41 @@
 #import "Commands/GroupTabs/GroupTabs.h"
 #import <objc/message.h>
 
-static char DPLittleKey, DPPageKey, DPChromeKey, DPSourceKey, DPPromotedKey, DPClosedKey, DPOpenedKey, DPProfileKey;
+static char DPLittleKey, DPNotLittleKey, DPPageKey, DPChromeKey, DPSourceKey, DPPromotedKey, DPClosedKey, DPOpenedKey, DPProfileKey, DPAwaitedKey;
 
 static NSMutableArray<NSDictionary *> *DPExpected;
 static NSMutableArray *DPPendingPages;
 static NSPointerArray *DPWindowsAwaitingPage;
+static NSMapTable *DPLittleWindowsByPage;
+
+static void DPSetLittlePage(NSWindow *window, id page) {
+    DPSet(window, &DPPageKey, page);
+    if (!page) return;
+    if (!DPLittleWindowsByPage) DPLittleWindowsByPage = [NSMapTable weakToWeakObjectsMapTable];
+    [DPLittleWindowsByPage setObject:window forKey:page];
+}
+
+static NSString *DPAddressKey(id address) {
+    NSString *text = [address isKindOfClass:NSURL.class] ? [address absoluteString] : address;
+    NSURLComponents *parts = [text isKindOfClass:NSString.class] ? [NSURLComponents componentsWithString:text] : nil;
+    if (!parts.host.length) return nil;
+    parts.scheme = parts.scheme.lowercaseString;
+    parts.host = parts.host.lowercaseString;
+    parts.fragment = nil;
+    if (!parts.path.length) parts.path = @"/";
+    return parts.string;
+}
+
+static NSString *DPPageAddress(id page) { return [page respondsToSelector:@selector(url)] ? DPAddressKey(DPMsg(page, @selector(url))) : nil; }
+
+static NSString *DPHostOf(NSString *key) { return key ? [NSURL URLWithString:key].host : nil; }
+
+// A page has no address until its navigation starts and a request may carry none, so only two addresses that both exist can rule a pair out, by host in case the site redirects.
+static BOOL DPCouldBe(NSString *requested, NSString *found) { return !requested || !found || [DPHostOf(requested) isEqualToString:DPHostOf(found)]; }
 
 void DPExpectLittleDiaWindow(NSRect frame, NSDictionary *noted, void (^missed)(void), void (^claimed)(NSWindow *window)) {
     NSMutableDictionary *link = [@{@"frame" : [NSValue valueWithRect:frame], @"noted" : noted ?: @{}} mutableCopy];
+    link[@"key"] = DPAddressKey(noted[@"url"]);
     if (missed) link[@"missed"] = [missed copy];
     if (claimed) link[@"claimed"] = [claimed copy];
     [DPExpected addObject:link];
@@ -68,16 +95,42 @@ static void DPFocusPage(NSWindow *window) {
     if (page) [window makeFirstResponder:page];
 }
 
+// An exact address wins, then a page that could still be the request's; a popup whose page is someone else's is left alone.
+static BOOL DPPairRequest(NSUInteger *request, NSUInteger *page) {
+    for (BOOL exact = YES;; exact = NO) {
+        for (NSUInteger p = 0; p < DPPendingPages.count; p++) {
+            NSString *found = DPPageAddress(DPPendingPages[p]);
+            for (NSUInteger r = 0; r < DPExpected.count; r++) {
+                NSString *requested = DPExpected[r][@"key"];
+                if (exact ? (requested && [requested isEqualToString:found]) : DPCouldBe(requested, found)) {
+                    *request = r;
+                    *page = p;
+                    return YES;
+                }
+            }
+        }
+        if (!exact) return NO;
+    }
+}
+
 static void DPClaim(NSWindow *window) {
-    if (!window || !DPIsKind(window, DPDiaPopupWindow) || DPGet(window, &DPLittleKey) || !DPExpected.count) return;
-    NSDictionary *link = DPExpected.firstObject, *noted = link[@"noted"];
-    [DPExpected removeObjectAtIndex:0];
+    if (!window || !DPIsKind(window, DPDiaPopupWindow) || DPGet(window, &DPLittleKey) || DPGet(window, &DPNotLittleKey) || !DPExpected.count) return;
+    NSUInteger at = 0, pageAt = NSNotFound;
+    if (DPPendingPages.count && !DPPairRequest(&at, &pageAt)) {
+        DPSet(window, &DPNotLittleKey, @YES);
+        return;
+    }
+    NSDictionary *link = DPExpected[at], *noted = link[@"noted"];
+    [DPExpected removeObjectAtIndex:at];
     DPSet(window, &DPLittleKey, @YES);
     if ([noted[@"source"] intValue]) DPSet(window, &DPSourceKey, noted[@"source"]);
-    if (DPPendingPages.count) {
-        DPSet(window, &DPPageKey, DPPendingPages.firstObject);
-        [DPPendingPages removeObjectAtIndex:0];
-    } else [DPWindowsAwaitingPage addPointer:(__bridge void *)window];
+    if (pageAt != NSNotFound) {
+        DPSetLittlePage(window, DPPendingPages[pageAt]);
+        [DPPendingPages removeObjectAtIndex:pageAt];
+    } else {
+        DPSet(window, &DPAwaitedKey, link[@"key"]);
+        [DPWindowsAwaitingPage addPointer:(__bridge void *)window];
+    }
     // Discard unmatched pending pages so later popups don't inherit a non-Little-Dia page.
     if (!DPExpected.count) [DPPendingPages removeAllObjects];
     NSRect frame = [link[@"frame"] rectValue];
@@ -107,17 +160,22 @@ static void DPBrowser_didCreate(id self, SEL _cmd, id browser, id page, BOOL act
     if (![browser respondsToSelector:@selector(type)] || type(browser, @selector(type)) != 2) return;
     DPSet(page, &DPProfileKey, DPProfileNameOf(browser));
     [DPWindowsAwaitingPage compact];
-    if (DPWindowsAwaitingPage.count) {
-        NSWindow *window = (__bridge NSWindow *)[DPWindowsAwaitingPage pointerAtIndex:0];
-        [DPWindowsAwaitingPage removePointerAtIndex:0];
-        DPSet(window, &DPPageKey, page);
-        DPRefreshLittleDiaWindows();
-    } else if (DPExpected.count) [DPPendingPages addObject:page];
+    NSString *found = DPPageAddress(page);
+    for (NSUInteger i = 0; i < DPWindowsAwaitingPage.count; i++) {
+        NSWindow *window = (__bridge NSWindow *)[DPWindowsAwaitingPage pointerAtIndex:i];
+        if (!DPCouldBe(DPGet(window, &DPAwaitedKey), found)) continue;
+        [DPWindowsAwaitingPage removePointerAtIndex:i];
+        DPSetLittlePage(window, page);
+        return DPRefreshLittleDiaWindows();
+    }
+    if (DPExpected.count) [DPPendingPages addObject:page];
 }
 
 static void DPPopupBar_viewDidMoveToWindow(NSView *self, SEL _cmd) {
     DPCallOriginal(DPPopupBar_viewDidMoveToWindow, self);
+    if (!self.window) return;
     if (DPLittleDia.on && DPExpected.count) DPClaim(self.window);
+    else if (!DPGet(self.window, &DPLittleKey)) DPSet(self.window, &DPNotLittleKey, @YES);
 }
 
 static void DPPage_viewDidMoveToWindow(NSView *self, SEL _cmd) {
@@ -130,10 +188,9 @@ static void DPPage_viewDidMoveToWindow(NSView *self, SEL _cmd) {
 
 // Only plain new-tab links stay; sized popups keep their opener for sign-in flows.
 static BOOL DPStaysInLittleDia(id page, NSInteger disposition) {
-    if (disposition != DPForegroundTab || (NSEvent.modifierFlags & (NSEventModifierFlagCommand | NSEventModifierFlagShift))) return NO;
-    for (NSWindow *window in NSApp.windows)
-        if (DPIsLittleDiaWindow(window) && DPLittleDiaPage(window) == page) return YES;
-    return NO;
+    if (!page || disposition != DPForegroundTab || (NSEvent.modifierFlags & (NSEventModifierFlagCommand | NSEventModifierFlagShift))) return NO;
+    NSWindow *window = [DPLittleWindowsByPage objectForKey:page];
+    return DPIsLittleDiaWindow(window) && DPLittleDiaPage(window) == page;
 }
 
 @interface DPStayingLink : NSProxy
@@ -209,7 +266,8 @@ void DPInstallLittleDiaWindows(void) {
     NSNotificationCenter *center = NSNotificationCenter.defaultCenter;
     [center addObserverForName:NSWindowDidBecomeKeyNotification object:nil queue:nil usingBlock:^(NSNotification *note) {
         if (!DPLittleDia.on) return;
-        DPClaim(note.object);
+        if (DPExpected.count) DPClaim(note.object);
+        else if (DPIsKind(note.object, DPDiaPopupWindow) && !DPGet(note.object, &DPLittleKey)) DPSet(note.object, &DPNotLittleKey, @YES);
         DPFocusPage(note.object);
     }];
     [center addObserverForName:NSWindowWillCloseNotification object:nil queue:nil usingBlock:^(NSNotification *note) { DPWindowWillClose(note.object); }];

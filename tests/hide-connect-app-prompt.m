@@ -116,7 +116,28 @@ typedef NS_ENUM(NSInteger, DPTestOutcome) {
 @implementation _TtC13AppsUpsellBar17AppsUpsellBarView
 @end
 
+static NSInteger gSubviewReads;
+@interface DPCountedView : NSView
+@end
+@implementation DPCountedView
+- (NSArray<NSView *> *)subviews {
+    gSubviewReads++;
+    return [super subviews];
+}
+@end
+
 static NSMutableArray<NSWindow *> *gTestWindows;
+static NSMutableArray<NSEvent *(^)(NSEvent *)> *gAIKeyMonitors;
+
+static id DPStubEvent_addMonitor(id self, SEL _cmd, NSEventMask mask, NSEvent *(^handler)(NSEvent *)) {
+    if (!gAIKeyMonitors) gAIKeyMonitors = [NSMutableArray new];
+    id copy = [handler copy];
+    if (mask & NSEventMaskKeyDown) [gAIKeyMonitors addObject:copy];
+    return copy;
+}
+static void DPStubEvent_removeMonitor(id self, SEL _cmd, id token) {
+    [gAIKeyMonitors removeObjectIdenticalTo:token];
+}
 static char gSheetsKey;
 static char gSheetHandlersKey;
 static char gShownKey;
@@ -246,6 +267,8 @@ int main(void) {
         DPHookClass(NSWindow.class, @selector(makeKeyAndOrderFront:), (IMP)DPStubWindow_makeKeyAndOrderFront);
         DPHookClass(NSWindow.class, @selector(orderFront:), (IMP)DPStubWindow_orderFront);
         DPHookClass(NSWindow.class, @selector(close), (IMP)DPStubWindow_close);
+        DPHookClass(object_getClass(NSEvent.class), @selector(addLocalMonitorForEventsMatchingMask:handler:), (IMP)DPStubEvent_addMonitor);
+        DPHookClass(object_getClass(NSEvent.class), @selector(removeMonitor:), (IMP)DPStubEvent_removeMonitor);
 
         DPPatch *patches[] = { &DPHideConnectAppPrompts, &DPTurnOffAI };
         DPPatches = patches;
@@ -607,6 +630,85 @@ int main(void) {
             [covered removeFromSuperview];
             [coveredLate removeFromSuperview];
             [coveredAll removeFromSuperview];
+        }
+
+        {
+            DPTurnOffAI.on = NO;
+            DPHideConnectAppPrompts.on = YES;
+            _TtC6Dialog15DialogPanelView *pending = DPMakePanel(
+                @"Connect Linear to Dia?", @"Use Linear in Chat.", YES, @"OK", @"Don\u2019t connect Linear");
+            _TtC6Dialog25DialogPanelViewController *pendingVC = [_TtC6Dialog25DialogPanelViewController new];
+            pendingVC.dialogView = pending;
+            [pendingVC view];
+            DPHideConnectAppPrompts.on = NO;
+
+            NSWindow *busy = DPMakeWindow();
+            busy.contentView = [[DPCountedView alloc] initWithFrame:NSMakeRect(0, 0, 400, 260)];
+            for (int i = 0; i < 400; i++) {
+                NSView *row = [[DPCountedView alloc] initWithFrame:NSMakeRect(0, 0, 400, 20)];
+                [row addSubview:[[DPCountedView alloc] initWithFrame:NSMakeRect(0, 0, 100, 20)]];
+                [busy.contentView addSubview:row];
+            }
+            gSubviewReads = 0;
+            [busy orderFront:nil];
+            [busy makeKeyAndOrderFront:nil];
+            check("off with a hidden prompt elsewhere: showing a window walks none of its views", gSubviewReads == 0);
+            check("off: a prompt in another window stays hidden", pendingVC.view.hidden && pending.hidden);
+
+            [busy.contentView addSubview:pendingVC.view];
+            [busy orderFront:nil];
+            check("off: showing the window that holds the hidden prompt restores it", !pendingVC.view.hidden && !pending.hidden);
+            [pendingVC.view removeFromSuperview];
+
+            gSubviewReads = 0;
+            [busy orderFront:nil];
+            [busy makeKeyAndOrderFront:nil];
+            [browserWindow beginSheet:busy completionHandler:nil];
+            check("off after the prompt is restored: showing a window or sheet walks none of its views", gSubviewReads == 0);
+            [browserWindow endSheet:busy];
+
+            __weak _TtC6Dialog15DialogPanelView *weakGone = nil;
+            @autoreleasepool {
+                _TtC6Dialog15DialogPanelView *gone = DPMakePanel(
+                    @"Connect Notion to Dia?", @"Use Notion in Chat.", YES, @"OK", @"Don\u2019t connect Notion");
+                _TtC6Dialog25DialogPanelViewController *goneVC = [_TtC6Dialog25DialogPanelViewController new];
+                goneVC.dialogView = gone;
+                DPHideConnectAppPrompts.on = YES;
+                [goneVC view];
+                DPHideConnectAppPrompts.on = NO;
+                check("on: the overlay's prompt is hidden at load", gone.hidden && goneVC.view.hidden);
+                weakGone = gone;
+            }
+            check("off: a prompt that is dismissed without being shown again is not kept alive", !weakGone);
+
+            DPTurnOffAI.on = NO;
+            NSUInteger monitorsBefore = gAIKeyMonitors.count;
+            DPTurnOffAI.install();
+            check("TurnOffAI off: install leaves no local key monitor", gAIKeyMonitors.count == monitorsBefore);
+            DPTurnOffAI.on = YES;
+            DPTurnOffAI.apply(&DPTurnOffAI);
+            check("TurnOffAI on: apply installs local key monitor", gAIKeyMonitors.count == monitorsBefore + 1);
+            NSEvent *(^aiMonitor)(NSEvent *) = gAIKeyMonitors.lastObject;
+            NSMenu *aiMenu = [[NSMenu alloc] initWithTitle:@"AI"];
+            NSMenuItem *chatItem = [[NSMenuItem alloc] initWithTitle:@"New Chat" action:nil keyEquivalent:@"j"];
+            chatItem.keyEquivalentModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagShift;
+            [aiMenu addItem:chatItem];
+            NSEvent *plainA = [NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:0
+                                              timestamp:0 windowNumber:0 context:nil characters:@"a" charactersIgnoringModifiers:@"a" isARepeat:NO keyCode:0];
+            NSEvent *aiChord = [NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint
+                                           modifierFlags:NSEventModifierFlagCommand | NSEventModifierFlagShift
+                                               timestamp:0 windowNumber:0 context:nil characters:@"J" charactersIgnoringModifiers:@"j" isARepeat:NO keyCode:38];
+            check("TurnOffAI key monitor passes plain typing and blocks tracked AI shortcut",
+                  aiMonitor(plainA) == plainA && aiMonitor(aiChord) == nil);
+            chatItem.keyEquivalent = @"k";
+            NSEvent *updatedChord = [NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint
+                                                modifierFlags:NSEventModifierFlagCommand | NSEventModifierFlagShift
+                                                    timestamp:0 windowNumber:0 context:nil characters:@"K" charactersIgnoringModifiers:@"k" isARepeat:NO keyCode:40];
+            check("updating an AI menu item's keyEquivalent refreshes the precomputed shortcut set",
+                  aiMonitor(aiChord) == aiChord && aiMonitor(updatedChord) == nil);
+            DPTurnOffAI.on = NO;
+            DPTurnOffAI.apply(&DPTurnOffAI);
+            check("TurnOffAI off: apply removes local key monitor", gAIKeyMonitors.count == monitorsBefore);
         }
 
         check("patch metadata matches spec",

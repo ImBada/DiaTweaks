@@ -1,6 +1,6 @@
 #import "PullRequestRepo.h"
 
-static char DPDiaTextKey, DPCheckedKey, DPInListKey;
+static char DPDiaTextKey, DPCheckedKey, DPInListKey, DPPRCacheKey;
 
 static NSString *DPMatch(NSString *pattern, NSString *text) {
     if (!text.length) return nil;
@@ -31,17 +31,26 @@ NSString *DPPRTabIDOf(NSView *view) {
 
 NSDictionary *DPPullRequestOf(NSView *view) {
     view = DPEnclosingView(view, DPDiaTabContentView);
+    if (!view) return nil;
     id controller = DPSwiftValue(DPSwiftValue(view, @"viewModel"), @"delegate");
     NSString *item = [DPSwiftValue(controller, @"currentlyRenderedLiveItem") description];
     if (![item containsString:@".pullRequest("]) return nil;
+    NSString *rawTab = [DPSwiftValue(controller, @"tabID") description] ?: @"";
+    NSArray *cached = DPGet(view, &DPPRCacheKey);
+    if (cached && [cached[0] isEqualToString:item] && [cached[1] isEqualToString:rawTab])
+        return cached[2] == NSNull.null ? nil : cached[2];
     NSString *repo = DPMatch(@"github\\.com/[^/\\s]+/([^/\\s)]+)/pull/[0-9]+", item), *number = DPMatch(@"github\\.com/[^\\s)]+/pull/([0-9]+)", item);
     NSString *author = DPMatch(@"author: \"([^\"]+)\"", item), *state = DPMatch(@"PullRequest\\.Status\\.([a-zA-Z]+)", item);
-    NSString *tab = DPPRTabIDOf(view);
-    if (!repo || !number || !author) return nil;
-    NSString *line = [NSString stringWithFormat:@"%@ #%@", repo, number];
-    state = state.length ? [[state substringToIndex:1].uppercaseString stringByAppendingString:[state substringFromIndex:1]] : @"";
-    if (state.length) line = [line stringByAppendingFormat:@" · %@", state];
-    return @{@"repo": line, @"state": state, @"author": author, @"tab": tab ?: @""};
+    NSString *tab = DPMatch(@"[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}", rawTab);
+    NSDictionary *parsed = nil;
+    if (repo && number && author) {
+        NSString *line = [NSString stringWithFormat:@"%@ #%@", repo, number];
+        state = state.length ? [[state substringToIndex:1].uppercaseString stringByAppendingString:[state substringFromIndex:1]] : @"";
+        if (state.length) line = [line stringByAppendingFormat:@" · %@", state];
+        parsed = @{@"repo": line, @"state": state, @"author": author, @"tab": tab ?: @""};
+    }
+    DPSet(view, &DPPRCacheKey, @[ item, rawTab, parsed ?: NSNull.null ]);
+    return parsed;
 }
 
 static NSString *DPSplit(NSView *label, NSString *text, NSString **status, NSString **tab) {

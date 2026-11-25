@@ -68,6 +68,9 @@ static id CaptureMonitor(id self, SEL _cmd, NSEventMask mask, NSEvent *(^handler
     [gMonitors addObject:copy];
     return copy;
 }
+static void RemoveMonitor(id self, SEL _cmd, id token) {
+    [gMonitors removeObjectIdenticalTo:token];
+}
 
 static int failures;
 static void Check(BOOL ok, NSString *msg) {
@@ -1085,9 +1088,13 @@ static void TestUndoCloseTabAndSavePageAs(void) {
     Check(undoMonitor(cmdZ) == cmdZ, @"UndoCloseTab: turning off/pausing before Cmd+Z passes event through without reopening tab");
 
     NSUInteger saveBefore = gMonitors.count;
+    DPSavePageAs.on = NO;
     DPSavePageAs.install();
-    NSEvent *(^saveMonitor)(NSEvent *) = gMonitors[saveBefore];
+    Check(gMonitors.count == saveBefore, @"SavePageAs: leaves no key monitor installed while off");
     DPSavePageAs.on = YES;
+    DPSavePageAs.apply(&DPSavePageAs);
+    Check(gMonitors.count == saveBefore + 1, @"SavePageAs: installs key monitor when turned on");
+    NSEvent *(^saveMonitor)(NSEvent *) = gMonitors[saveBefore];
     ArcWebContents *detached = [ArcWebContents new];
     detached.nativeView = [NSView new];
     detached.visibility = 2;
@@ -1095,6 +1102,9 @@ static void TestUndoCloseTabAndSavePageAs(void) {
                                        timestamp:0 windowNumber:0 context:nil characters:@"z" charactersIgnoringModifiers:@"z" isARepeat:NO keyCode:6];
     Check(NSApp.keyWindow == nil && NSApp.mainWindow == nil && saveMonitor(cmdSave) == cmdSave,
           @"SavePageAs: windowless detached page does not match when no window is key/main");
+    DPSavePageAs.on = NO;
+    DPSavePageAs.apply(&DPSavePageAs);
+    Check(gMonitors.count == saveBefore, @"SavePageAs: turning off removes its key monitor");
 }
 
 @interface DPFakeIndicator : NSView
@@ -1472,6 +1482,7 @@ int main(void) {
         method_exchangeImplementations(class_getInstanceMethod(NSUserDefaults.class, @selector(initWithSuiteName:)),
             class_getInstanceMethod(NSUserDefaults.class, @selector(dp_testInitWithSuiteName:)));
         DPHookClass(object_getClass(NSEvent.class), @selector(addLocalMonitorForEventsMatchingMask:handler:), (IMP)CaptureMonitor);
+        DPHookClass(object_getClass(NSEvent.class), @selector(removeMonitor:), (IMP)RemoveMonitor);
         TestHideSleepingTabs();
         TestHideTabGroupBackground();
         TestKeepFoldersOpen();

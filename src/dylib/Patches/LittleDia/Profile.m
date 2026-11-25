@@ -40,9 +40,21 @@ static NSMenu *DPFilled(NSMenu *menu) {
     return menu;
 }
 
+static NSMenu *gProfileMenu;
+static __weak NSMenu *gMainMenu;
+
 NSImage *DPLittleDiaProfileImage(NSString *name) {
-    NSMenu *tabs = DPFilled([NSApp.mainMenu itemWithTitle:@"Tabs"].submenu);
-    return [DPFilled([tabs itemWithTitle:@"Move to Profile"].submenu) itemWithTitle:name].image;
+    NSMenu *mainMenu = NSApp.mainMenu;
+    if (!gProfileMenu || gMainMenu != mainMenu) {
+        gMainMenu = mainMenu;
+        NSMenu *tabs = DPFilled([mainMenu itemWithTitle:@"Tabs"].submenu);
+        gProfileMenu = DPFilled([tabs itemWithTitle:@"Move to Profile"].submenu);
+        if (gProfileMenu) {
+            CFRunLoopPerformBlock(CFRunLoopGetMain(), kCFRunLoopCommonModes, ^{ gProfileMenu = nil; });
+            CFRunLoopWakeUp(CFRunLoopGetMain());
+        }
+    }
+    return [gProfileMenu itemWithTitle:name].image;
 }
 
 // Run off the main thread: Dia answers its Apple events there, so waiting there times out.
