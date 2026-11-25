@@ -1,6 +1,6 @@
 #import "StdPatch/StdPatch.h"
 
-static const char *const DPLogoClasses[] = {"_TtC10NewTabPage8LogoView", DPDiaNewTabLogo, DPDiaNewTabLogoParticles};
+static const char *const DPLogoClasses[] = {DPDiaNewTabLogoView, DPDiaNewTabLogo, DPDiaNewTabLogoParticles};
 
 static BOOL DPIsNewTabLogo(NSView *view) {
     BOOL logo = NO;

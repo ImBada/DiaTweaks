@@ -2,6 +2,7 @@
 #import "StdPatch/StdPatch.h"
 #import "Commands/GroupTabs/GroupTabs.h"
 #import "Settings/Settings.h"
+#import <dlfcn.h>
 
 void DPInstallPreviews(void) {}
 void DPSetHint(NSView *view, NSString *text) {}
@@ -54,6 +55,7 @@ void DPLocalRepairLinks(void) {}
 #import "Commands/GroupTabs/Order.m"
 #import "Commands/GroupTabs/Grouping.m"
 #import "Commands/GroupTabs/Menu.m"
+#import "Patches/HideNewTabLogo/HideNewTabLogo.m"
 
 @interface DPFakeToolbarDelegate : NSObject <NSToolbarDelegate> {
 @public
@@ -84,6 +86,69 @@ static void expect(BOOL ok, NSString *what) {
 @implementation DPFakeDelegate
 - (void)browser:(id)browser removeTabsFromGroupWithSessionIds:(NSArray *)ids completion:(void (^)(id))done { self.ungroupCalls++; }
 @end
+
+static int runtimeLookups;
+static char aliasNames[32][48];
+static Class aliasClasses[32];
+static int aliasCount;
+
+// Defined here so every lookup by name from this executable, including DPClassNamed's, is counted and can be pointed at a class of the test's choosing.
+Class objc_getClass(const char *name) {
+    static Class (*lookUp)(const char *);
+    if (!lookUp) lookUp = dlsym(RTLD_NEXT, "objc_getClass");
+    runtimeLookups++;
+    for (int i = 0; i < aliasCount; i++)
+        if (!strcmp(aliasNames[i], name)) return aliasClasses[i];
+    return lookUp(name);
+}
+
+// The runtime resolves "Module.Class" to the Swift class "_TtC<len>Module<len>Class".
+static Class registerClass(const char *name, Class superclass) {
+    Class cls = objc_lookUpClass(name);
+    if (cls) return cls;
+    cls = objc_allocateClassPair(superclass, name, 0);
+    objc_registerClassPair(cls);
+    return cls;
+}
+
+static BOOL answeredFromCache(id object, const char *lookup) {
+    if (!DPIsKind(object, lookup)) return NO;
+    int before = runtimeLookups;
+    return DPIsKind(object, lookup) && runtimeLookups == before;
+}
+
+static BOOL cachesSwiftClass(const char *lookup, const char *mangled) {
+    return answeredFromCache([registerClass(mangled, NSObject.class) new], lookup);
+}
+
+static unsigned classSlot(const char *name) {
+    uint32_t hash = 2166136261u;
+    for (const unsigned char *p = (const unsigned char *)name; *p; p++) hash = (hash ^ *p) * 16777619u;
+    return hash & 255;
+}
+
+// Points a name that shares the lookup's cache slot at the class, so the class sits in that slot when the lookup comes.
+static BOOL cacheInSlotOf(const char *lookup, Class cls, id object) {
+    for (int n = 0; n < 10000; n++) {
+        char alias[48];
+        snprintf(alias, sizeof alias, "Alias%d", n);
+        if (classSlot(alias) != classSlot(lookup)) continue;
+        int row = 0;
+        while (row < aliasCount && strcmp(aliasNames[row], alias)) row++;
+        if (row == aliasCount) aliasCount++;
+        strlcpy(aliasNames[row], alias, sizeof aliasNames[row]);
+        aliasClasses[row] = cls;
+        return DPIsKind(object, alias);
+    }
+    return NO;
+}
+
+static BOOL rejectsSlotNeighbour(const char *className, const char *lookup) {
+    id object = [registerClass(className, NSObject.class) new];
+    if (!cacheInSlotOf(lookup, [object class], object)) return NO;
+    int before = runtimeLookups;
+    return !DPIsKind(object, lookup) && runtimeLookups == before + 1;
+}
 
 int main(void) {
     @autoreleasepool {
@@ -267,6 +332,70 @@ int main(void) {
         expect(weakSettings == nil, @"DPSettings deallocates cleanly");
         [NSNotificationCenter.defaultCenter postNotificationName:NSViewBoundsDidChangeNotification object:tempClip];
         expect(YES, @"posting NSViewBoundsDidChangeNotification after DPSettings dealloc does not crash");
+
+        expect(cachesSwiftClass("Cache.One", "_TtC5Cache3One"), @"a dotted Swift class name is answered from the cache");
+        expect(cachesSwiftClass("A.B", "_TtC1A1B"), @"one-letter Swift module and class names are cached");
+        expect(cachesSwiftClass("Personalization.IconButton", "_TtC15Personalization10IconButton"), @"two-digit Swift name lengths are cached");
+        char longLookup[300] = "Pi.", longMangled[300] = "_TtC2Pi256", overLookup[300] = "Rho.", overMangled[300] = "_TtC3Rho257";
+        memset(longLookup + 3, 'B', 256);
+        memset(longMangled + 10, 'B', 256);
+        memset(overLookup + 4, 'B', 257);
+        memset(overMangled + 11, 'B', 257);
+        expect(cachesSwiftClass(longLookup, longMangled), @"a 256-character Swift name part is cached");
+        expect(!cachesSwiftClass(overLookup, overMangled), @"a 257-character Swift name part is not cached");
+
+        static const char *const swiftMisfits[][2] = {
+            {"_TtC03Foo3Bar", "Foo.Bar"},
+            {"_TtC3Foo3BarExtra", "Foo.Bar"},
+            {"_TtC3Foo4Bar", "Foo.Bar"},
+            {"_TtC999999999999Foo3Bar", "Foo.Bar"},
+            {"_TtC0.A", ".A"},
+            {"_TtC3Foo", "Foo.Bar"},
+            {"_TtC3Foo3Baz", "Foo.Bar"},
+            {"_TtC2Fo3Bar", "Foo.Bar"},
+            {"_TtC4Foo.3Bar", "Foo.Bar"},
+            {"_TtCC3Foo3Bar3Baz", "Foo.Bar"},
+            {"_TtC3Foo3Bar", "FooBar"},
+            {"_TtC3Foo3Bar", "Foo:Bar"},
+            {"Swft3Foo3Bar", "Foo.Bar"},
+            {"_TtC3Foo3Bar", "Foo.Bar.Baz"},
+            {"_TtC3Foo3Bar3", "Foo.Bar"},
+            {"_TtC3Foo3Bar", "Foo.Ba"},
+            {"_TtC", "Foo.Bar"},
+            {"_TtC3Foo3Bar", ""},
+        };
+        for (size_t i = 0; i < sizeof swiftMisfits / sizeof *swiftMisfits; i++)
+            expect(rejectsSlotNeighbour(swiftMisfits[i][0], swiftMisfits[i][1]),
+                   [NSString stringWithFormat:@"%s in a cache slot never answers a lookup for \"%s\"", swiftMisfits[i][0], swiftMisfits[i][1]]);
+
+        id kept = [registerClass("_TtC5Evict4Kept", NSObject.class) new];
+        expect(answeredFromCache(kept, "Evict.Kept"), @"the class a neighbour will evict is cached first");
+        id neighbour = [registerClass("_TtC5Evict5Other", NSObject.class) new];
+        expect(cacheInSlotOf("Evict.Kept", [neighbour class], neighbour), @"a class sharing the slot is found through the runtime");
+        int beforeEvicted = runtimeLookups;
+        expect(DPIsKind(kept, "Evict.Kept") && runtimeLookups == beforeEvicted + 1 && answeredFromCache(kept, "Evict.Kept"),
+               @"the slot neighbour evicted the cached class, which is looked up once more and cached again");
+
+        Class swiftLogoCls = registerClass("_TtC10NewTabPage8LogoView", NSView.class), swiftPageCls = registerClass("_TtC10NewTabPage21NewTabPageContentView", NSView.class);
+        Class iconCls = registerClass(DPDiaNewTabLogo, NSView.class), particlesCls = registerClass(DPDiaNewTabLogoParticles, NSView.class);
+        NSView *newTabPage = [[swiftPageCls alloc] initWithFrame:NSMakeRect(0, 0, 400, 300)], *content = [NSView new];
+        [newTabPage addSubview:content];
+        for (Class logoClass in @[ swiftLogoCls, iconCls, particlesCls ]) {
+            NSString *name = @(class_getName(logoClass));
+            NSView *inside = [[logoClass alloc] initWithFrame:NSMakeRect(0, 0, 40, 40)], *outside = [[logoClass alloc] initWithFrame:NSMakeRect(0, 0, 40, 40)];
+            [content addSubview:inside];
+            expect(DPHideNewTabLogo.hides(inside), [NSString stringWithFormat:@"Hide New Tab Logo hides %@ on a new tab page", name]);
+            expect(!DPHideNewTabLogo.hides(outside), [NSString stringWithFormat:@"Hide New Tab Logo leaves a loose %@ alone", name]);
+            NSView *elsewhere = [NSView new];
+            [elsewhere addSubview:outside];
+            expect(!DPHideNewTabLogo.hides(outside), [NSString stringWithFormat:@"Hide New Tab Logo leaves %@ outside a new tab page alone", name]);
+        }
+        NSView *plainInside = [NSView new];
+        [content addSubview:plainInside];
+        expect(!DPHideNewTabLogo.hides(plainInside) && !DPHideNewTabLogo.hides(content) && !DPHideNewTabLogo.hides(newTabPage),
+               @"Hide New Tab Logo leaves the rest of a new tab page alone");
+        expect(answeredFromCache([swiftLogoCls new], DPDiaNewTabLogoView), @"the new tab logo class is answered from the cache");
+        expect(answeredFromCache([swiftPageCls new], DPDiaNewTabPage), @"the new tab page class is answered from the cache");
 
         if (savedDomain) setenv("DIATWEAKS_DOMAIN", savedDomain.UTF8String, 1);
         else unsetenv("DIATWEAKS_DOMAIN");

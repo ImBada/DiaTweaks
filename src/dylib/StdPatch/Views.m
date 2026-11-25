@@ -3,6 +3,23 @@
 #import <pthread.h>
 #import <stdatomic.h>
 
+// Swift registers "Module.Class" as "_TtC<len>Module<len>Class", so a dotted lookup name never equals the class's own name.
+static BOOL DPSameClassName(const char *actual, const char *name) {
+    if (!strcmp(actual, name)) return YES;
+    if (strncmp(actual, "_TtC", 4)) return NO;
+    actual += 4;
+    for (int part = 0; part < 2; part++) {
+        if (*actual < '1' || *actual > '9') return NO;
+        size_t length = 0;
+        while (*actual >= '0' && *actual <= '9' && length <= 256) length = length * 10 + (size_t)(*actual++ - '0');
+        if (length > 256) return NO;
+        for (; length; length--, actual++, name++)
+            if (!*actual || *actual != *name) return NO;
+        if (part == 0 ? *name++ != '.' : *name) return NO;
+    }
+    return !*actual;
+}
+
 // Hot hooks look Dia's classes up by name on every call; the slot is only a hint, checked against the class's own name.
 static Class DPClassNamed(const char *name) {
     static _Atomic(void *) cache[256];
@@ -10,7 +27,7 @@ static Class DPClassNamed(const char *name) {
     for (const unsigned char *p = (const unsigned char *)name; *p; p++) hash = (hash ^ *p) * 16777619u;
     _Atomic(void *) *slot = &cache[hash & 255];
     Class cls = (__bridge Class)atomic_load_explicit(slot, memory_order_relaxed);
-    if (cls && !strcmp(class_getName(cls), name)) return cls;
+    if (cls && DPSameClassName(class_getName(cls), name)) return cls;
     cls = objc_getClass(name);
     if (cls) atomic_store_explicit(slot, (__bridge void *)cls, memory_order_relaxed);
     return cls;
