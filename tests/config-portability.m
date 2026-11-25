@@ -33,7 +33,7 @@ static void expectEqual(id actual, id expected, NSString *what) {
 }
 
 static NSArray<NSString *> *DPExperimentalKeys(void) {
-    return @[ @"bitwarden", @"briefLanguage", @"commandBarHideTab", @"commandBarSpare", @"hideToolbar", @"icloudPasswords", @"keepWindowsActive",
+    return @[ @"bitwarden", @"briefLanguage", @"commandBarHideTab", @"commandBarSpare", @"deleteProfileMenu", @"hideToolbar", @"icloudPasswords", @"keepWindowsActive",
               @"littleDiaRemember", @"littleDiaTabLinks", @"onePassword", @"passkeys", @"privateWindowTheme", @"protonPass", @"skipAccount",
               @"splitClientHello", @"tabTitles" ];
 }
@@ -152,14 +152,14 @@ static void DPCheckExperimentalData(void) {
         if (patch->experimental) [flagged addObject:patch->key];
         expect(![patch->detail hasSuffix:@"Experimental."], [NSString stringWithFormat:@"%@ doesn't say Experimental in its detail", patch->key]);
     }
-    expectEqual([flagged sortedArrayUsingSelector:@selector(compare:)], DPExperimentalKeys(), @"the 16 tweaks that said Experimental are flagged");
+    expectEqual([flagged sortedArrayUsingSelector:@selector(compare:)], DPExperimentalKeys(), @"the 17 tweaks that said Experimental are flagged");
 }
 
 static void DPCheckVisibility(void) {
     expect(!DPShowsExperimental(), @"experimental tweaks start hidden");
     for (NSString *key in DPExperimentalKeys()) expect(!DPExperimentalShown(DPPatchNamed(key)), [key stringByAppendingString:@" is hidden while off"]);
     expect(DPExperimentalShown(DPPatchNamed(@"commandBar")) && DPExperimentalShown(DPPatchNamed(@"littleDia")), @"ordinary tweaks are always shown");
-    expectEqual(@(DPHiddenExperimentalCount()), @16, @"16 experimental tweaks are hidden");
+    expectEqual(@(DPHiddenExperimentalCount()), @17, @"17 experimental tweaks are hidden");
 
     DPOverviewView *overview = [[DPOverviewView alloc] initWithFrame:NSMakeRect(0, 0, 560, 800)];
     DPPaneView *pane = [[DPPaneView alloc] initWithTitle:@"Patches" content:overview];
@@ -170,21 +170,21 @@ static void DPCheckVisibility(void) {
     expect(![labels containsObject:@"Password Managers"], @"the Password Managers folder is gone while hidden");
     expect(labels.count > 40 && [labels containsObject:@"Window Corners"], @"the other rows stay");
     expect(!DPVisible(DPGroupTitled(overview, @"Passwords")), @"the Passwords section is gone with its only folder");
-    expect(DPVisible(DPLabelShowing(overview, @"16 experimental tweaks are hidden.")), @"Overview says 16 are hidden");
+    expect(DPVisible(DPLabelShowing(overview, @"17 experimental tweaks are hidden.")), @"Overview says 17 are hidden");
 
     DPType(pane, @"1Password");
     expectEqual(DPVisibleLabels(overview), @[], @"searching a hidden tweak finds nothing");
     expect(DPVisible(DPLabelShowing(overview, @"No Results")), @"and says so");
     DPType(pane, @"experimental");
     expectEqual(DPVisibleLabels(overview), @[], @"searching experimental shows no tweak rows");
-    expect(DPVisible(DPLabelShowing(overview, @"16 experimental tweaks are hidden.")), @"but finds the hidden-tweaks row");
+    expect(DPVisible(DPLabelShowing(overview, @"17 experimental tweaks are hidden.")), @"but finds the hidden-tweaks row");
     DPType(pane, @"");
 
     DPSaveOn(@"onePassword", YES);
-    expect(DPExperimentalShown(DPPatchNamed(@"onePassword")) && DPHiddenExperimentalCount() == 15, @"a tweak that is on is shown");
+    expect(DPExperimentalShown(DPPatchNamed(@"onePassword")) && DPHiddenExperimentalCount() == 16, @"a tweak that is on is shown");
     expect([DPVisibleLabels(overview) containsObject:@"Password Managers"], @"its folder returns");
     expect(DPVisible(DPLabelShowing(overview, @"Allow 1Password")), @"and names it");
-    expect(DPVisible(DPLabelShowing(overview, @"15 experimental tweaks are hidden.")), @"the count follows");
+    expect(DPVisible(DPLabelShowing(overview, @"16 experimental tweaks are hidden.")), @"the count follows");
     DPFolderView *folder = [[DPFolderView alloc] initWithFolder:DPFolderSpecNamed(@"passwordManagers")];
     NSView *members = DPGroups(folder).firstObject;
     expectEqual(@(DPVisibleRowsIn(members)), @1, @"the folder lists only the tweak that is on");
@@ -207,7 +207,7 @@ static void DPCheckVisibility(void) {
     expect(DPShowsExperimental(), @"Show turns Show Experimental Tweaks on");
     labels = DPVisibleLabels(overview);
     expect([labels containsObject:@"Password Managers"] && [labels containsObject:@"Hide Toolbar"] && [labels containsObject:@"Skip Account"], @"every experimental row appears live");
-    expect(!DPVisible(DPLabelShowing(overview, @"16 experimental tweaks are hidden.")), @"and the hidden-tweaks row goes");
+    expect(!DPVisible(DPLabelShowing(overview, @"17 experimental tweaks are hidden.")), @"and the hidden-tweaks row goes");
     [folder sync];
     expectEqual(@(DPVisibleRowsIn(members)), @5, @"the folder page lists all five managers");
 
@@ -224,7 +224,7 @@ static void DPCheckVisibility(void) {
     NSSwitch *toggle = (NSSwitch *)DPFindView(home, ^BOOL(NSView *v) { return [v isKindOfClass:NSSwitch.class] && [v.accessibilityLabel isEqual:@"Show Experimental Tweaks"]; });
     expect(toggle && toggle.state == NSControlStateValueOn, @"Home's switch shows the saved choice");
     [toggle performClick:nil];
-    expect(!DPShowsExperimental() && DPHiddenExperimentalCount() == 16, @"Home's switch turns it off");
+    expect(!DPShowsExperimental() && DPHiddenExperimentalCount() == 17, @"Home's switch turns it off");
     DPSetShowsExperimental(YES);
     expect(toggle.state == NSControlStateValueOn, @"and follows a change made elsewhere");
     expect(DPButtonTitled(home, @"Export…") && DPButtonTitled(home, @"Import…"), @"Home has Export and Import");

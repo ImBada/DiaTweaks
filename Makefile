@@ -452,6 +452,18 @@ check-config-portability: build/config-portability
 check: check-config-portability
 .PHONY: check-config-portability
 
+build/delete-profile-menu: tests/delete-profile-menu.m $(wildcard src/dylib/Patches/DeleteProfileMenu/*.[hm]) src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m src/dylib/StdPatch/App.m $(wildcard src/dylib/StdPatch/*.h) | build
+	clang $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -Isrc/dylib -framework AppKit -framework QuartzCore -o $@ tests/delete-profile-menu.m \
+		$(wildcard src/dylib/Patches/DeleteProfileMenu/*.m) src/dylib/StdPatch/Hook.m src/dylib/StdPatch/Views.m src/dylib/StdPatch/App.m
+
+check-delete-profile-menu: build/delete-profile-menu
+	home="$$(mktemp -d /tmp/dp-delete-profile.XXXXXX)"; domain="com.diapatches.test.delete-profile.$$$$"; \
+	trap 'rm -rf "$$home"; defaults delete "$$domain" 2>/dev/null; rm -f "$$HOME/Library/Preferences/$$domain.plist"' EXIT; \
+	DIAPATCH_HOME="$$home" DIATWEAKS_DOMAIN="$$domain" build/delete-profile-menu --type=renderer
+
+check: check-delete-profile-menu
+.PHONY: check-delete-profile-menu
+
 check: build/diapatch build/diapatch-tests build/group-tabs build/mouse-back-forward build/vertical-tab-glow build/split-client-hello build/peek-cursor build/link-key build/peek-tabs build/peek-chat build/safe-mode build/pause build/hook-table build/updates-runtime build/settings-preview build/runtime-guards build/tidy-tabs build/drag-offset build/small-tab-shape build/toolbar-permission build/launch-flags build/little-dia-stack build/little-dia-profile build/little-dia-over build/little-dia-focus build/tracking build/hide-toolbar-settle build/command-bar-swap build/command-bar-spare build/tab-titles build/show-address-field build/destination-toggle-engine-name build/hide-chat-button build/hide-connect-app-prompt build/hide-ntp-prompts build/open-sidebar-instantly build/ai-history-search build/native-messaging build/diapatch-passkeys build/passkeys-origin build/app-icon-signing build/little-dia-route build/little-dia-tab-links build/chat-card build/peek-lifecycle build/hide-toolbar-off build/hide-toolbar-focus-bookmarks build/little-dia-launcher build/pinned-cmd-click build/command-bar-lifecycle build/window-patches build/pinned-tab-close-button build/pinned-split-close build/sidebar-tab-bugs build/unload-tab build/profile-color-picker build/historical-regressions build/abi-kvc-kvo build/view-reuse-layout build/combinatorial-stability build/local-tweaks build/patches.json
 	tests/tweaks-update
 	build/diapatch-tests
