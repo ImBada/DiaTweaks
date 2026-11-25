@@ -216,6 +216,9 @@ int main(void) {
         DPClick(pinned, opened, DPBackgroundTab);
         PumpFor(1.2);
         CHECK(gNewTarget.unpins == 0, "a nil-target Unpin item is refused");
+        DPPinnedCmdClick.on = NO;
+        PumpFor(0.3);
+        DPPinnedCmdClick.on = YES;
         DPShowTabFor(gNewTab, opened, gNewTarget);
 
         gNewTarget.unpins = 0;
