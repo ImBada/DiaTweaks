@@ -13,7 +13,9 @@ static void expect(BOOL ok, NSString *what) {
 
 static void DPNoop(id self, SEL _cmd) {}
 
-static id DPNoToolbarItem(id self, SEL _cmd, NSToolbar *toolbar, NSString *identifier, BOOL insert) { return nil; }
+static NSMutableDictionary<NSString *, NSToolbarItem *> *DPDiaToolbarItems;
+
+static id DPDiaToolbarItem(id self, SEL _cmd, NSToolbar *toolbar, NSString *identifier, BOOL insert) { return DPDiaToolbarItems[identifier]; }
 
 static NSInteger DPTwoRows(id self, SEL _cmd, NSTableView *table) { return 2; }
 
@@ -25,7 +27,9 @@ static void DPSettle(void) {
     for (int i = 0; i < 10; i++) [NSRunLoop.mainRunLoop runMode:NSDefaultRunLoopMode beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
 }
 
-static NSArray<NSString *> *DPSearchOnly(id self, SEL _cmd, NSToolbar *toolbar) { return @[ DPSearchItemIdentifier, NSToolbarFlexibleSpaceItemIdentifier ]; }
+static NSArray<NSString *> *DPSearchOnly(id self, SEL _cmd, NSToolbar *toolbar) {
+    return @[ DPSearchItemIdentifier, NSToolbarFlexibleSpaceItemIdentifier, @"PreferencesNavigateBack", @"PreferencesPaneTitle" ];
+}
 
 int main(int argc, const char *argv[]) {
     @autoreleasepool {
@@ -34,7 +38,7 @@ int main(int argc, const char *argv[]) {
 
         Class controller = objc_allocateClassPair(NSObject.class, DPDiaSettingsController, 0);
         class_addMethod(controller, @selector(handleBack), (IMP)DPNoop, "v@:");
-        class_addMethod(controller, @selector(toolbar:itemForItemIdentifier:willBeInsertedIntoToolbar:), (IMP)DPNoToolbarItem, "@@:@@B");
+        class_addMethod(controller, @selector(toolbar:itemForItemIdentifier:willBeInsertedIntoToolbar:), (IMP)DPDiaToolbarItem, "@@:@@B");
         class_addMethod(controller, @selector(toolbarAllowedItemIdentifiers:), (IMP)DPSearchOnly, "@@:@");
         class_addMethod(controller, @selector(toolbarDefaultItemIdentifiers:), (IMP)DPSearchOnly, "@@:@");
         objc_registerClassPair(controller);
@@ -124,6 +128,25 @@ int main(int argc, const char *argv[]) {
         [shown selectRowIndexes:[NSIndexSet indexSetWithIndex:0] byExtendingSelection:NO];
         expect([owner toolbar:toolbar itemForItemIdentifier:DPSearchItemIdentifier willBeInsertedIntoToolbar:NO] == nil,
                @"leaving Patches stops the toolbar holding on to its search item");
+
+        NSToolbarItem *backItem = [[NSToolbarItem alloc] initWithItemIdentifier:@"PreferencesNavigateBack"];
+        NSToolbarItem *titleItem = [[NSToolbarItem alloc] initWithItemIdentifier:@"PreferencesPaneTitle"];
+        NSTextField *label = [NSTextField labelWithString:@"General"];
+        titleItem.view = label;
+        backItem.autovalidates = NO;
+        backItem.enabled = NO;
+        DPDiaToolbarItems = [@{ backItem.itemIdentifier : backItem, titleItem.itemIdentifier : titleItem } mutableCopy];
+        [toolbar insertItemWithItemIdentifier:backItem.itemIdentifier atIndex:0];
+        [toolbar insertItemWithItemIdentifier:titleItem.itemIdentifier atIndex:1];
+
+        [shown selectRowIndexes:[NSIndexSet indexSetWithIndex:4] byExtendingSelection:NO];
+        expect([label.stringValue isEqualToString:@"Patches"], @"opening Patches titles the window Patches");
+        DPPaneView *patches = [settings valueForKey:@"patches"];
+        ((DPOverviewView *)patches.content).open(@"Hide Toolbar", [NSView new]);
+        expect([label.stringValue isEqualToString:@"Hide Toolbar"] && backItem.enabled, @"a tweak page shows its own title and turns Back on");
+        [shown selectRowIndexes:[NSIndexSet indexSetWithIndex:0] byExtendingSelection:NO];
+        expect([label.stringValue isEqualToString:@"General"], [NSString stringWithFormat:@"leaving a tweak page gives Dia's title back: %@", label.stringValue]);
+        expect(!backItem.enabled && !patches.showsPage, @"leaving a tweak page gives Dia's Back state back");
 
         if (failures) printf("%d failures\n", failures);
         else printf("settings sidebar fallback: ok\n");

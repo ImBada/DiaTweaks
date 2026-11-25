@@ -2,7 +2,8 @@
 
 extern DPPatch DPWindowMaterial, DPTranslucentSidebar;
 static char DPHiddenKey, DPDiaHiddenKey, DPMaterialKey, DPGlassKey, DPOpaqueKey, DPAppliedKey, DPPendingMaterialKey;
-static NSInteger DPAppliedTints;
+// Weak, since Dia drops tint views without telling us; `count` keeps zeroed entries, `anyObject` doesn't.
+static NSHashTable<NSView *> *DPAppliedTintViews;
 static NSHashTable *DPHidingClasses;
 
 static NSString *const DPMaterials[] = {
@@ -107,7 +108,8 @@ static void DPApplyMaterialUnder(NSView *tint, BOOL floating) {
     BOOL translucent = choice || (floating && DPTranslucentSidebar.on), glass = [choice hasPrefix:@"glass."];
     BOOL applied = DPGet(tint, &DPAppliedKey) != nil;
     if (!translucent && !applied) return;
-    if (translucent != applied) DPAppliedTints += translucent ? 1 : -1;
+    if (translucent) [(DPAppliedTintViews ?: (DPAppliedTintViews = [NSHashTable weakObjectsHashTable])) addObject:tint];
+    else [DPAppliedTintViews removeObject:tint];
     DPSet(tint, &DPAppliedKey, translucent ? @YES : nil);
     NSInteger value = choice.pathExtension.integerValue;
 
@@ -187,14 +189,14 @@ static NSArray<NSView *> *DPWindowFrames(void) {
 // A hidden tint stops laying out, the theme frame doesn't.
 static void DPWindowFrame_layout(NSView *self, SEL _cmd) {
     DPCallOriginal(DPWindowFrame_layout, self);
-    if (!DPWindowMaterial.on && !DPAppliedTints) return;
+    if (!DPWindowMaterial.on && !DPAppliedTintViews.anyObject) return;
     NSView *tint = DPTintIn(self);
     if (DPWindowMaterial.on || DPGet(tint, &DPAppliedKey)) DPApplyMaterialUnder(tint, NO);
 }
 
 static void DPFloatingSidebar_layout(NSView *self, SEL _cmd) {
     DPCallOriginal(DPFloatingSidebar_layout, self);
-    if (!DPWindowMaterial.on && !DPTranslucentSidebar.on && !DPAppliedTints) return;
+    if (!DPWindowMaterial.on && !DPTranslucentSidebar.on && !DPAppliedTintViews.anyObject) return;
     NSView *tint = DPTintIn(self);
     if (DPWindowMaterial.on || DPTranslucentSidebar.on || DPGet(tint, &DPAppliedKey)) DPApplyMaterialUnder(tint, YES);
 }

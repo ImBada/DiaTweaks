@@ -40,9 +40,6 @@ static void DPGrainDotDidUpdate(NSView *self, SEL _cmd) {
 }
 
 static void DPInstallSidebarGrain(void) {
-    [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskRightMouseDown handler:^NSEvent *(NSEvent *event) {
-        return DPGrainRightClick(event);
-    }];
     DPHook(DPDiaSidebarController, @selector(viewDidLayout), (IMP)DPGrainSidebarDidLayout);
     DPHook(DPDiaTabStripController, @selector(viewDidLayout), (IMP)DPGrainStripDidLayout);
     DPHook(DPDiaSpaceSwitcherItem, @selector(updateLayer), (IMP)DPGrainSwitcherItemDidUpdate);
@@ -50,7 +47,18 @@ static void DPInstallSidebarGrain(void) {
     DPHook(DPDiaPageIndicatorDot, @selector(updateLayer), (IMP)DPGrainDotDidUpdate);
 }
 
-static void DPApplySidebarGrain(DPPatch *patch) { DPRefreshSidebarGrain(); }
+static void DPApplySidebarGrain(DPPatch *patch) {
+    static id monitor;
+    if (patch->on && !monitor) {
+        monitor = [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskRightMouseDown handler:^NSEvent *(NSEvent *event) {
+            return DPGrainRightClick(event);
+        }];
+    } else if (!patch->on && monitor) {
+        [NSEvent removeMonitor:monitor];
+        monitor = nil;
+    }
+    DPRefreshSidebarGrain();
+}
 
 DP_PATCH(DPSidebarGrain) {
     .key = @"sidebarGrain",

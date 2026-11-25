@@ -10,6 +10,7 @@ use serde_json::{json, Value};
 
 const PATCHES: &str = r#"{"version": 1, "patches": [
     {"key": "hideToolbar", "title": "Hide Toolbar", "detail": "H", "defaultOn": false, "requires": null, "disabledBy": null, "experimental": true},
+    {"key": "localTweaks", "title": "Local Tweaks", "detail": "T", "defaultOn": true, "requires": null, "disabledBy": null},
     {"key": "showAddressField", "title": "Show Address Field", "detail": "S", "defaultOn": false, "requires": null, "disabledBy": null},
     {"key": "windowMaterial", "title": "Window Material", "detail": "W", "defaultOn": true, "requires": null, "disabledBy": null,
      "choice": {"key": "windowMaterialChoice", "default": "glass.17", "values": ["glass.17", "material.1"]},
@@ -374,6 +375,30 @@ fn replace_import_resets_portable_keys_and_nothing_else() {
     for (key, before) in kept {
         assert_eq!(sandbox.saved(key), Some(before), "{key}");
     }
+}
+
+#[test]
+fn local_tweaks_stay_on_this_mac_through_export_and_import() {
+    let sandbox = Sandbox::new("localtweaks");
+    assert!(sandbox.run(&["off", "localTweaks"]).status.success());
+    assert_eq!(sandbox.exported()["tweaks"].get("localTweaks"), None);
+
+    let replaced = sandbox.import(&json!({"version": 1}), &["--replace"]);
+    assert!(replaced.status.success(), "{}", err(&replaced));
+    assert_eq!(sandbox.saved("localTweaks").as_deref(), Some("0"));
+
+    let named = sandbox.import(
+        &json!({"version": 1, "tweaks": {"localTweaks": true, "showAddressField": true}}),
+        &[],
+    );
+    assert!(named.status.success(), "{}", err(&named));
+    assert!(
+        err(&named).contains("Skipped unknown keys: localTweaks"),
+        "{}",
+        err(&named)
+    );
+    assert_eq!(sandbox.saved("localTweaks").as_deref(), Some("0"));
+    assert_eq!(sandbox.exported()["tweaks"]["showAddressField"], true);
 }
 
 #[test]

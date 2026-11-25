@@ -138,6 +138,20 @@ BOOL DPMsgBool(id object, SEL sel) { return ((BOOL (*)(id, SEL))objc_msgSend)(ob
 @implementation _TtC6Window28FloatingSidebarContainerView
 @end
 
+static int gSubviewReads;
+
+@interface DPSpyFloatingSidebar : _TtC6Window28FloatingSidebarContainerView
+@end
+@implementation DPSpyFloatingSidebar
+- (NSArray<NSView *> *)subviews { gSubviewReads++; return super.subviews; }
+@end
+
+@interface DPSpyThemeFrame : _TtC6Window24PlatformWindowThemeFrame
+@end
+@implementation DPSpyThemeFrame
+- (NSArray<NSView *> *)subviews { gSubviewReads++; return super.subviews; }
+@end
+
 @interface _TtC15WindowTreatment24WindowBackgroundBaseView : NSView
 @end
 @implementation _TtC15WindowTreatment24WindowBackgroundBaseView
@@ -339,6 +353,39 @@ int main(void) {
         DPEdgeToEdge.on = NO;
         [nav layout];
         CHECK(gRoundCornerControlsCalls == 0, "NavigationBar_layout skips DPRoundCornerControls when WindowCorners and EdgeToEdge are off");
+
+        int (^layoutReads)(NSView *) = ^int(NSView *view) {
+            gSubviewReads = 0;
+            [view layout];
+            return gSubviewReads;
+        };
+        DPSpyFloatingSidebar *idleFloat = [[DPSpyFloatingSidebar alloc] initWithFrame:NSMakeRect(0, 0, 200, 500)];
+        DPSpyThemeFrame *idleFrame = [[DPSpyThemeFrame alloc] initWithFrame:NSMakeRect(0, 0, 400, 300)];
+        int floatReads = layoutReads(idleFloat), frameReads = layoutReads(idleFrame);
+        _TtC6Window14PlatformWindow *leakWin = DPMakeBrowserWindow(NO, NO);
+        gFakeWindows = @[ leakWin ];
+        DPWindowMaterial.on = YES;
+        __weak NSView *weakTint;
+        @autoreleasepool {
+            DPSpyFloatingSidebar *doomed = [[DPSpyFloatingSidebar alloc] initWithFrame:NSMakeRect(0, 0, 200, 500)];
+            NSView *doomedContent = [[NSView alloc] initWithFrame:doomed.bounds];
+            NSView *tint = [[_TtC15WindowTreatment31WindowBackgroundOverlayTintView alloc] initWithFrame:doomed.bounds];
+            NSView *wash = [[_TtC5ARCUI19BackgroundColorView alloc] initWithFrame:doomed.bounds];
+            weakTint = tint;
+            [tint addSubview:wash];
+            [doomedContent addSubview:tint];
+            [doomed addSubview:doomedContent];
+            [leakWin.contentView addSubview:doomed];
+            DPWindowMaterial.apply(&DPWindowMaterial);
+            CHECK(wash.hidden, "WindowMaterial applies to the tint it later loses");
+            [doomed removeFromSuperview];
+        }
+        CHECK(!weakTint, "Dia's replaced tint view is gone while WindowMaterial is still on");
+        DPWindowMaterial.on = NO;
+        DPWindowMaterial.apply(&DPWindowMaterial);
+        CHECK(layoutReads(idleFloat) == floatReads && layoutReads(idleFrame) == frameReads,
+              "layouts skip scanning for tints once WindowMaterial is off, even after Dia dropped an applied tint");
+        gFakeWindows = @[ win ];
 
         _TtC6Window14PlatformWindow *matWin = DPMakeBrowserWindow(NO, NO);
         matWin.backgroundColor = nil;

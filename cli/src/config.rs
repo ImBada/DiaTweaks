@@ -22,7 +22,7 @@ use crate::{
     dia,
     env::Env,
     lock,
-    manifest::{Manifest, SettingKind},
+    manifest::{Manifest, Patch, SettingKind},
     prefs::{as_bool, Prefs},
     tweaks::{self, on_off},
     ui::{self, Ui},
@@ -61,9 +61,16 @@ struct Plan {
     warnings: Vec<String>,
 }
 
+fn portable_patch(patch: &Patch) -> bool {
+    !patch.local && patch.key != "localTweaks"
+}
+
 fn portable(manifest: &Manifest) -> BTreeMap<&str, Setting<'_>> {
     let mut found = BTreeMap::new();
     for (index, patch) in manifest.patches.iter().enumerate() {
+        if !portable_patch(patch) {
+            continue;
+        }
         if let Some(choice) = &patch.choice {
             found.insert(
                 choice.key.as_str(),
@@ -117,6 +124,7 @@ pub fn export(env: &Env, ui: &Ui, path: Option<PathBuf>) -> Result<()> {
             .patches
             .iter()
             .zip(&state)
+            .filter(|(patch, _)| portable_patch(patch))
             .map(|(patch, &on)| (patch.key.as_str(), on))
             .collect(),
         settings,
@@ -190,7 +198,7 @@ pub fn import(env: &Env, ui: &Ui, path: Option<PathBuf>, replace: bool) -> Resul
                 prefs.set(&patch.key, on);
             }
             wanted[index] = on;
-        } else if replace && prefs.raw(&patch.key).is_some() {
+        } else if replace && portable_patch(patch) && prefs.raw(&patch.key).is_some() {
             prefs.clear(&patch.key);
             wanted[index] = patch.default_on;
             reset.push(patch.key.as_str());
@@ -369,7 +377,10 @@ impl Plan {
         let (tweaks, settings) = (section("tweaks"), section("settings"));
 
         for (key, value) in &tweaks {
-            let Some(index) = manifest.index(key) else {
+            let Some(index) = manifest
+                .index(key)
+                .filter(|&index| portable_patch(&manifest.patches[index]))
+            else {
                 plan.unknown.push(key.clone());
                 continue;
             };

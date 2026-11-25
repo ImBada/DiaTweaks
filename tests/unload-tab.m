@@ -943,6 +943,37 @@ static void TestNonTabIsolationAndEdgeCases(_TtC3ADK18WebContentChromium *chromi
     [popupWin close];
 }
 
+static void TestTabBeforeInHoldingProfile(void) {
+    DPTestWindow *win = MakeWindow(@"WIN-PROFILES");
+    DPTestScriptTab *a1 = MakeScriptTab(@"E1111111-1111-1111-1111-111111111111", @"https://a1.test/");
+    DPTestScriptTab *a2 = MakeScriptTab(@"E1111111-1111-1111-1111-111111111112", @"https://a2.test/");
+    DPTestScriptTab *b1 = MakeScriptTab(@"E2222222-2222-2222-2222-222222222221", @"https://b1.test/");
+    DPTestScriptTab *b2 = MakeScriptTab(@"E2222222-2222-2222-2222-222222222222", @"https://b2.test/");
+    DPTestScriptTab *b3 = MakeScriptTab(@"E2222222-2222-2222-2222-222222222223", @"https://b3.test/");
+    DPTestScriptProfile *pa = [DPTestScriptProfile new], *pb = [DPTestScriptProfile new];
+    pa.appleScriptTabs = @[a1, a2];
+    pb.appleScriptTabs = @[b1, b2, b3];
+    DPTestScriptWindow *sw = [DPTestScriptWindow new];
+    sw.windowId = @"WIN-PROFILES";
+    sw.appleScriptProfiles = @[pa, pb];
+    sw.activeTab = b2;
+    DPTestAppDelegate *appDel = [DPTestAppDelegate new];
+    appDel.appleScriptWindows = @[sw];
+    NSApp.delegate = appDel;
+
+    Check(DPTabBefore(win) == b3, @"DPTabBefore finds the neighbor in the profile holding the front tab when the window lists none");
+    sw.appleScriptTabs = pa.appleScriptTabs;
+    Check(DPTabBefore(win) == b3, @"DPTabBefore ignores another profile's tabs listed on the window");
+    sw.activeTab = b3;
+    Check(DPTabBefore(win) == b2, @"DPTabBefore steps back inside the holding profile from its last tab");
+    sw.activeTab = a1;
+    Check(DPTabBefore(win) == a2, @"DPTabBefore follows the front tab to the other profile");
+
+    NSApp.delegate = nil;
+    win.mockVisible = NO;
+    [win close];
+}
+
 int main(void) {
     @autoreleasepool {
         [NSApplication sharedApplication];
@@ -961,6 +992,8 @@ int main(void) {
         TestOffPausedAndVerify(chromium);
         DPStage("TestNonTabIsolationAndEdgeCases");
         TestNonTabIsolationAndEdgeCases(chromium);
+        DPStage("TestTabBeforeInHoldingProfile");
+        TestTabBeforeInHoldingProfile();
 
         if (failures) {
             printf("%d unload-tab test(s) failed\n", failures);

@@ -5,8 +5,8 @@ static NSMapTable<NSWindow *, NSMutableArray<NSString *> *> *DPRecent;
 
 id DPTabBefore(NSWindow *window) {
     NSString *active = DPActiveTabID(window);
-    id rawTabs = DPValueForKey(DPScriptWindow(window), @"appleScriptTabs");
-    NSArray *tabs = [rawTabs isKindOfClass:NSArray.class] ? rawTabs : nil;
+    id scriptWindow = DPScriptWindow(window);
+    NSArray *tabs = DPScriptTabs(DPScriptProfileHolding(scriptWindow, active) ?: scriptWindow);
     if (!tabs.count) return nil;
     NSMutableArray *ids = [NSMutableArray arrayWithCapacity:tabs.count];
     for (id tab in tabs) [ids addObject:DPTabID(tab) ?: NSNull.null];

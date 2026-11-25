@@ -156,11 +156,12 @@ static __weak DPPaneView *DPShownPane;
             [toolbar removeItemAtIndex:index - 1];
     }
     DPSet(toolbar, &DPSearchItemKey, nil);
-    NSString *shown = self.title.stringValue;
-    if (pane.showsPage) [self borrowBack:NO];
+    BOOL restoreTitle = self.originalTitle && [self.title.stringValue isEqualToString:self.shownTitle];
+    pane.titleChanged = nil;
+    [self borrowBack:NO];
     [pane reset];
     self.shown = DPShownPane = nil;
-    if (self.originalTitle && [shown isEqualToString:self.shownTitle]) self.title.stringValue = self.originalTitle;
+    if (restoreTitle) self.title.stringValue = self.originalTitle;
 }
 
 - (void)borrowBack:(BOOL)borrow {

@@ -9,7 +9,7 @@ static NSMenu *DPFileMenu(void) { return [NSApp.mainMenu itemWithTitle:@"File"].
 
 static BOOL DPShouldShow(void) { return DPLittleDia.on && DPLittleDiaReady(); }
 
-// The extension is ready some time after launch, and much later with no window, so this polls until it is.
+// The extension is ready some time after launch, so this polls for a minute until it is.
 void DPRefreshLittleDiaNewWindow(void) {
     NSMenu *file = DPFileMenu();
     BOOL show = DPShouldShow();
@@ -25,9 +25,11 @@ void DPRefreshLittleDiaNewWindow(void) {
         return;
     }
     if (gLooking) return;
+    if (gLooks >= 120) return;
     gLooking = YES;
     NSUInteger turn = gLookTurn;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (gLooks++ < 120 ? 500 : 5000) * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
+    gLooks++;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 500 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
         if (turn != gLookTurn) return;
         gLooking = NO;
         DPRefreshLittleDiaNewWindow();
@@ -43,6 +45,8 @@ void DPInstallLittleDiaNewWindow(void) {
     gItem.keyEquivalent = @"n";
     gItem.keyEquivalentModifierMask = NSEventModifierFlagOption | NSEventModifierFlagCommand;
     DPOnLaunch(^{ DPRefreshLittleDiaNewWindow(); });
+    // With no window at launch the extension isn't ready until one opens, after the poll has given up.
+    [NSNotificationCenter.defaultCenter addObserverForName:NSWindowDidBecomeMainNotification object:nil queue:nil usingBlock:^(NSNotification *note) { DPRefreshLittleDiaNewWindow(); }];
 }
 
 NSString *DPLittleDiaNewWindowProblem(void) {

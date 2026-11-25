@@ -10,16 +10,19 @@ Each tweak changes one thing about Dia: it hides something you don't use, change
 
 | Section | What the tweaks there change |
 |---|---|
-| Page | The padding and corners around web pages |
+| Page | The padding and corners around web pages, saving them, and the mouse's back and forward buttons |
 | Toolbar | The toolbar, its buttons and the address field |
-| Sidebar & Tab Bar | The sidebar, pinned tabs, profiles and tab groups |
+| Sidebar & Tab Bar | The sidebar, pinned tabs and tab groups |
+| Profiles | Profile emoji and colors, the private window theme, switching with ⌘1–9, and deleting profiles from the sidebar |
 | Tabs | Grouping, saving, unloading, closing and reopening tabs |
 | Command Bar | The command bar and what it suggests |
 | New Tab Page | What the new tab page shows |
 | AI | Turning off Dia's AI, all at once or one part at a time |
 | Window | How the window looks and behaves |
+| App | Launch flags, the Dock icon and the tweaks you write yourself |
 | Passwords | Password managers and passkeys |
 | Links | Opening links in Little Dia and the address shown on hover |
+| Network | Getting past networks that block sites by name |
 
 Turn them on and off in **Dia → Settings → Patches**, or with the `diatweaks` command. Each one's Settings page links to its wiki page, which says what it does and when you'd want it. Experimental tweaks stay out of the list until you switch them on in **Settings → Home** (or at the bottom of **Patches**), where you can also back up or import your settings.
 

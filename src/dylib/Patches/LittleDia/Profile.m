@@ -53,7 +53,7 @@ void DPOpenInProfile(NSString *url, NSUInteger index, void (^done)(BOOL opened))
     NSString *source = [NSString stringWithFormat:@"tell application id \"%@\" to tell window id \"%@\" to focus (make new tab at end of tabs of profile %lu with properties {URL:\"%@\"})",
                                                   NSBundle.mainBundle.bundleIdentifier, windowID, (unsigned long)index + 1, quoted];
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-        NSDictionary *error;
+        NSDictionary *error = nil;
         [[[NSAppleScript alloc] initWithSource:source] executeAndReturnError:&error];
         if (error) NSLog(@"DiaPatches: couldn't open in profile %lu: %@", (unsigned long)index + 1, error);
         dispatch_async(dispatch_get_main_queue(), ^{ done(!error); });
