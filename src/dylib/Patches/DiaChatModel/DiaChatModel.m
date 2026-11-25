@@ -16,13 +16,11 @@ static NSString *const DPDefaultDiaModel = @"dia-default";
 
 static BOOL gOfferedRelaunch, gAppliedTurnOffAI;
 
-// Dia starts its chat agent once. One that started before this tweak was on can't be reached until Dia relaunches.
 BOOL DPChatModelNeedsRelaunch(DPPatch *patch) {
     return patch->on && DPSavedOn(patch) && !DPTurnOffAI.on && DPAgentTransportInstalled() &&
         !DPAgentRelayRunning() && DPAgentServerRunning();
 }
 
-// Once per time the tweak is on, so changing the model while it waits doesn't ask again.
 BOOL DPChatModelTakeRelaunchOffer(DPPatch *patch) {
     if (!patch->on) gOfferedRelaunch = NO;
     if (gOfferedRelaunch || !DPChatModelNeedsRelaunch(patch)) return NO;
@@ -39,7 +37,6 @@ static void DPOfferChatModelRelaunch(DPPatch *patch) {
     if ([alert runModal] == NSAlertFirstButtonReturn) DPHandOffAndQuit(@[ @"apply" ]);
 }
 
-// Off, paused and Turn Off AI all leave Dia's agent socket alone: no filter is registered, and one already running passes frames through.
 void DPApplyDiaChatModel(DPPatch *patch) {
     gAppliedTurnOffAI = DPTurnOffAI.on;
     BOOL active = patch->on && !gAppliedTurnOffAI;

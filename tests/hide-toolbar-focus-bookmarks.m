@@ -127,6 +127,19 @@ int main(void) {
         PumpUntil(^{ return (BOOL)!hover.revealed; });
         CHECK(!hover.revealed, "losing focus hides the toolbar");
 
+        __weak NSView *goneWatch = nil;
+        @autoreleasepool {
+            DPFocusView *gone = [[DPFocusView alloc] initWithFrame:NSMakeRect(10, 100, 100, 20)];
+            goneWatch = gone;
+            [page addSubview:gone];
+            [window makeFirstResponder:gone];
+            [NSNotificationCenter.defaultCenter postNotificationName:NSWindowDidUpdateNotification object:window];
+            [window makeFirstResponder:nil];
+            [gone removeFromSuperview];
+        }
+        __unsafe_unretained id lastResponder = object_getIvar(hover, class_getInstanceVariable(DPToolbarHover.class, "_lastResponder"));
+        CHECK(goneWatch == nil && lastResponder == nil, "a freed responder's address can't be mistaken for the next responder's");
+
         gKeyWindow = nil;
         [window makeFirstResponder:field];
         [NSNotificationCenter.defaultCenter postNotificationName:NSWindowDidUpdateNotification object:window];

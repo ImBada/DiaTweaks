@@ -11,6 +11,7 @@ void DPForgetApp(NSString *app) {}
 BOOL DPRunsThisDiapatch(audit_token_t token) { return NO; }
 pid_t DPParentOf(pid_t pid) { return 0; }
 
+#import "Disclaim.m"
 #import "PasswordsLaunch.m"
 #import "PasswordsHandoff.m"
 #define send passkeysSend
@@ -152,6 +153,73 @@ static void testPasskeyMessageValidation(void) {
 
     NSDictionary *bad = runInHelper(0, nil, nil, nil, nil);
     NSCAssert([bad[@"error"][@"name"] isEqual:@"NotAllowedError"], @"runInHelper guards nil without crashing");
+}
+
+static NSData *helperMessage(NSUInteger length) {
+    NSMutableData *json = [NSMutableData dataWithLength:length];
+    memset(json.mutableBytes, 'a', length);
+    memcpy(json.mutableBytes, "{\"p\":\"", 6);
+    memcpy((char *)json.mutableBytes + length - 2, "\"}", 2);
+    return json;
+}
+
+static NSArray *readHelperStream(NSData *stream, NSUInteger reads) {
+    gFromHelper = fmemopen((void *)stream.bytes, stream.length, "r");
+    NSCAssert(gFromHelper != NULL, @"fmemopen failed");
+    NSMutableArray *replies = [NSMutableArray array];
+    for (NSUInteger i = 0; i < reads; i++) [replies addObject:readFromHelper() ?: NSNull.null];
+    fclose(gFromHelper);
+    gFromHelper = NULL;
+    return replies;
+}
+
+static void testHelperMessageFraming(void) {
+    NSMutableData *stream = [NSMutableData data];
+    for (NSNumber *length in @[ @40000, @16384, @16385, @8 ]) {
+        [stream appendData:helperMessage(length.unsignedIntegerValue)];
+        [stream appendBytes:"" length:1];
+    }
+    [stream appendBytes:"{\"id\":3" length:7];
+    NSArray *replies = readHelperStream(stream, 6);
+    NSArray *lengths = @[ @(40000 - 8), @(16384 - 8), @(16385 - 8), @0 ];
+    for (NSUInteger i = 0; i < lengths.count; i++)
+        NSCAssert([replies[i] isKindOfClass:NSDictionary.class] && [replies[i][@"p"] length] == [lengths[i] unsignedIntegerValue],
+                  @"NUL-framed message %lu survives 16 KB chunk boundaries", (unsigned long)i);
+    NSCAssert(replies[4] == NSNull.null && replies[5] == NSNull.null, @"EOF mid-message yields nil, then nil again");
+
+    NSMutableData *atCap = [helperMessage(kMaxHelperMessageLength) mutableCopy];
+    [atCap appendBytes:"" length:1];
+    NSCAssert([readHelperStream(atCap, 1).firstObject isKindOfClass:NSDictionary.class], @"a message of exactly the cap is read");
+    NSMutableData *overCap = [helperMessage(kMaxHelperMessageLength + 1) mutableCopy];
+    [overCap appendBytes:"" length:1];
+    NSCAssert(readHelperStream(overCap, 1).firstObject == NSNull.null, @"a message one byte over the cap is rejected");
+}
+
+static void testSpawnEnvironmentOverrides(void) {
+    setenv("CFFIXED_USER_HOME", "/stale", 1);
+    setenv("DIAPATCH_PASSWORDS_HANDOFF", "/stale.sock", 1);
+    setenv("DIAPATCH_PASSWORDS_HANDOFF_EXTRA", "kept", 1);
+    int out[2];
+    NSCAssert(pipe(out) == 0, @"pipe failed");
+    posix_spawn_file_actions_t files;
+    posix_spawn_file_actions_init(&files);
+    posix_spawn_file_actions_adddup2(&files, out[1], 1);
+    const char *argv[] = { "/usr/bin/env", NULL };
+    pid_t pid = DPSpawnDisclaimed(argv, @[ @"CFFIXED_USER_HOME=/fresh", @"DIAPATCH_PASSWORDS_HANDOFF=/fresh.sock" ], &files);
+    posix_spawn_file_actions_destroy(&files);
+    close(out[1]);
+    NSCAssert(pid > 0, @"DPSpawnDisclaimed starts the child");
+    NSData *printed = [[NSFileHandle alloc] initWithFileDescriptor:out[0] closeOnDealloc:YES].readDataToEndOfFile;
+    waitpid(pid, NULL, 0);
+    NSArray *lines = [[[NSString alloc] initWithData:printed encoding:NSUTF8StringEncoding] componentsSeparatedByString:@"\n"];
+    NSArray *fixed = [lines filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"SELF BEGINSWITH 'CFFIXED_USER_HOME='"]];
+    NSArray *handoff = [lines filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"SELF BEGINSWITH 'DIAPATCH_PASSWORDS_HANDOFF='"]];
+    NSCAssert([fixed isEqual:@[ @"CFFIXED_USER_HOME=/fresh" ]], @"override replaces the inherited value: %@", fixed);
+    NSCAssert([handoff isEqual:@[ @"DIAPATCH_PASSWORDS_HANDOFF=/fresh.sock" ]], @"handoff override replaces the inherited value: %@", handoff);
+    NSCAssert([lines containsObject:@"DIAPATCH_PASSWORDS_HANDOFF_EXTRA=kept"], @"a longer name sharing the prefix is kept");
+    unsetenv("CFFIXED_USER_HOME");
+    unsetenv("DIAPATCH_PASSWORDS_HANDOFF");
+    unsetenv("DIAPATCH_PASSWORDS_HANDOFF_EXTRA");
 }
 
 static NSDictionary *runHostChild(NSString *home, NSData *stdinBytes, BOOL closeStdinEarly, int *exitCode, BOOL *leakedFDs) {
@@ -506,6 +574,8 @@ int main(int argc, char *argv[]) {
         testApplicationsCopyUpgradeInvalidation();
         testPasswordsHandoffWithClosedStdin();
         testPasskeyMessageValidation();
+        testHelperMessageFraming();
+        testSpawnEnvironmentOverrides();
         testPasskeyHostErrorPathsAndFDCleanup();
         puts("all diapatch passkeys hardening checks passed");
     }

@@ -1,0 +1,129 @@
+#!/usr/bin/env python3
+import json
+import os
+import shutil
+import subprocess
+import sys
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+TWEAKS = os.path.join(ROOT, "tweaks")
+BUILD = os.path.join(ROOT, "build")
+HOME = os.path.join(BUILD, "tweaks-home")
+FIELDS = ("key", "title", "detail", "symbol", "tint", "section", "defaultOn", "experimental", "requires", "disabledBy", "coveredBy", "relaunch")
+
+
+def visible(names):
+    return [name for name in names if not name.startswith(".")]
+
+
+def sources(folder):
+    files = []
+    for path, folders, names in os.walk(folder):
+        folders[:] = visible(folders)
+        files += [os.path.relpath(os.path.join(path, name), TWEAKS) for name in visible(names) if name.endswith((".m", ".h"))]
+    return sorted(files)
+
+
+def scan():
+    found = {}
+    for name in visible(sorted(os.listdir(TWEAKS))):
+        path = os.path.join(TWEAKS, name)
+        if os.path.isfile(path) and name.endswith(".m"):
+            found[name[:-2]] = [name]
+        elif os.path.isdir(path):
+            files = sources(path)
+            if any(file.endswith(".m") for file in files):
+                found[name] = files
+    return found
+
+
+def stamp(path):
+    try:
+        info = os.stat(path)
+    except FileNotFoundError:
+        return None
+    return info.st_mtime_ns, info.st_size
+
+
+def remove(path):
+    if os.path.isdir(path):
+        shutil.rmtree(path)
+    elif os.path.lexists(path):
+        os.remove(path)
+
+
+def mirror(source, target, names=None):
+    if os.path.isdir(source) != os.path.isdir(target):
+        remove(target)
+    if not os.path.isdir(source):
+        if stamp(source) != stamp(target):
+            # A new inode: rewriting a signed Mach-O in place gets whoever maps it next killed.
+            shutil.copy2(source, target + ".tmp")
+            os.replace(target + ".tmp", target)
+        return
+    os.makedirs(target, exist_ok=True)
+    names = set(visible(os.listdir(source)) if names is None else names)
+    for name in set(os.listdir(target)) - names:
+        remove(os.path.join(target, name))
+    for name in names:
+        mirror(os.path.join(source, name), os.path.join(target, name))
+
+
+def build(found):
+    for binary in ("DiaPatches.dylib", "diapatch"):
+        if not os.path.exists(os.path.join(BUILD, binary)):
+            sys.exit(f"build/{binary} is missing: run make first")
+    mirror(TWEAKS, os.path.join(HOME, "local"), [name if os.path.isdir(os.path.join(TWEAKS, name)) else name + ".m" for name in found])
+    mirror(os.path.join(BUILD, "DiaPatches.dylib"), os.path.join(HOME, "DiaPatches.dylib"))
+    result = subprocess.run(
+        [os.path.join(BUILD, "diapatch"), "local", "build"],
+        env={**os.environ, "DIAPATCH_HOME": HOME},
+        capture_output=True,
+        text=True,
+    )
+    try:
+        with open(os.path.join(HOME, "local-state.json")) as handle:
+            records = {item["id"]: item for item in json.load(handle)["items"]}
+    except (OSError, ValueError, KeyError):
+        records = {}
+    problems = []
+    for name in found:
+        record = records.get(name)
+        if not record:
+            problems.append(f"{name} did not build")
+        elif record.get("status") not in ("ready", "loaded") or record.get("error"):
+            problems.append(f"{name}: {record.get('error') or record.get('status')}")
+    if result.returncode != 0 or problems:
+        print(result.stdout + result.stderr, end="", file=sys.stderr)
+        sys.exit("\n".join(problems) or "diapatch local build failed")
+    return records
+
+
+def index(found, records):
+    tweaks = []
+    for name, files in found.items():
+        patches = [{field: patch.get(field) for field in FIELDS} for patch in records[name]["patches"]]
+        for patch in patches:
+            patch["experimental"] = bool(patch["experimental"])
+        tweaks.append({"id": name, "files": files, "patches": patches})
+    return json.dumps({"tweaks": tweaks}, indent=2, ensure_ascii=False) + "\n"
+
+
+def main():
+    check = sys.argv[1:] == ["--check"]
+    if sys.argv[1:] and not check:
+        sys.exit("usage: scripts/build-tweaks [--check]")
+    found = scan() if os.path.isdir(TWEAKS) else {}
+    text = index(found, build(found) if found else {})
+    path = os.path.join(TWEAKS, "index.json")
+    current = open(path, encoding="utf-8").read() if os.path.exists(path) else None
+    if current == text:
+        return
+    if check:
+        sys.exit("tweaks/index.json is out of date: run make")
+    os.makedirs(TWEAKS, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write(text)
+
+
+main()

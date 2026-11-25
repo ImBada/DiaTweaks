@@ -13,9 +13,12 @@ static BOOL DPWeb_shouldChangeCurrentCursor(NSView *self, SEL _cmd) {
     if (!DPCallOriginal(DPWeb_shouldChangeCurrentCursor, self)) return NO;
     if (!DPPeek.on) return YES;
     if (DPPeekHiddenAncestor(self)) return NO;
-    if (!DPPeekCardIn(self.window)) return YES;
+    DPPeekCard *peek = DPPeekCardIn(self.window);
+    if (!peek) return YES;
+    NSPoint mouse = self.window.mouseLocationOutsideOfEventStream;
+    if (![self isDescendantOf:peek] && !NSPointInRect([peek convertPoint:mouse fromView:nil], peek.bounds)) return YES;
     NSView *root = self.window.contentView;
-    NSView *hit = [root hitTest:[root.superview convertPoint:self.window.mouseLocationOutsideOfEventStream fromView:nil]];
+    NSView *hit = [root hitTest:[root.superview convertPoint:mouse fromView:nil]];
     return hit == self || [hit isDescendantOf:self];
 }
 

@@ -108,9 +108,10 @@ static void DPApplyProtonPass(DPPatch *patch) { DPRegisterHost(patch->on); }
 
 DP_PATCH(DPProtonPass) {
     .key = @"protonPass",
+    .experimental = YES,
     .order = 210,
     .title = @"Allow Proton Pass",
-    .detail = @"Unlock the Proton Pass extension with the Proton Pass app, such as with Touch ID. Proton Pass only sets this up for browsers it knows, so this adds the file Dia reads when it’s missing, and takes away only that file. Experimental.",
+    .detail = @"Unlock the Proton Pass extension with the Proton Pass app, such as with Touch ID. Proton Pass only sets this up for browsers it knows, so this adds the file Dia reads when it’s missing, and takes away only that file.",
     .symbol = @"key.shield.fill key.horizontal.fill",
     .tint = @"systemGreenColor",
     .section = @"Passwords",

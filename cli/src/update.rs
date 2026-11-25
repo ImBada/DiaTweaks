@@ -1,4 +1,4 @@
-use anyhow::{anyhow, bail, Result};
+use anyhow::{bail, Result};
 
 use crate::{
     child::OnInterrupt,
@@ -19,7 +19,7 @@ pub fn run(env: &Env, ui: &Ui) -> Result<()> {
             env.app.display()
         );
     }
-    let _lock = lock::acquire(&env.support)?;
+    let _lock = lock::acquire(env, ui)?;
     if !ui.proceed("Update DiaTweaks? It installs the latest release, then reopens Dia.")? {
         return Err(Cancelled::nothing_changed().into());
     }
@@ -31,10 +31,7 @@ pub fn run(env: &Env, ui: &Ui) -> Result<()> {
         return Err(spinner.fail(Cancelled::nothing_changed().into()));
     }
     if !download.status.success() {
-        return Err(spinner.fail(anyhow!(
-            "Couldn't update DiaTweaks. Check your internet connection, then try again.\n{}",
-            download.tail(3)
-        )));
+        return Err(spinner.fail(download.failure("Couldn't update DiaTweaks.", 3, &env.support)));
     }
     let download_note = download.output.trim().lines().last().map(str::to_owned);
     let done = spinner.check(diapatch.run(
@@ -43,7 +40,7 @@ pub fn run(env: &Env, ui: &Ui) -> Result<()> {
         &spinner,
     ))?;
     if !done.status.success() {
-        return Err(spinner.fail(anyhow!("Couldn't install DiaTweaks:\n{}", done.tail(3))));
+        return Err(spinner.fail(done.failure("Couldn't install DiaTweaks:", 3, &env.support)));
     }
     spinner.stop(
         done.output
@@ -66,7 +63,7 @@ pub fn run(env: &Env, ui: &Ui) -> Result<()> {
         &spinner,
     ))?;
     if !done.status.success() {
-        return Err(spinner.fail(anyhow!("Couldn't patch Dia:\n{}", done.tail(12))));
+        return Err(spinner.fail(done.failure("Couldn't patch Dia:", 12, &env.support)));
     }
     spinner.stop("Patched Dia");
     ui.done("DiaTweaks is up to date.");

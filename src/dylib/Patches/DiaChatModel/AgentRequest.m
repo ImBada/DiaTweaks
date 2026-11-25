@@ -24,7 +24,6 @@ static BOOL DPMayBeChatRun(NSData *line) {
     return YES;
 }
 
-// Only Dia's own chat run is rewritten; any other frame, or a run of a different shape, passes through untouched.
 NSData *DPChatAgentRequest(NSData *line, NSString *model) {
     if (!model || !DPMayBeChatRun(line) || !DPValidChatModel(model)) return line;
     id parsed = [NSJSONSerialization JSONObjectWithData:line options:NSJSONReadingMutableContainers error:nil];

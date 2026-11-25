@@ -1,19 +1,38 @@
 #import "DevTools/DevTools.h"
+#include <sys/stat.h>
 
 static const NSUInteger DPLoopLimit = 150;
-static const NSUInteger DPMaxReports = 12;
+static const NSUInteger DPMaxReports = 12, DPMaxFrames = 48;
+static const off_t DPReportCap = 256 * 1024;
 static NSMapTable<NSView *, NSMutableDictionary<NSString *, NSNumber *> *> *DPCounts;
 static NSMutableSet<NSString *> *DPReported;
 static NSString *DPReportPath;
+static BOOL DPCounting;
 
-typedef struct { const char *cls, *superCls; const void *view; NSRect from, to; } DPFrameChange;
+typedef struct { char cls[64], superCls[64]; const void *view; NSRect from, to; } DPFrameChange;
 enum { DPRecentCount = 24 };
 static DPFrameChange DPRecent[DPRecentCount];
 static NSUInteger DPRecentTotal;
 
 static void DPRemember(NSView *view, NSRect from, NSRect to) {
     if (!NSThread.isMainThread || !view.window) return;
-    DPRecent[DPRecentTotal++ % DPRecentCount] = (DPFrameChange){object_getClassName(view), object_getClassName(view.superview), (__bridge const void *)view, from, to};
+    DPFrameChange *change = &DPRecent[DPRecentTotal++ % DPRecentCount];
+    strlcpy(change->cls, object_getClassName(view), sizeof change->cls);
+    strlcpy(change->superCls, object_getClassName(view.superview), sizeof change->superCls);
+    change->view = (__bridge const void *)view;
+    change->from = from;
+    change->to = to;
+}
+
+static void DPAppendReport(NSString *report) {
+    struct stat info;
+    const char *path = DPReportPath.fileSystemRepresentation;
+    BOOL full = stat(path, &info) == 0 && info.st_size > DPReportCap;
+    FILE *file = fopen(path, full ? "w" : "a");
+    if (!file) return;
+    NSData *data = [report dataUsingEncoding:NSUTF8StringEncoding];
+    fwrite(data.bytes, 1, data.length, file);
+    fclose(file);
 }
 
 static void DPReport(NSView *view, NSString *kind) {
@@ -27,19 +46,13 @@ static void DPReport(NSView *view, NSString *kind) {
         DPFrameChange change = DPRecent[i % DPRecentCount];
         [out appendFormat:@"    %s %p %@ -> %@ (in %s)\n", change.cls, change.view, NSStringFromRect(change.from), NSStringFromRect(change.to), change.superCls];
     }
-    for (NSString *frame in NSThread.callStackSymbols) [out appendFormat:@"  %@\n", frame];
-    NSFileHandle *file = [NSFileHandle fileHandleForWritingAtPath:DPReportPath];
-    if (!file) {
-        [NSFileManager.defaultManager createFileAtPath:DPReportPath contents:nil attributes:nil];
-        file = [NSFileHandle fileHandleForWritingAtPath:DPReportPath];
-    }
-    [file seekToEndOfFile];
-    [file writeData:[out dataUsingEncoding:NSUTF8StringEncoding]];
-    [file closeFile];
+    NSArray<NSString *> *stack = NSThread.callStackSymbols;
+    for (NSUInteger i = 0; i < MIN(stack.count, DPMaxFrames); i++) [out appendFormat:@"  %@\n", stack[i]];
+    DPAppendReport(out);
 }
 
 static void DPCount(NSView *view, NSString *kind) {
-    if (!NSThread.isMainThread || !view.window) return;
+    if (!DPCounting || !NSThread.isMainThread || !view.window) return;
     NSMutableDictionary *counts = [DPCounts objectForKey:view];
     if (!counts) [DPCounts setObject:counts = [NSMutableDictionary dictionary] forKey:view];
     NSUInteger n = [counts[kind] unsignedIntegerValue] + 1;
@@ -75,8 +88,16 @@ static void DPView_setFrameOrigin(NSView *self, SEL _cmd, NSPoint origin) {
     DPCallOriginal(DPView_setFrameOrigin, self, origin);
 }
 
+// Every NSView pays for these hooks, so they go in only for a developer who asks. Launch lays out in one long
+// run loop turn, so counting starts after it.
 void DPTraceLayoutLoops(void) {
-    DPReportPath = DPBesideDylib(@"layout-loops.txt");
+    NSString *path = DPBesideDylib(@"layout-loops.txt");
+    const char *wanted = getenv("DIAPATCH_LAYOUT_LOOPS");
+    if (!wanted || !*wanted) {
+        unlink(path.fileSystemRepresentation);
+        return;
+    }
+    DPReportPath = path;
     DPCounts = [NSMapTable weakToStrongObjectsMapTable];
     DPReported = [NSMutableSet set];
     DPHookClass(NSView.class, @selector(setNeedsLayout:), (IMP)DPView_setNeedsLayout);
@@ -87,4 +108,5 @@ void DPTraceLayoutLoops(void) {
         [DPCounts removeAllObjects];
     });
     CFRunLoopAddObserver(CFRunLoopGetMain(), reset, kCFRunLoopCommonModes);
+    DPOnLaunch(^{ DPCounting = YES; });
 }

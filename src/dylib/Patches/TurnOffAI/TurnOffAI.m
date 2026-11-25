@@ -33,13 +33,24 @@ static void DPHost_layout(NSView *self, SEL _cmd) {
 }
 
 static NSHashTable<NSView *> *DPMorningBriefs;
+static char DPBriefHiddenKey;
+
+static void DPHideBrief(NSView *section) {
+    if (DPTurnOffAI.on && !section.hidden) {
+        section.hidden = YES;
+        DPSet(section, &DPBriefHiddenKey, @YES);
+    } else if (!DPTurnOffAI.on && DPGet(section, &DPBriefHiddenKey)) {
+        section.hidden = NO;
+        DPSet(section, &DPBriefHiddenKey, nil);
+    }
+}
 
 static void DPSettingsHeader_layout(NSView *self, SEL _cmd) {
     DPCallOriginal(DPSettingsHeader_layout, self);
     NSTextField *title = (NSTextField *)DPFindView(self, ^BOOL(NSView *view) { return [view isKindOfClass:NSTextField.class]; });
     if (![title.stringValue isEqual:@"Morning Brief"] || !self.superview) return;
     [DPMorningBriefs addObject:self.superview];
-    if (DPTurnOffAI.on) self.superview.hidden = YES;
+    DPHideBrief(self.superview);
 }
 
 static NSHashTable<NSViewController *> *DPChatSidebars;
@@ -165,7 +176,7 @@ static void DPApplyTurnOffAI(DPPatch *patch) {
     DPApplyHides(patch);
     for (NSMenuItem *item in DPAIItems.allObjects) DPTrack(item);
     for (NSTextView *view in DPPlaceholderViews.allObjects) view.needsDisplay = YES;
-    for (NSView *section in DPMorningBriefs.allObjects) section.hidden = patch->on;
+    for (NSView *section in DPMorningBriefs.allObjects) DPHideBrief(section);
     for (NSViewController *sidebar in DPChatSidebars.allObjects) DPCloseChat(sidebar);
     DPApplyAIRows();
     if (patch->on) DPDismissConnectAppPrompts();

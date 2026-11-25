@@ -4,6 +4,7 @@
 
 extern DPPatch DPUndoCloseTab;
 static BOOL DPJustClosed;
+static id DPEventMonitor;
 
 static NSMenuItem *DPReopenItem(void) {
     for (NSMenuItem *top in NSApp.mainMenu.itemArray)
@@ -27,26 +28,29 @@ static BOOL DPEditingWithUndo(NSWindow *window) {
 
 static NSDictionary *DPDefaultUndoShortcut(void) { return @{ @"keyCode" : @6, @"modifiers" : @(NSEventModifierFlagCommand), @"key" : @"Z" }; }
 
-static void DPInstallUndoCloseTab(void) {
-    DPHook(DPDiaWebContents, @selector(closeWithForegroundCommitTiming:), (IMP)DPPage_close);
-    NSEventMask mask = NSEventMaskKeyDown | NSEventMaskLeftMouseDown | NSEventMaskRightMouseDown | NSEventMaskOtherMouseDown;
-    [NSEvent addLocalMonitorForEventsMatchingMask:mask handler:^NSEvent *(NSEvent *event) {
-        if (!DPUndoCloseTab.on || !DPJustClosed) {
-            DPJustClosed = NO;
-            return event;
-        }
-        BOOL undo = event.type == NSEventTypeKeyDown && DPShortcutMatches(event, &DPUndoCloseTab)
-            && !DPCanUndoGrouping() && !DPEditingWithUndo(event.window);
+static NSEvent *DPUndoEvent(NSEvent *event) {
+    if (!DPUndoCloseTab.on || !DPJustClosed) {
         DPJustClosed = NO;
-        NSMenuItem *reopen = undo ? DPReopenItem() : nil;
-        if (!reopen) return event;
-        [reopen.menu performActionForItemAtIndex:[reopen.menu indexOfItem:reopen]];
-        return nil;
-    }];
+        return event;
+    }
+    BOOL undo = event.type == NSEventTypeKeyDown && DPShortcutMatches(event, &DPUndoCloseTab)
+        && !DPCanUndoGrouping() && !DPEditingWithUndo(event.window);
+    DPJustClosed = NO;
+    NSMenuItem *reopen = undo ? DPReopenItem() : nil;
+    if (!reopen) return event;
+    [reopen.menu performActionForItemAtIndex:[reopen.menu indexOfItem:reopen]];
+    return nil;
 }
 
 static void DPApplyUndoCloseTab(DPPatch *patch) {
     if (!patch->on) DPJustClosed = NO;
+    DPSyncMonitor(&DPEventMonitor, patch->on, NSEventMaskKeyDown | NSEventMaskLeftMouseDown | NSEventMaskRightMouseDown | NSEventMaskOtherMouseDown,
+                  ^NSEvent *(NSEvent *event) { return DPUndoEvent(event); });
+}
+
+static void DPInstallUndoCloseTab(void) {
+    DPHook(DPDiaWebContents, @selector(closeWithForegroundCommitTiming:), (IMP)DPPage_close);
+    DPApplyUndoCloseTab(&DPUndoCloseTab);
 }
 
 static NSString *DPVerifyUndoCloseTab(DPPatch *patch) {

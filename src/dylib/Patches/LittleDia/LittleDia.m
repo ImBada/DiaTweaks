@@ -55,6 +55,8 @@ DP_PATCH(DPLittleDia) {
     .symbol = @"macwindow.on.rectangle rectangle.on.rectangle",
     .tint = @"systemMintColor",
     .classes = DPClasses(DPDiaOpenURLEvents, DPDiaPopupWindow, DPDiaPopupBar, DPDiaPopupTitle),
+    .settings = DPSettingList({DPSettingNumber, @"littleDiaWidth", .defaultNumber = 1180, .min = 480, .max = 2000},
+                              {DPSettingNumber, @"littleDiaHeight", .defaultNumber = 860, .min = 360, .max = 1400}),
     .rows = DPLittleDiaRows,
     .relaunch = YES,
     .install = DPInstallLittleDia,

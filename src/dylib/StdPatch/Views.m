@@ -1,5 +1,6 @@
 #import "StdPatch/StdPatch.h"
 #import <os/log.h>
+#import <pthread.h>
 #import <stdatomic.h>
 
 // Hot hooks look Dia's classes up by name on every call; the slot is only a hint, checked against the class's own name.
@@ -29,14 +30,18 @@ static void DPCollectViews(NSView *view, Class cls, NSMutableArray<NSView *> *vi
     for (NSView *sub in view.subviews) DPCollectViews(sub, cls, views);
 }
 
-NSArray<NSView *> *DPFindViews(const char *className) {
+static NSArray<NSView *> *DPViewsOfClass(const char *className, BOOL hiddenToo) {
     Class cls = className ? DPClassNamed(className) : Nil;
     if (!cls) return @[];
     NSMutableArray<NSView *> *views = [NSMutableArray new];
     for (NSWindow *window in NSApp.windows)
-        if (window.isVisible) DPCollectViews(window.contentView, cls, views);
+        if (hiddenToo || window.isVisible) DPCollectViews(window.contentView, cls, views);
     return views;
 }
+
+NSArray<NSView *> *DPFindViews(const char *className) { return DPViewsOfClass(className, NO); }
+
+NSArray<NSView *> *DPFindAllViews(const char *className) { return DPViewsOfClass(className, YES); }
 
 NSString *DPTabLayout(void) {
     Class cls = DPClassNamed(DPDiaSidebarFooter);
@@ -73,8 +78,23 @@ BOOL DPIsChatButton(NSView *view) {
         || DPFindView(view, ^BOOL(NSView *sub) { return DPHasLabel(sub, @"chat fill"); }) != nil;
 }
 
+static __unsafe_unretained NSView *DPLabelView;
+static NSString *DPLabel;
+static BOOL DPLabelRead;
+
+void DPShareLabel(NSView *view) {
+    DPLabelView = pthread_main_np() ? view : nil;
+    DPLabel = nil;
+    DPLabelRead = NO;
+}
+
 BOOL DPHasLabel(NSView *view, NSString *accessibilityLabel) {
-    return [view.accessibilityLabel isEqualToString:accessibilityLabel];
+    if (!view || view != DPLabelView || !pthread_main_np()) return [view.accessibilityLabel isEqualToString:accessibilityLabel];
+    if (!DPLabelRead) {
+        DPLabel = view.accessibilityLabel;
+        DPLabelRead = YES;
+    }
+    return [DPLabel isEqualToString:accessibilityLabel];
 }
 
 void DPRelayoutViews(NSHashTable<NSView *> *views) {

@@ -23,6 +23,7 @@ static id DPControl(NSView *row, Class cls) {
 }
 
 int main(void) { @autoreleasepool {
+    unsetenv("DIATWEAKS_DOMAIN");
     [NSApplication sharedApplication];
     DPSidebarGrain.key = @"sidebarGrain";
     DPSidebarGrain.choice = @"sidebarGrainMaterial";

@@ -5,12 +5,6 @@ static NSUInteger DPHandbacks;
 static BOOL DPSettingDockIcon, DPDrawsOwnTile;
 static NSString *const DPOwnTileKey = @"appIconOwnTile";
 
-static NSUserDefaults *DPTileDefaults(void) {
-    static NSUserDefaults *defaults;
-    if (!defaults) defaults = [[NSUserDefaults alloc] initWithSuiteName:@"com.diapatches"];
-    return defaults;
-}
-
 // 0-2 default, 3-5 clear (3 auto, 5 dark), 6-8 tinted.
 static unsigned DPIconStyle(void) {
     static Class configuration;
@@ -46,18 +40,18 @@ static void DPIconStyleDidChange(NSNotification *note) {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_MSEC * 500), dispatch_get_main_queue(), ^{
         if (current != DPHandbacks || !DPDrawsOwnTile) return;
         DPDrawsOwnTile = NO;
-        [DPTileDefaults() removeObjectForKey:DPOwnTileKey];
+        [DPSettingsDefaults() removeObjectForKey:DPOwnTileKey];
         DPSetTileImage(nil);
     });
 }
 
 void DPDrawOwnTile(void) {
     DPDrawsOwnTile = YES;
-    [DPTileDefaults() setBool:YES forKey:DPOwnTileKey];
+    [DPSettingsDefaults() setBool:YES forKey:DPOwnTileKey];
     DPDrawTile();
 }
 
-BOOL DPOwnTileInDock(void) { return [DPTileDefaults() boolForKey:DPOwnTileKey]; }
+BOOL DPOwnTileInDock(void) { return [DPSettingsDefaults() boolForKey:DPOwnTileKey]; }
 
 static void DPDockTile_setContentView(NSDockTile *self, SEL _cmd, NSView *view) {
     if (!DPAppIcon.on || DPSettingDockIcon) DPCallOriginal(DPDockTile_setContentView, self, view);

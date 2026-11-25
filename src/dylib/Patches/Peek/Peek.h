@@ -21,7 +21,7 @@ enum { DPIgnoreAction = 0, DPCurrentTab = 1, DPForegroundTab = 2, DPBackgroundTa
 @property (nonatomic, copy) NSURL *requestedURL;
 @property (nonatomic, copy) NSString *originTabID;
 @property (nonatomic, weak) NSWindow *originWindow;
-@property (nonatomic, weak) NSView *pane;
+@property (nonatomic, weak) NSView *pane, *paneToolbar;
 @property (nonatomic, strong) id paneObserver, monitor, chatBridge;
 @property (nonatomic) NSRect link;
 @property (nonatomic) CGFloat grown;

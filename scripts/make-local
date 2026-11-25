@@ -1,0 +1,118 @@
+#!/usr/bin/env python3
+import os
+import re
+import shutil
+import subprocess
+import sys
+
+os.chdir(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+PATCHES = "src/dylib/Patches"
+LINKS = "requires|disabledBy|coveredBy"
+
+
+def fail(message):
+    sys.exit(f"make-local: {message}")
+
+
+def sources(folder, extensions=(".m", ".h")):
+    return sorted(os.path.join(path, name) for path, _, names in os.walk(folder) for name in names if name.endswith(extensions))
+
+
+def read(path):
+    with open(path, encoding="utf-8") as handle:
+        return handle.read()
+
+
+def rewrite(path, pairs):
+    original = text = read(path)
+    for pattern, replacement in pairs:
+        text = re.sub(pattern, replacement, text)
+    if text != original:
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(text)
+
+
+def move(source, destination):
+    os.makedirs(os.path.dirname(destination), exist_ok=True)
+    if subprocess.run(["git", "mv", source, destination], capture_output=True).returncode != 0:
+        shutil.move(source, destination)
+
+
+def outside_users(names):
+    inside = tuple(os.path.join(PATCHES, name) + os.sep for name in names)
+    paths = sources("src/dylib")
+    keys = {key for path in paths if path.startswith(inside) for key in re.findall(r'\.key\s*=\s*@"([^"]+)"', read(path))}
+    for path in paths:
+        if path.startswith(inside):
+            continue
+        text = read(path)
+        for name in names:
+            if f'"Patches/{name}/' in text:
+                fail(f"{path} imports {name}, so {name} has to stay built in.")
+        for key in keys:
+            if re.search(rf'\.({LINKS})\s*=\s*@"{re.escape(key)}"|DPPatchNamed\(@"{re.escape(key)}"\)', text):
+                fail(f"{path} depends on the {key} tweak, so it has to stay built in.")
+
+
+def to_local(names):
+    for name in names:
+        folder = os.path.join(PATCHES, name)
+        if not os.path.isdir(folder):
+            fail(f"there is no {folder}.")
+        if os.path.exists(os.path.join("tweaks", name)):
+            fail(f"tweaks/{name} already exists.")
+        if name == "Passkeys":
+            fail("Passkeys can't move: its extension is embedded in DiaPatches.dylib.")
+        if sources(folder, (".swift",)):
+            fail(f"{name} has Swift files, and local tweaks only compile Objective-C.")
+        if any(re.search(r"\.group\s*=", read(path)) for path in sources(folder, (".m",))):
+            fail(f"{name} is in a Settings folder, which only built-in tweaks can fill.")
+    outside_users(names)
+    for name in names:
+        move(os.path.join(PATCHES, name), os.path.join("tweaks", name))
+        for path in sources(os.path.join("tweaks", name)):
+            rewrite(path, [(rf'#import "Patches/{name}/', '#import "')])
+    outside(names, lambda name: [(rf"src/dylib/Patches/{name}(?![A-Za-z0-9_])", f"tweaks/{name}"), (rf'#import "Patches/{name}/', f'#import "{name}/')])
+
+
+def to_builtin(names):
+    for name in names:
+        if not os.path.isdir(os.path.join("tweaks", name)):
+            fail(f"there is no tweaks/{name} folder.")
+        if os.path.exists(os.path.join(PATCHES, name)):
+            fail(f"{PATCHES}/{name} already exists.")
+    for name in names:
+        root = os.path.join(PATCHES, name)
+        move(os.path.join("tweaks", name), root)
+        for path in sources(root):
+            def own(match):
+                for base in (os.path.dirname(path), root):
+                    target = os.path.normpath(os.path.join(base, match.group(1)))
+                    if os.path.isfile(target):
+                        return f'#import "Patches/{name}/{os.path.relpath(target, root)}"'
+                return match.group(0)
+            rewrite(path, [(r'#import "([^"]+)"', own)])
+    outside(names, lambda name: [(rf"tweaks/{name}(?![A-Za-z0-9_])", f"src/dylib/Patches/{name}"), (rf'#import "{name}/', f'#import "Patches/{name}/')])
+
+
+def outside(names, pairs):
+    for path in ["Makefile"] + sources("tests"):
+        rewrite(path, [pair for name in names for pair in pairs(name)])
+
+
+def main():
+    arguments = sys.argv[1:]
+    builtin = arguments[:1] == ["--builtin"]
+    names = [name.strip("/") for name in arguments[1 if builtin else 0:]]
+    if not names or any(name.startswith("-") for name in names):
+        sys.exit("usage: scripts/make-local [--builtin] <Name>...")
+    (to_builtin if builtin else to_local)(names)
+    for stale in ("build/DiaPatches.dylib", "build/dp_headers.bin", "build/patches.json", "build/tweaks.stamp"):
+        if os.path.exists(stale):
+            os.remove(stale)
+    for command in (["make", "-s", f"-j{os.cpu_count() or 4}"], ["scripts/check-patches"]):
+        if subprocess.run(command).returncode != 0:
+            fail(f"`{' '.join(command)}` failed. Undo with scripts/make-local{'' if builtin else ' --builtin'} {' '.join(names)}.")
+
+
+main()

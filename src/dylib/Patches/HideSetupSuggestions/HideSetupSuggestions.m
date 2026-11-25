@@ -86,6 +86,7 @@ static void DPSuggestionCell_layout(NSView *self, SEL _cmd) {
         DPSet(self, &DPDiaHiddenKey, nil);
         self.hidden = diaHidden;
     }
+    if (!hide && !DPHideSetupSuggestions.on) return;
     NSTableView *table = nil;
     for (NSView *up = self.superview; up && !table; up = up.superview)
         if ([up isKindOfClass:NSTableView.class]) table = (NSTableView *)up;

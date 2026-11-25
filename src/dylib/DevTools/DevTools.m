@@ -89,12 +89,12 @@ static void DPListen(NSString *name, void (*handler)(NSNotification *)) {
 }
 
 void DPInstallDevTools(void) {
-    if (![[[NSUserDefaults alloc] initWithSuiteName:@"com.diapatches"] boolForKey:@"devTools"]) return;
+    DPTraceLayoutLoops();
+    if (![DPSettingsDefaults() boolForKey:@"devTools"]) return;
     DPListen(@"com.diapatches.dev.set", DPScriptSet);
     DPListen(@"com.diapatches.dev.type", DPScriptType);
     DPListen(@"com.diapatches.dev.methods", DPScriptMethods);
     DPListen(@"com.diapatches.dev.dump", DPScriptDump);
-    DPTraceLayoutLoops();
     DPOnLaunch(^{
         DPAddMenuItem(@"Help", @"DiaPatches: Copy View Tree", ^{ DPCopyViewTree(); });
         NSMenu *debug = [[NSMenu alloc] initWithTitle:@"Debug"];

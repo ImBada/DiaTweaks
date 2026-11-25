@@ -9,14 +9,16 @@ static NSMutableArray *DPPendingPages;
 static NSPointerArray *DPWindowsAwaitingPage;
 
 void DPExpectLittleDiaWindow(NSRect frame, NSDictionary *noted, void (^missed)(void), void (^claimed)(NSWindow *window)) {
-    NSMutableDictionary *link = [@{@"frame" : [NSValue valueWithRect:frame], @"noted" : noted, @"missed" : [missed copy]} mutableCopy];
+    NSMutableDictionary *link = [@{@"frame" : [NSValue valueWithRect:frame], @"noted" : noted ?: @{}} mutableCopy];
+    if (missed) link[@"missed"] = [missed copy];
     if (claimed) link[@"claimed"] = [claimed copy];
     [DPExpected addObject:link];
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, DPLittleDiaWait * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
         if ([DPExpected indexOfObjectIdenticalTo:link] == NSNotFound) return;
         [DPExpected removeObjectIdenticalTo:link];
         if (!DPExpected.count) [DPPendingPages removeAllObjects];
-        ((void (^)(void))link[@"missed"])();
+        void (^miss)(void) = link[@"missed"];
+        if (miss) miss();
     });
 }
 
@@ -40,19 +42,20 @@ static void DPSetChrome(NSWindow *window, BOOL little) {
     NSView *titlebar = [window standardWindowButton:NSWindowCloseButton].superview.superview;
     NSDictionary *saved = DPGet(window, &DPChromeKey);
     if (little == (saved != nil)) return;
-    if (little) {
-        DPSet(window, &DPChromeKey, @{@"mask" : @(window.styleMask), @"movable" : @(window.movableByWindowBackground)});
-        window.styleMask |= NSWindowStyleMaskFullSizeContentView;
-    } else {
+    if (!little) {
         DPSet(window, &DPChromeKey, nil);
-        NSWindowStyleMask mask = ([saved[@"mask"] unsignedIntegerValue] & ~NSWindowStyleMaskFullScreen)
-                               | (window.styleMask & NSWindowStyleMaskFullScreen);
-        window.styleMask = mask;
+        window.styleMask = ([saved[@"mask"] unsignedIntegerValue] & ~NSWindowStyleMaskFullScreen) | (window.styleMask & NSWindowStyleMaskFullScreen);
         window.movableByWindowBackground = [saved[@"movable"] boolValue];
+        window.titlebarAppearsTransparent = [saved[@"transparent"] boolValue];
+        window.titleVisibility = [saved[@"title"] integerValue];
+    } else {
+        DPSet(window, &DPChromeKey, @{@"mask" : @(window.styleMask), @"movable" : @(window.movableByWindowBackground),
+                                      @"transparent" : @(window.titlebarAppearsTransparent), @"title" : @(window.titleVisibility)});
+        window.styleMask |= NSWindowStyleMaskFullSizeContentView;
+        window.movableByWindowBackground = YES;
+        window.titlebarAppearsTransparent = YES;
+        window.titleVisibility = NSWindowTitleHidden;
     }
-    window.titlebarAppearsTransparent = little;
-    window.titleVisibility = little ? NSWindowTitleHidden : NSWindowTitleVisible;
-    if (little) window.movableByWindowBackground = YES;
     for (NSWindowButton kind = NSWindowCloseButton; kind <= NSWindowZoomButton; kind++) [window standardWindowButton:kind].hidden = little;
     titlebar.hidden = little;
 }

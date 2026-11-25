@@ -22,7 +22,13 @@ BOOL DPPeekIsWeb(NSURL *url) {
     NSString *scheme = url.scheme;
     return [scheme caseInsensitiveCompare:@"http"] == NSOrderedSame || [scheme caseInsensitiveCompare:@"https"] == NSOrderedSame;
 }
-BOOL DPPeekInPinnedRow(NSWindow *window, id page) { return page == gPinnedSource; }
+// Like Peek, a window that doesn't hold the page answers with its own selected tab.
+static NSWindow *gWindow, *gOtherWindow;
+static BOOL gWindowSelectionPinned;
+static NSMapTable *gOwners;
+id DPBrowserOfContents(id contents) { return contents; }
+NSWindow *DPBrowserWindow(id browser) { return [gOwners objectForKey:browser] ?: gWindow; }
+BOOL DPPeekInPinnedRow(NSWindow *window, id page) { return window == gWindow && (page == gPinnedSource || gWindowSelectionPinned); }
 NSString *DPText(id value) { return [value isKindOfClass:NSString.class] ? value : [value description]; }
 id DPMsg(id object, SEL sel) { return [object respondsToSelector:sel] ? ((id (*)(id, SEL))objc_msgSend)(object, sel) : nil; }
 BOOL DPMsgBool(id object, SEL sel) { return [object respondsToSelector:sel] && ((BOOL (*)(id, SEL))objc_msgSend)(object, sel); }
@@ -96,7 +102,6 @@ static void PumpFor(NSTimeInterval seconds) {
         [NSRunLoop.mainRunLoop runMode:NSDefaultRunLoopMode beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
 }
 
-static NSWindow *gWindow;
 static _TtC5TabUI7TabView *gSourceTab, *gNewTab;
 static DPUnpinTarget *gSourceTarget, *gNewTarget;
 
@@ -214,11 +219,23 @@ int main(void) {
         DPShowTabFor(gNewTab, opened, gNewTarget);
 
         gNewTarget.unpins = 0;
+        gOtherWindow = [[DPVisibleWindow alloc] initWithContentRect:NSMakeRect(-30000, -30000, 400, 300) styleMask:NSWindowStyleMaskBorderless
+                                                           backing:NSBackingStoreBuffered defer:NO];
+        DPFakePage *stray = DPMakePage(@"33333333-3333-3333-3333-333333333333", @"https://stray.example/");
+        gOwners = [NSMapTable weakToWeakObjectsMapTable];
+        [gOwners setObject:gOtherWindow forKey:stray];
+        gWindowSelectionPinned = YES;
+        DPClick(stray, opened, DPBackgroundTab);
+        PumpFor(0.2);
+        CHECK(gNewTarget.unpins == 0, "a link from another window's unpinned tab ignores the key window's pinned selection");
+        gWindowSelectionPinned = NO;
+
+        gNewTarget.unpins = 0;
         DPPinnedCmdClick.on = NO;
         DPClick(pinned, opened, DPBackgroundTab);
         PumpFor(0.1);
         CHECK(gNewTarget.unpins == 0, "the hook is a no-op when the tweak is off");
-        CHECK(gOriginalCalls == 9, "the original handler still runs when off");
+        CHECK(gOriginalCalls == 10, "the original handler still runs when off");
 
         if (failures) return 1;
         puts("PASS: Pinned Tabs unpins tabs opened by ⌘-click or middle-click from a pinned tab");

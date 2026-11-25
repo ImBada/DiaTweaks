@@ -92,9 +92,12 @@ static NSURL *gGivenURL;
 
 @interface DPPeekTestWindow : NSWindow
 @property NSInteger makeKeyCalls;
-@property BOOL fakeMiniaturized;
+@property BOOL fakeMiniaturized, noDisplayLink;
 @end
 @implementation DPPeekTestWindow
+- (CADisplayLink *)displayLinkWithTarget:(id)target selector:(SEL)selector {
+    return self.noDisplayLink ? nil : [super displayLinkWithTarget:target selector:selector];
+}
 - (void)makeKeyWindow { self.makeKeyCalls++; }
 - (BOOL)isVisible { return YES; }
 - (BOOL)isMiniaturized { return self.fakeMiniaturized; }
@@ -209,7 +212,24 @@ int main(void) {
         [glow step];
         CHECK(!glow.loading && glow.shown == 0, "DPPeekGlow skips 60fps step work while window is miniaturized");
         window.fakeMiniaturized = NO;
+        glowPage.isLoading = NO;
+        [glow step];
+        CHECK(glow.frames.valid && glow.frames.timeInterval >= 0.2, "an idle glow only looks a few times a second");
+        glowPage.isLoading = YES;
+        [glow step];
+        CHECK(glow.loading && glow.frames.timeInterval < 0.02, "a loading page's glow draws at 60 Hz");
+        glowPage.isLoading = NO;
+        [glow step];
+        CHECK(glow.finishing && glow.frames.timeInterval < 0.02, "the glow keeps drawing while it finishes");
+        glow.finishing = glow.fading = NO;
+        [glow step];
+        CHECK(glow.frames.timeInterval >= 0.2, "a settled glow goes back to idling");
+        glow.hidden = YES;
+        CHECK(glow.frames == nil, "a hidden glow stops its timer");
+        glow.hidden = NO;
+        CHECK(glow.frames.valid, "showing the glow again restarts it");
         [glow removeFromSuperview];
+        CHECK(glow.frames == nil, "a glow off the window stops its timer");
 
         _TtC11ContentPane15ContentPaneView *pane = [[_TtC11ContentPane15ContentPaneView alloc] initWithFrame:window.contentView.bounds];
         [window.contentView addSubview:pane];
@@ -225,10 +245,11 @@ int main(void) {
         DPPeek.on = YES;
         DPFakePeekPage *source = [DPFakePeekPage new];
         DPPeekWarm(window, source, [NSURL URLWithString:@"https://example.com/warm"]);
-        CHECK(DPPeekWarmPage != nil && DPPeekWarmView.superview != nil, "warm page attached before close-all");
+        CHECK([DPPeekWarmSlots objectForKey:window].view.superview != nil, "warm page attached before close-all");
         DPShowZone(window, NSMakePoint(100, 100));
         CHECK(DPZonePanel != nil && DPZoneRelease.valid, "drag zone shown before close-all");
 
+        pane.postsFrameChangedNotifications = NO;
         DPFakePeekPage *cardPage = [DPFakePeekPage new];
         cardPage.url = [NSURL URLWithString:@"https://example.com/card"];
         DPPeekCard *card = DPPeekShowCard(window, cardPage, nil, NSMakeRect(10, 10, 40, 20));
@@ -245,15 +266,32 @@ int main(void) {
         card2.source = source;
         CHECK(card.hidden && card2 && !card2.hidden && DPPeekAllCards(window).count == 2 && DPPeekHiddenCards(window).count == 1,
               "both hidden and visible cards tracked before close-all");
+        CHECK(pane.postsFrameChangedNotifications, "a watched pane posts frame changes while a card follows it");
 
         DPPeek.on = NO;
         DPPeekCloseAll();
         CHECK(DPPeekAllCards(nil).count == 0 && card.superview == nil && card2.superview == nil && card.monitor == nil && card.paneObserver == nil,
               "DPPeekCloseAll tears down visible+hidden cards, monitors, and observers");
+        CHECK(!pane.postsFrameChangedNotifications, "closing every card turns the pane's frame notifications back off");
         CHECK(DPPeekSyncTimer == nil, "DPPeekCloseAll invalidates selection sync timer");
-        CHECK(DPPeekWarmPage == nil && DPPeekWarmView == nil, "DPPeekCloseAll cools pre-warmed page");
+        CHECK([DPPeekWarmSlots objectForKey:window] == nil, "DPPeekCloseAll cools pre-warmed page");
         CHECK(DPZonePanel == nil && DPZoneRelease == nil, "DPPeekCloseAll hides drag zone and stops timer");
         gActiveID = @"tab-1";
+
+        DPPeek.on = YES;
+        DPPeekTestWindow *warmA = MakeWindow(NSMakeRect(-30000, -30000, 600, 400)), *warmB = MakeWindow(NSMakeRect(-29000, -30000, 600, 400));
+        gDetachCalls = 0;
+        DPPeekWarm(warmA, source, [NSURL URLWithString:@"https://a.example/"]);
+        DPPeekWarm(warmB, source, [NSURL URLWithString:@"https://b.example/"]);
+        CHECK(gDetachCalls == 0, "hovering a link in a second window keeps the first window's warm page");
+        DPPeekCoolIn(warmB);
+        CHECK(gDetachCalls == 1, "cooling one window leaves the other warm");
+        DPPeekCool();
+        CHECK(gDetachCalls == 2, "cooling everything cools every window");
+        DPPeekCool();
+        CHECK(gDetachCalls == 2, "nothing is left to cool");
+        [warmA close];
+        [warmB close];
 
         DPPeek.on = NO;
         gCloseCalls = 0;
@@ -327,7 +365,7 @@ int main(void) {
         DPPeek.on = YES;
         gCloseCalls = 0;
         DPPeekWarm(window, source, [NSURL URLWithString:@"https://closed-window.example/warm"]);
-        CHECK(DPPeekWarmPage == nil && DPPeekWarmView == nil, "DPPeekWarm refuses closed window");
+        CHECK([DPPeekWarmSlots objectForKey:window] == nil, "DPPeekWarm refuses closed window");
         DPFakePeekPage *closedWarm = [DPFakePeekPage new];
         closedWarm.url = [NSURL URLWithString:@"about:blank"];
         DPPeekOpenFrom(window, @"tab-1", [NSURL URLWithString:@"https://closed-window.example/"], NSMakeRect(0, 0, 20, 10), delegate, source, closedWarm, nil);
@@ -392,6 +430,24 @@ int main(void) {
             DPPeek.on = YES;
             CHECK(!DPPeekHandoffActive() && DPPeekSyncTimer == nil, "no handoff cover or sync timer survives teardown");
             [window3 close];
+        }
+
+        {
+            DPPeekTestWindow *window5 = MakeWindow(NSMakeRect(-30000, -30000, 600, 400));
+            window5.noDisplayLink = YES;
+            DPPeekCard *coverCard = DPPeekShowCard(window5, [DPFakePeekPage new], nil, NSMakeRect(10, 10, 40, 20));
+            CGColorSpaceRef space = CGColorSpaceCreateDeviceRGB();
+            CGContextRef bitmap = CGBitmapContextCreate(NULL, 4, 4, 8, 16, space, (CGBitmapInfo)kCGImageAlphaPremultipliedLast);
+            CGImageRef shot = CGBitmapContextCreateImage(bitmap);
+            __block int promotedNow = 0;
+            DPPeekShowCover(coverCard, shot, ^{ promotedNow++; });
+            CHECK(coverCard && promotedNow == 1 && !DPPeekCoverIn(window5) && DPGet(coverCard, &DPPeekCoverKey) == nil,
+                  "a window that gives the cover no display ticks takes it down and promotes at once");
+            CGImageRelease(shot);
+            CGContextRelease(bitmap);
+            CGColorSpaceRelease(space);
+            [coverCard handOverTo:nil attach:nil];
+            [window5 close];
         }
 
         {

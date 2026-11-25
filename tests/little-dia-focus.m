@@ -163,6 +163,15 @@ int main(void) {
         CHECK(![nilProxy isKindOfClass:NSString.class] && ![nilProxy conformsToProtocol:@protocol(NSCopying)],
               "nil-target DPStayingLink safely returns NO for kind/protocol checks");
 
+        BOOL survived = YES;
+        @try {
+            DPExpectLittleDiaWindow(NSMakeRect(0, 0, 10, 10), nil, nil, nil);
+            [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:DPLittleDiaWait + 0.3]];
+        } @catch (NSException *exception) {
+            survived = NO;
+        }
+        CHECK(survived, "expecting a Little Dia window with no stack, no fallback and no claim neither throws nor crashes when it lapses");
+
         if (failures) return 1;
         puts("PASS: Little Dia focuses the page view without stealing existing focus");
     }

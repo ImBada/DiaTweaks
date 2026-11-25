@@ -26,7 +26,7 @@ pub fn show(env: &Env, ui: &Ui) -> Result<()> {
 }
 
 fn report(env: &Env, spinner: &Spinner) -> Result<Vec<String>> {
-    let manifest = Manifest::load_with_local(&env.manifest(), &env.local_state())?;
+    let manifest = Manifest::load_with_local(env)?;
     let status = Diapatch::find(env)?.status(spinner)?;
     let none = || "none".to_string();
 
@@ -35,9 +35,11 @@ fn report(env: &Env, spinner: &Spinner) -> Result<Vec<String>> {
         Some(version) => format!("{version}, not patched"),
         None => format!("not installed at {}", env.app.display()),
     };
-    let staged = status.staged.as_ref().map_or_else(none, |version| {
-        format!("{version}, installs when Dia quits")
-    });
+    let staged = match &status.staged {
+        Some(version) => format!("{version}, installs when Dia quits"),
+        None if env.staged().exists() => "incomplete — run `diatweaks update`".into(),
+        None => none(),
+    };
     let latest = match &status.feed {
         Some(version) => format!("{version} on the {} channel", status.channel),
         None => "couldn't check (are you online?)".into(),

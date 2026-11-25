@@ -1,12 +1,6 @@
 #import "ProfileColorPicker.h"
 
 static NSString *const DPProfileColorsKey = @"profileColors";
-static NSUserDefaults *DPColorDefaults;
-
-static NSUserDefaults *DPDefaults(void) {
-    if (!DPColorDefaults) DPColorDefaults = [[NSUserDefaults alloc] initWithSuiteName:@"com.diapatches"];
-    return DPColorDefaults;
-}
 
 static int DPHexDigit(unichar c) {
     if (c >= '0' && c <= '9') return c - '0';
@@ -97,7 +91,7 @@ NSString *DPNormalizedSpaceID(id value) {
 NSString *DPSavedProfileHexForSpace(NSString *spaceID) {
     NSString *key = DPNormalizedSpaceID(spaceID);
     if (!key) return nil;
-    NSDictionary *dict = [DPDefaults() dictionaryForKey:DPProfileColorsKey];
+    NSDictionary *dict = [DPSettingsDefaults() dictionaryForKey:DPProfileColorsKey];
     NSString *raw = [dict isKindOfClass:NSDictionary.class] ? dict[key] : nil;
     NSString *canonical = nil;
     return DPColorFromHex(raw, &canonical) ? canonical : nil;
@@ -112,9 +106,9 @@ void DPSetProfileHexForSpace(NSString *spaceID, NSString *hex) {
     if (!key) return;
     NSString *canonical = nil;
     if (hex.length && !DPColorFromHex(hex, &canonical)) return;
-    NSDictionary *existing = [DPDefaults() dictionaryForKey:DPProfileColorsKey];
+    NSDictionary *existing = [DPSettingsDefaults() dictionaryForKey:DPProfileColorsKey];
     NSMutableDictionary *colors = [existing isKindOfClass:NSDictionary.class] ? [existing mutableCopy] : [NSMutableDictionary dictionary];
     colors[key] = canonical;
-    if (colors.count) [DPDefaults() setObject:colors forKey:DPProfileColorsKey];
-    else [DPDefaults() removeObjectForKey:DPProfileColorsKey];
+    if (colors.count) [DPSettingsDefaults() setObject:colors forKey:DPProfileColorsKey];
+    else [DPSettingsDefaults() removeObjectForKey:DPProfileColorsKey];
 }

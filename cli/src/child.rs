@@ -9,7 +9,7 @@ use std::{
     time::Duration,
 };
 
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Error, Result};
 
 use crate::{signals, ui::Spinner};
 
@@ -34,8 +34,41 @@ impl Finished {
         if lines.is_empty() {
             return format!("It stopped with {} and printed nothing.", self.status);
         }
-        lines[lines.len().saturating_sub(count)..].join("\n")
+        user_facing(&lines[lines.len().saturating_sub(count)..].join("\n"))
     }
+
+    pub fn failure(&self, what: &str, lines: usize, support: &Path) -> Error {
+        const NETWORK: [&str; 7] = [
+            "curl",
+            "resolve",
+            "connect",
+            "timed out",
+            "SSL",
+            "HTTP",
+            "network",
+        ];
+        let tail = self.tail(lines);
+        if NETWORK.iter().any(|sign| self.output.contains(sign)) {
+            return anyhow!("{what} Check your internet connection, then try again.\n{tail}");
+        }
+        anyhow!(
+            "{what}\n{tail}\nDetails: {}",
+            support.join("diapatch.log").display()
+        )
+    }
+}
+
+fn user_facing(text: &str) -> String {
+    [
+        ("`diapatch build`", "`diatweaks update-dia`"),
+        ("`diapatch apply`", "`diatweaks update-dia`"),
+        ("`diapatch update`", "`diatweaks update-dia`"),
+        ("`diapatch install`", "`diatweaks update`"),
+        ("`diapatch self-update`", "`diatweaks update`"),
+        ("`diapatch uninstall`", "`diatweaks restore`"),
+    ]
+    .iter()
+    .fold(text.to_owned(), |text, (from, to)| text.replace(from, to))
 }
 
 // Unlinked file instead of a pipe so the child never dies of SIGPIPE if diatweaks is killed.
@@ -131,4 +164,52 @@ pub fn quick(command: &mut Command) -> Option<String> {
         .status
         .success()
         .then(|| String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::unix::process::ExitStatusExt;
+
+    fn finished(output: &str) -> Finished {
+        Finished {
+            status: ExitStatus::from_raw(1 << 8),
+            output: output.into(),
+        }
+    }
+
+    #[test]
+    fn tails_name_diatweaks_commands() {
+        let done = finished(
+            "noise\nerror: deleted staged: a stopped run left it there; run `diapatch build` to stage Dia again\nerror: Dia is running; quit it, then run `diapatch apply`\n",
+        );
+        assert_eq!(
+            done.tail(2),
+            "error: deleted staged: a stopped run left it there; run `diatweaks update-dia` to stage Dia again\nerror: Dia is running; quit it, then run `diatweaks update-dia`"
+        );
+    }
+
+    #[test]
+    fn failures_blame_the_network_only_when_it_was_the_network() {
+        let support = Path::new("/support");
+        let offline = finished("curl: (6) Could not resolve host: api.github.com").failure(
+            "Couldn't update DiaTweaks.",
+            3,
+            support,
+        );
+        assert!(offline
+            .to_string()
+            .contains("Check your internet connection"));
+        assert!(!offline.to_string().contains("Details:"));
+
+        let local = finished("error: cannot write /support/bin").failure(
+            "Couldn't update DiaTweaks.",
+            3,
+            support,
+        );
+        assert!(!local.to_string().contains("internet"));
+        assert!(local
+            .to_string()
+            .ends_with("Details: /support/diapatch.log"));
+    }
 }

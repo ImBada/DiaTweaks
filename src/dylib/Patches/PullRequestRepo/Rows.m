@@ -89,21 +89,20 @@ static void DPUndoAdjustment(NSArray *previous, void *height) {
 
 static void DPLayout_prepareLayout(NSCollectionViewLayout *self, SEL _cmd) {
     DPCallOriginal(DPLayout_prepareLayout, self);
-    void *height = DPIvar(self, "contentHeight");
-    NSArray *(*elements)(id, SEL, NSRect) = (void *)DPDiaIMP(objc_getClass(DPDiaTabListLayout), @selector(layoutAttributesForElementsInRect:));
+    BOOL active = DPPullRequestRepo.on && DPTallTabs.count;
     NSArray *prev = DPGet(self, &DPAdjustedKey);
+    if (!active && !prev && !DPGet(self, &DPEditsKey)) return;
+    void *height = DPIvar(self, "contentHeight");
     if (prev && height) {
         DPSet(self, &DPAdjustedKey, nil);
         DPUndoAdjustment(prev, height);
     }
-    if (!DPPullRequestRepo.on || !DPTallTabs.count) {
-        if (DPGet(self, &DPEditsKey)) DPSet(self, &DPEditsKey, nil);
-        return;
-    }
+    if (!active) return DPSet(self, &DPEditsKey, nil);
     id diffable = self.collectionView.dataSource;
     id source = DPObjectIvar(diffable, "_impl");
     if (![source respondsToSelector:@selector(itemIdentifierForIndexPath:)] || !height) return;
     // Use Dia's IMP so we mutate real attributes, not Collapse Pinned Tabs' copies.
+    NSArray *(*elements)(id, SEL, NSRect) = (void *)DPDiaIMP(objc_getClass(DPDiaTabListLayout), @selector(layoutAttributesForElementsInRect:));
     NSArray<NSCollectionViewLayoutAttributes *> *all = elements(self, @selector(layoutAttributesForElementsInRect:), NSMakeRect(-1e5, -1e5, 2e5, 1e7));
     NSMutableArray<NSCollectionViewLayoutAttributes *> *tall = [NSMutableArray new];
     for (NSCollectionViewLayoutAttributes *a in all)

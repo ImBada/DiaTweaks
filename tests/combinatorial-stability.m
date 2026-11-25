@@ -230,6 +230,9 @@ static int gLastConfigArgc;
 static int gPopupCalls, gPipRequests;
 static NSMutableArray<NSEvent * (^)(NSEvent *)> *gKeyMonitors;
 
+static const NSPoint DPCombOffscreenPointer = {-1000, -1000};
+static NSPoint DPEvent_mouseLocation(id self, SEL _cmd) { return DPCombOffscreenPointer; }
+
 static id DPEvent_addLocalMonitor(id self, SEL _cmd, NSEventMask mask, NSEvent * (^handler)(NSEvent *)) {
     id token = DPCallOriginal(DPEvent_addLocalMonitor, self, mask, handler);
     if ((mask & NSEventMaskKeyDown) && handler) {
@@ -340,6 +343,7 @@ static NSEvent *MakeRightClick(NSWindow *window) {
 - (NSWindow *)attachedSheet { return self.fakeSheet; }
 - (NSButton *)standardWindowButton:(NSWindowButton)b { return b == NSWindowCloseButton ? self.fakeCloseButton : [super standardWindowButton:b]; }
 - (NSResponder *)firstResponder { return self.mockFirstResponder ?: [super firstResponder]; }
+- (NSPoint)mouseLocationOutsideOfEventStream { return DPCombOffscreenPointer; }
 - (BOOL)makeFirstResponder:(NSResponder *)responder { self.mockFirstResponder = responder; return YES; }
 - (void)performClose:(id)sender { self.closeCalled = YES; }
 - (id)safeSwiftValueForKey:(NSString *)key { return [key isEqualToString:@"viewModel"] ? self.viewModel : nil; }
@@ -1745,6 +1749,7 @@ static void TestPermutationAndPauseStress(void) {
 
 int main(void) {
     @autoreleasepool {
+        unsetenv("DIATWEAKS_DOMAIN");
         [NSApplication sharedApplication];
         DPArmTestWatchdog(120);
         DPTesting = YES;
@@ -1759,11 +1764,14 @@ int main(void) {
         [NSFileManager.defaultManager createDirectoryAtPath:scratchDir withIntermediateDirectories:YES attributes:nil error:nil];
         NSString *fakeDylib = [scratchDir stringByAppendingPathComponent:@"DiaPatches.dylib"];
         DPTestDylibPath = fakeDylib.fileSystemRepresentation;
+        setenv("DIAPATCH_HOME", [scratchDir stringByAppendingPathComponent:@"home"].fileSystemRepresentation, 1);
 
         // Capture all installed local key monitors so overlay priority tests exercise the real monitor chain.
         Class eventMeta = object_getClass(NSEvent.class);
         DPHookClass(eventMeta, @selector(addLocalMonitorForEventsMatchingMask:handler:), (IMP)DPEvent_addLocalMonitor);
         DPHookClass(eventMeta, @selector(removeMonitor:), (IMP)DPEvent_removeMonitor);
+        // Keep the host's real pointer out of every hover check.
+        DPHookClass(eventMeta, @selector(mouseLocation), (IMP)DPEvent_mouseLocation);
 
         // Stub NSMenu popup presentation before patches hook it, so popup tests never block headless runs.
         Class menuMeta = object_getClass(NSMenu.class);

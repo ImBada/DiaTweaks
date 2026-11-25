@@ -6,8 +6,15 @@ extern DPPatch DPMouseBackForward;
 static const NSInteger DPWebContentsHidden = 0;
 static NSHashTable *DPPages;
 
+static BOOL DPCanSteer(id page) {
+    static const char *const needs[] = {"nativeView", "visibility", "hasFocus", "canGoBack", "canGoForward", "navigationController"};
+    for (size_t i = 0; i < sizeof needs / sizeof *needs; i++)
+        if (![page respondsToSelector:sel_registerName(needs[i])]) return NO;
+    return YES;
+}
+
 static void DPPage_setVisibility(id self, SEL _cmd, NSInteger visibility) {
-    [DPPages addObject:self];
+    if (DPCanSteer(self)) [DPPages addObject:self];
     DPCallOriginal(DPPage_setVisibility, self, visibility);
 }
 
@@ -48,8 +55,8 @@ static id DPPageAt(NSEvent *event) {
 static void DPGo(id page, NSInteger offset) {
     if (!DPPageBool(page, offset < 0 ? @selector(canGoBack) : @selector(canGoForward))) return;
     id controller = [page performSelector:@selector(navigationController)];
-    if (offset < 0) [controller performSelector:@selector(goBack)];
-    else [controller performSelector:@selector(goForward)];
+    SEL go = offset < 0 ? @selector(goBack) : @selector(goForward);
+    if ([controller respondsToSelector:go]) ((void (*)(id, SEL))objc_msgSend)(controller, go);
 }
 
 static void DPInstallMouseBackForward(void) {

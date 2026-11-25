@@ -86,7 +86,7 @@ static NSView *DPGrainSliderRowFor(const DPGrainSetting *setting) {
 
 - (void)reset:(NSButton *)button {
     if (self.space) DPGrainClear(self.space);
-    else for (NSUInteger i = 0; i < DPGrainSettingCount; i++) [DPGrainDefaults() removeObjectForKey:DPGrainSettings[i]->key];
+    else for (NSUInteger i = 0; i < DPGrainSettingCount; i++) [DPSettingsDefaults() removeObjectForKey:DPGrainSettings[i]->key];
     for (DPGrainSliderRow *row in DPGrainSliders) [row sync];
     DPRefreshSidebarGrain();
     if (self.afterReset) self.afterReset();

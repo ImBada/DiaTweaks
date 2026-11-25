@@ -108,11 +108,11 @@ private func DPTidyIneligibleReason() -> String? {
     let domain = unsafeBitCast(domainSymbol, to: Domain.self)("OS_ELIGIBILITY_DOMAIN_GREYMATTER")
     var answer: UInt64 = 0, source: UInt64 = 0
     var statusPointer: UnsafeMutableRawPointer?, contextPointer: UnsafeMutableRawPointer?
-    let rc = unsafeBitCast(answerSymbol, to: Answer.self)(domain, &answer, &source, &statusPointer, &contextPointer)
+    guard unsafeBitCast(answerSymbol, to: Answer.self)(domain, &answer, &source, &statusPointer, &contextPointer) == 0 else { return nil }
     // Both come back retained when non-null.
     let statusObj = statusPointer.map { Unmanaged<AnyObject>.fromOpaque($0).takeRetainedValue() }
     let contextObj = contextPointer.map { Unmanaged<AnyObject>.fromOpaque($0).takeRetainedValue() }
-    guard rc == 0, let status = statusObj as? xpc_object_t, xpc_get_type(status) == XPC_TYPE_DICTIONARY else { return nil }
+    guard let status = statusObj as? xpc_object_t, xpc_get_type(status) == XPC_TYPE_DICTIONARY else { return nil }
     let rawContext = contextObj as? xpc_object_t
     let context = rawContext.flatMap { xpc_get_type($0) == XPC_TYPE_DICTIONARY ? $0 : nil }
     let fails = { (input: String) in xpc_dictionary_get_int64(status, "OS_ELIGIBILITY_INPUT_" + input) == 2 }
@@ -152,7 +152,7 @@ public func DPTidyAskModel(_ tabs: NSArray, _ done: @escaping @convention(block)
     }
     if let reason = DPTidyUnavailableReason() { return finish(nil, reason as String) }
     #if canImport(FoundationModels)
-    guard #available(macOS 26, *) else { return }
+    guard #available(macOS 26, *) else { return finish(nil, "Tidy Tabs needs macOS 26 or later.") }
     let lines = tabs.map { tab -> String in
         let tab = tab as? NSDictionary
         let title = String(((tab?["title"] as? String) ?? "").prefix(90))

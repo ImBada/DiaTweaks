@@ -1,7 +1,7 @@
 #import "Settings.h"
 
 static void DPAppendSearch(NSMutableString *search, DPPatch *patch) {
-    [search appendFormat:@" %@ %@", patch->title, patch->detail];
+    [search appendFormat:@" %@ %@ %@", patch->title, patch->detail, patch->experimental ? @"experimental" : @""];
     DPForEachOption(patch, ^(DPPatch *option) { [search appendFormat:@" %@ %@", option->title, option->detail]; });
 }
 
@@ -15,16 +15,26 @@ static void DPAppendSearch(NSMutableString *search, DPPatch *patch) {
 @implementation DPFolderRow
 @end
 
+@interface DPOverviewSection : NSObject
+@property (nonatomic, strong) NSView *header, *group;
+@property (nonatomic, strong) NSArray<NSView *> *rows;
+@end
+
+@implementation DPOverviewSection
+@end
+
 @interface DPOverviewView ()
-@property (nonatomic, strong) NSMapTable<DPPatchSwitch *, NSTextField *> *notes;
-@property (nonatomic, strong) NSMutableArray<NSArray *> *sections;
+@property (nonatomic, strong) NSMutableArray<NSArray *> *toggles;
+@property (nonatomic, strong) NSMapTable<NSView *, NSArray<NSValue *> *> *gates;
+@property (nonatomic, strong) NSMutableArray<DPOverviewSection *> *sections;
 @property (nonatomic, strong) NSMutableArray<DPFolderRow *> *folders;
 @property (nonatomic, strong) NSMutableDictionary<NSString *, NSString *> *sectionHiders;
 @property (nonatomic, strong) NSMutableDictionary<NSString *, NSImageView *> *sectionEyes;
 @property (nonatomic, strong) NSTextField *noResults;
-@property (nonatomic, strong) NSView *pausedRow;
-@property (nonatomic, strong) NSTextField *pauseLabel;
+@property (nonatomic, strong) NSView *pausedRow, *experimentalRow;
+@property (nonatomic, strong) NSTextField *pauseLabel, *experimentalLabel;
 @property (nonatomic, strong) NSButton *pauseButton;
+@property (nonatomic) NSUInteger hiddenExperimental;
 @end
 
 @implementation DPOverviewView
@@ -32,7 +42,8 @@ static void DPAppendSearch(NSMutableString *search, DPPatch *patch) {
 - (instancetype)initWithFrame:(NSRect)frame {
     if (!(self = [super initWithFrame:frame])) return nil;
     self.searchText = [NSMapTable strongToStrongObjectsMapTable];
-    self.notes = [NSMapTable strongToStrongObjectsMapTable];
+    self.toggles = [NSMutableArray new];
+    self.gates = [NSMapTable strongToStrongObjectsMapTable];
     self.sections = [NSMutableArray new];
     self.folders = [NSMutableArray new];
     self.sectionHiders = [NSMutableDictionary new];
@@ -56,7 +67,6 @@ static void DPAppendSearch(NSMutableString *search, DPPatch *patch) {
         if (DPRequired(patch)) continue;
         NSString *section = patch->section ?: @"Other", *hider = patch->disabledBy ?: @"", *shared = self.sectionHiders[section];
         self.sectionHiders[section] = !shared || [shared isEqual:hider] ? hider : @"";
-        // One folder row stands in for every tweak in it, at the first one's place.
         const DPFolderSpec *folder = patch->group ? DPFolderSpecNamed(patch->group) : NULL;
         if (!folder) {
             add(section, [self rowForPatch:patch]);
@@ -66,6 +76,7 @@ static void DPAppendSearch(NSMutableString *search, DPPatch *patch) {
         [folded addObject:patch->group];
         add(section, [self rowForFolder:folder]);
     }
+    add(@"Experimental", self.experimentalRow = [self makeExperimentalRow]);
 
     NSMutableArray<NSView *> *views = [NSMutableArray new];
     for (NSString *title in titles) {
@@ -81,7 +92,11 @@ static void DPAppendSearch(NSMutableString *search, DPPatch *patch) {
         }
         NSView *group = DPGroup(rows[title]);
         [views addObjectsFromArray:@[header, group]];
-        [self.sections addObject:@[header, group, rows[title]]];
+        DPOverviewSection *section = [DPOverviewSection new];
+        section.header = header;
+        section.group = group;
+        section.rows = rows[title];
+        [self.sections addObject:section];
     }
     self.noResults = DPLabel(@"No Results", 13, NSFontWeightRegular, NSColor.secondaryLabelColor);
     DPFillStack(self, [views arrayByAddingObject:self.noResults]);
@@ -114,10 +129,19 @@ static void DPAppendSearch(NSMutableString *search, DPPatch *patch) {
     DPSetTweaksPaused(!DPPaused, self.window);
 }
 
+- (NSView *)makeExperimentalRow {
+    self.experimentalLabel = DPLabel(@"", 13, NSFontWeightRegular, NSColor.labelColor);
+    NSView *row = DPRow(self.experimentalLabel, [NSButton buttonWithTitle:@"Show" target:self action:@selector(showExperimental:)]);
+    [self.searchText setObject:@"experimental hidden tweaks show still being tested" forKey:row];
+    return row;
+}
+
+- (void)showExperimental:(id)sender { DPSetShowsExperimental(YES); }
+
 - (NSView *)rowForPatch:(DPPatch *)patch {
     NSTextField *note = DPHiddenNote();
     DPPatchSwitch *toggle = [[DPPatchSwitch alloc] initWithPatch:patch];
-    [self.notes setObject:note forKey:toggle];
+    [self.toggles addObject:@[ toggle, note ]];
     NSMutableString *search = [NSMutableString new];
     DPAppendSearch(search, patch);
 
@@ -127,6 +151,7 @@ static void DPAppendSearch(NSMutableString *search, DPPatch *patch) {
         if (weakSelf.open) weakSelf.open(patch->title, [[DPPageView alloc] initWithPatch:patch]);
     });
     [self.searchText setObject:search forKey:row];
+    [self.gates setObject:@[ [NSValue valueWithPointer:patch] ] forKey:row];
     return row;
 }
 
@@ -141,7 +166,6 @@ static void DPAppendSearch(NSMutableString *search, DPPatch *patch) {
     entry.eye = eye;
     [self.folders addObject:entry];
 
-    // Searching for anything inside the folder has to find the folder, since its tweaks have no rows of their own.
     NSMutableString *search = [NSMutableString stringWithFormat:@"%@ %@", folder->title, folder->detail];
     for (NSValue *value in members) DPAppendSearch(search, value.pointerValue);
 
@@ -151,14 +175,15 @@ static void DPAppendSearch(NSMutableString *search, DPPatch *patch) {
         if (weakSelf.open) weakSelf.open(folder->title, [[DPFolderView alloc] initWithFolder:folder]);
     });
     [self.searchText setObject:search forKey:row];
+    [self.gates setObject:members forKey:row];
     return row;
 }
 
 - (void)syncFolder:(DPFolderRow *)entry {
-    // A reason every member shares, like Turn Off AI covering all of them, reads better than a list of names.
+    NSArray<NSValue *> *members = DPShownMembers(entry.members);
     NSString *shared = nil;
-    BOOL every = entry.members.count > 0;
-    for (NSValue *value in entry.members) {
+    BOOL every = members.count > 0;
+    for (NSValue *value in members) {
         DPPatch *member = value.pointerValue;
         NSString *why = DPWhyDisabled(member);
         if (!why || (shared && ![shared isEqualToString:why])) {
@@ -168,7 +193,7 @@ static void DPAppendSearch(NSMutableString *search, DPPatch *patch) {
         shared = why;
     }
     NSMutableArray<NSString *> *shown = [NSMutableArray new];
-    for (NSValue *value in entry.members) {
+    for (NSValue *value in members) {
         DPPatch *member = value.pointerValue;
         if (DPShownOn(member)) [shown addObject:member->title];
     }
@@ -179,7 +204,7 @@ static void DPAppendSearch(NSMutableString *search, DPPatch *patch) {
 
     NSString *hint = nil;
     if (shown.count) {
-        for (NSValue *value in entry.members) {
+        for (NSValue *value in members) {
             if (!DPShownOn(value.pointerValue)) continue;
             NSString *why = DPWhyHidden(value.pointerValue);
             if (!why || (hint && ![hint isEqualToString:why])) {
@@ -194,45 +219,50 @@ static void DPAppendSearch(NSMutableString *search, DPPatch *patch) {
     entry.eye.hidden = !hint;
 }
 
-- (void)syncWithQuery:(NSString *)query {
+- (void)syncState {
     DPSyncPauseRow(self.pauseLabel, self.pauseButton);
+    self.hiddenExperimental = DPHiddenExperimentalCount();
+    self.experimentalLabel.stringValue = [NSString stringWithFormat:@"%lu experimental tweak%@ hidden.", self.hiddenExperimental,
+                                          self.hiddenExperimental == 1 ? @" is" : @"s are"];
     [self.sectionEyes enumerateKeysAndObjectsUsingBlock:^(NSString *section, NSImageView *eye, BOOL *stop) {
         NSString *hint = DPWhyHiddenBy(DPPatchNamed(self.sectionHiders[section]));
         DPSetHint(eye, hint);
         eye.hidden = !hint;
     }];
-    for (DPPatchSwitch *toggle in self.notes) {
+    for (NSArray *pair in self.toggles) {
+        DPPatchSwitch *toggle = pair[0];
+        NSTextField *note = pair[1];
         [toggle sync];
         if (self.sectionEyes[toggle.patch->section ?: @"Other"]) toggle.hiddenIcon.hidden = YES;
-        NSString *summary = DPActiveSummary(toggle.patch);
-        NSTextField *note = [self.notes objectForKey:toggle];
-        note.stringValue = summary ?: @"";
+        note.stringValue = DPActiveSummary(toggle.patch) ?: @"";
         note.hidden = !note.stringValue.length;
     }
     for (DPFolderRow *folder in self.folders) [self syncFolder:folder];
+}
 
+- (void)filterWithQuery:(NSString *)query {
     NSArray<NSString *> *words = [query componentsSeparatedByCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
     BOOL anything = NO;
-    for (NSArray *section in self.sections) {
-        BOOL any = NO;
-        NSArray<NSView *> *arranged = ((NSStackView *)((NSView *)[section[2] firstObject]).superview).arrangedSubviews;
-        for (NSView *row in section[2]) {
-            BOOL visible = row != self.pausedRow || DPPaused || !DPSafeMode;
+    for (DPOverviewSection *section in self.sections) {
+        for (NSView *row in section.rows) {
+            NSArray<NSValue *> *gate = [self.gates objectForKey:row];
+            BOOL visible = row == self.pausedRow ? DPPaused || !DPSafeMode : row == self.experimentalRow ? self.hiddenExperimental > 0 : !gate || DPShownMembers(gate).count;
             NSString *text = visible ? [self.searchText objectForKey:row] : nil;
             for (NSString *word in words) {
                 if (!visible) break;
                 if (word.length && ![text localizedStandardContainsString:word]) visible = NO;
             }
-            NSUInteger index = [arranged indexOfObject:row];
             row.hidden = !visible;
-            if (index != NSNotFound && index > 0) arranged[index - 1].hidden = !visible || !any;
-            any |= visible;
         }
-        BOOL pauseSection = ((NSArray *)section[2]).firstObject == self.pausedRow;
-        ((NSView *)section[0]).hidden = !any || (pauseSection && !DPPaused);
-        ((NSView *)section[1]).hidden = !any;
+        BOOL any = DPTidyGroup(section.group);
+        section.header.hidden = !any || (section.rows.firstObject == self.pausedRow && !DPPaused);
         anything |= any;
     }
     self.noResults.hidden = anything;
+}
+
+- (void)syncWithQuery:(NSString *)query {
+    [self syncState];
+    [self filterWithQuery:query];
 }
 @end

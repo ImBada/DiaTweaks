@@ -4,41 +4,34 @@ const DPGrainSetting DPGrainAmountSetting = {@"sidebarGrainAmount", @"Grain", 0,
 const DPGrainSetting DPGrainSoftnessSetting = {@"sidebarGrainSoftness", @"Softness", 0, 100, 0};
 const DPGrainSetting DPGrainScaleSetting = {@"sidebarGrainScale", @"Scale", 50, 300, 100};
 
-NSUserDefaults *DPGrainDefaults(void) {
-    static NSUserDefaults *defaults;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{ defaults = [[NSUserDefaults alloc] initWithSuiteName:@"com.diapatches"]; });
-    return defaults;
-}
-
 static NSString *const DPGrainProfilesKey = @"sidebarGrainProfiles";
 
 static NSDictionary *DPGrainProfile(NSString *space) {
-    NSDictionary *profile = space ? [DPGrainDefaults() dictionaryForKey:DPGrainProfilesKey][space] : nil;
+    NSDictionary *profile = space ? [DPSettingsDefaults() dictionaryForKey:DPGrainProfilesKey][space] : nil;
     return [profile isKindOfClass:NSDictionary.class] ? profile : nil;
 }
 
 void DPGrainSave(NSString *key, id value, NSString *space) {
-    if (!space) return [DPGrainDefaults() setObject:value forKey:key];
-    NSMutableDictionary *profiles = [[DPGrainDefaults() dictionaryForKey:DPGrainProfilesKey] mutableCopy] ?: [NSMutableDictionary new];
+    if (!space) return [DPSettingsDefaults() setObject:value forKey:key];
+    NSMutableDictionary *profiles = [[DPSettingsDefaults() dictionaryForKey:DPGrainProfilesKey] mutableCopy] ?: [NSMutableDictionary new];
     NSMutableDictionary *profile = [DPGrainProfile(space) mutableCopy] ?: [NSMutableDictionary new];
     profile[key] = value;
     profiles[space] = profile;
-    [DPGrainDefaults() setObject:profiles forKey:DPGrainProfilesKey];
+    [DPSettingsDefaults() setObject:profiles forKey:DPGrainProfilesKey];
 }
 
 BOOL DPGrainHasOverrides(NSString *space) { return DPGrainProfile(space).count > 0; }
 
 void DPGrainClear(NSString *space) {
-    NSMutableDictionary *profiles = [[DPGrainDefaults() dictionaryForKey:DPGrainProfilesKey] mutableCopy];
+    NSMutableDictionary *profiles = [[DPSettingsDefaults() dictionaryForKey:DPGrainProfilesKey] mutableCopy];
     profiles[space] = nil;
-    if (profiles.count) [DPGrainDefaults() setObject:profiles forKey:DPGrainProfilesKey];
-    else [DPGrainDefaults() removeObjectForKey:DPGrainProfilesKey];
+    if (profiles.count) [DPSettingsDefaults() setObject:profiles forKey:DPGrainProfilesKey];
+    else [DPSettingsDefaults() removeObjectForKey:DPGrainProfilesKey];
 }
 
 NSInteger DPGrainValue(const DPGrainSetting *setting, NSString *space) {
     NSNumber *saved = DPGrainProfile(space)[setting->key];
-    if (![saved isKindOfClass:NSNumber.class]) saved = [DPGrainDefaults() objectForKey:setting->key];
+    if (![saved isKindOfClass:NSNumber.class]) saved = [DPSettingsDefaults() objectForKey:setting->key];
     return [saved isKindOfClass:NSNumber.class] ? MAX(setting->min, MIN(setting->max, saved.integerValue)) : setting->fallback;
 }
 

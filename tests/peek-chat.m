@@ -439,6 +439,17 @@ int main(void) {
         NSView *hitHiddenChat = [window.contentView hitTest:chatBtnInWindow];
         CHECK(hitHiddenChat == peek || [hitHiddenChat isDescendantOf:peek], "hidden Chat button does not pass through Peek backdrop");
         chatBtn.hidden = NO;
+        CHECK(peek.paneToolbar == toolbar, "the card remembers its pane's toolbar instead of searching on every hit test");
+        [toolbar removeFromSuperview];
+        _TtC13NavigationBar17NavigationBarView *rebuilt = [[_TtC13NavigationBar17NavigationBarView alloc] initWithFrame:toolbar.frame];
+        [pane addSubview:rebuilt];
+        NSView *afterRebuild = [window.contentView hitTest:chatBtnInWindow];
+        CHECK(peek.paneToolbar == rebuilt && (afterRebuild == peek || [afterRebuild isDescendantOf:peek]),
+              "a toolbar Dia rebuilds is found again, and its missing Chat button doesn't pass clicks through");
+        [rebuilt removeFromSuperview];
+        [pane addSubview:toolbar];
+        NSView *restored = [window.contentView hitTest:chatBtnInWindow];
+        CHECK(peek.paneToolbar == toolbar && (restored == chatBtn || [restored isDescendantOf:chatBtn]), "the original toolbar works again once it's back");
 
         contentContainer.frame = NSMakeRect(0, 0, 820, 800);
         pageContainer.frame = contentContainer.bounds;

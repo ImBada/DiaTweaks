@@ -1,21 +1,28 @@
 #import "Local/Local.h"
 
 NSDictionary *DPLocalReadState(void) {
-    // The file is JSON, which dictionaryWithContentsOfFile: (a plist reader) can't parse.
     NSData *data = [NSData dataWithContentsOfFile:DPLocalStatePath()];
-    if (!data) return @{};
-    id state = [NSJSONSerialization JSONObjectWithData:data options:0 error:NULL];
+    id state = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:NULL] : nil;
     return [state isKindOfClass:NSDictionary.class] ? state : @{};
 }
 
-BOOL DPLocalWriteState(NSArray<NSDictionary *> *items) {
-    NSMutableDictionary *state = [@{ @"version" : @1, @"dylibUUID" : DPDylibUUID(), @"items" : items ?: @[] } mutableCopy];
-    if (DPLocalToolchainSaved()) state[@"toolchain"] = DPLocalToolchainSaved();
+static NSDictionary *DPLocalStateOf(NSArray<NSDictionary *> *items) {
+    NSMutableDictionary *state = [@{ @"version" : @1, @"dylibUUID" : DPDylibUUID(), @"items" : items.copy ?: @[] } mutableCopy];
+    id toolchain = DPLocalToolchainSaved() ?: DPLocalSavedValue(@"toolchain");
+    if ([toolchain isKindOfClass:NSDictionary.class]) state[@"toolchain"] = toolchain;
+    return state;
+}
+
+static BOOL DPLocalStore(NSDictionary *state) {
     NSData *json = [NSJSONSerialization dataWithJSONObject:state options:NSJSONWritingPrettyPrinted | NSJSONWritingSortedKeys error:NULL];
-    if (!json) return NO;
     NSString *path = DPLocalStatePath();
     [NSFileManager.defaultManager createDirectoryAtPath:path.stringByDeletingLastPathComponent withIntermediateDirectories:YES attributes:nil error:NULL];
-    NSString *temporary = [path stringByAppendingString:@".tmp"];
-    if (![json writeToFile:temporary atomically:YES]) return NO;
-    return rename(temporary.fileSystemRepresentation, path.fileSystemRepresentation) == 0;
+    return [json writeToFile:path atomically:YES];
+}
+
+BOOL DPLocalWriteState(NSArray<NSDictionary *> *items) { return DPLocalStore(DPLocalStateOf(items)); }
+
+NSDictionary *DPLocalUpdateState(NSArray<NSDictionary *> *items, NSDictionary *saved) {
+    NSDictionary *state = DPLocalStateOf(items);
+    return [state isEqual:saved] || DPLocalStore(state) ? state : saved;
 }

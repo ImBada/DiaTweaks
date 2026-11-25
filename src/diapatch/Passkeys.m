@@ -1,14 +1,11 @@
 #import <CoreGraphics/CoreGraphics.h>
 #import <Foundation/Foundation.h>
 #import <pthread.h>
-#import <spawn.h>
 #import <sys/file.h>
 #import <sys/wait.h>
 #import "LaunchServices.h"
 #import "Passkeys.h"
-
-extern char **environ;
-int responsibility_spawnattrs_setdisclaim(posix_spawnattr_t *attrs, int disclaim);  // private: macOS asks about the copy, not Dia
+#import "Disclaim.h"
 
 static const int kSheetWidth = 480, kSheetHeight = 300;
 static const uint32_t kMaxMessageLength = 1024 * 1024;
@@ -26,18 +23,21 @@ static NSString *asString(id value) { return [value isKindOfClass:NSString.class
 static NSDictionary *readFromHelper(void) {
     if (!gFromHelper) return nil;
     NSMutableData *data = [NSMutableData data];
+    char chunk[16 * 1024];
+    size_t used = 0;
     for (;;) {
-        int c = fgetc(gFromHelper);
-        if (c == 0) break;
+        int c = getc_unlocked(gFromHelper);
         if (c == EOF) {
-            if (ferror(gFromHelper) && errno == EINTR) {
-                clearerr(gFromHelper);
-                continue;
-            }
-            return nil;
+            if (!ferror(gFromHelper) || errno != EINTR) return nil;
+            clearerr(gFromHelper);
+            continue;
         }
-        if (data.length >= kMaxHelperMessageLength) return nil;
-        [data appendBytes:&(char){ (char)c } length:1];
+        if (c) chunk[used++] = (char)c;
+        if (c && used < sizeof chunk) continue;
+        if (data.length + used > kMaxHelperMessageLength) return nil;
+        [data appendBytes:chunk length:used];
+        used = 0;
+        if (!c) break;
     }
     return asDictionary([NSJSONSerialization JSONObjectWithData:data options:0 error:nil]);
 }
@@ -161,15 +161,15 @@ static void signInAsDia(NSString *userData) {
     }
 }
 
+// Through cfprefsd as `defaults write` did; macOS may map this path to Dia's own domain, so only write when unset.
 static void skipIntro(NSString *data) {
-    NSString *prefsDir = [data stringByAppendingPathComponent:@"Library/Preferences"];
-    [NSFileManager.defaultManager createDirectoryAtPath:prefsDir withIntermediateDirectories:YES attributes:nil error:nil];
-    NSString *preferences = [prefsDir stringByAppendingPathComponent:@"company.thebrowser.dia"];
-    NSTask *task = [NSTask new];
-    task.executableURL = [NSURL fileURLWithPath:@"/usr/bin/defaults"];
-    task.arguments = @[ @"write", preferences, @"hasPresentedOnboardingIntro", @"-bool", @"YES" ];
-    task.standardInput = task.standardOutput = task.standardError = NSFileHandle.fileHandleWithNullDevice;
-    if ([task launchAndReturnError:NULL]) [task waitUntilExit];
+    NSString *folder = [data stringByAppendingPathComponent:@"Library/Preferences"];
+    CFStringRef preferences = (__bridge CFStringRef)[folder stringByAppendingPathComponent:@"company.thebrowser.dia"];
+    Boolean valid = false;
+    if (CFPreferencesGetAppBooleanValue(CFSTR("hasPresentedOnboardingIntro"), preferences, &valid) && valid) return;
+    [NSFileManager.defaultManager createDirectoryAtPath:folder withIntermediateDirectories:YES attributes:nil error:nil];
+    CFPreferencesSetAppValue(CFSTR("hasPresentedOnboardingIntro"), kCFBooleanTrue, preferences);
+    CFPreferencesAppSynchronize(preferences);
 }
 
 static void forgetWindows(NSString *userData) {
@@ -234,47 +234,22 @@ static pid_t launchHelper(NSString *home, int toHelper[2], int fromHelper[2]) {
     const char *argv[] = { app.fileSystemRepresentation, profile.UTF8String, size.UTF8String, position.UTF8String, "--remote-debugging-pipe", "--mute-audio",
                            "-transientFeatureFlagOverrides", "sync-enabled=false", NULL };
 
-    NSString *fixedHome = [@"CFFIXED_USER_HOME=" stringByAppendingString:data];
-    size_t envCount = 0;
-    while (environ[envCount]) envCount++;
-    const char **envp = calloc(envCount + 2, sizeof *envp);
-    if (!envp) return 0;
-    size_t out = 0;
-    envp[out++] = fixedHome.UTF8String;
-    for (size_t i = 0; i < envCount; i++) {
-        if (!strncmp(environ[i], "CFFIXED_USER_HOME=", 18)) continue;
-        envp[out++] = environ[i];
-    }
-
-    // Move pipe ends above 4 so adddup2(..., 3) cannot clobber fromHelper[1] if stdio/lock used lower fds.
+    // adddup2 onto 3 and 4 would clobber a pipe end already sitting there.
     int childIn = toHelper[0] <= 4 ? fcntl(toHelper[0], F_DUPFD_CLOEXEC, 5) : toHelper[0];
     int childOut = fromHelper[1] <= 4 ? fcntl(fromHelper[1], F_DUPFD_CLOEXEC, 5) : fromHelper[1];
-    if (childIn < 0 || childOut < 0) {
-        if (childIn >= 0 && childIn != toHelper[0]) close(childIn);
-        if (childOut >= 0 && childOut != fromHelper[1]) close(childOut);
-        free(envp);
-        return 0;
-    }
-
-    posix_spawn_file_actions_t files;
-    posix_spawn_file_actions_init(&files);
-    posix_spawn_file_actions_adddup2(&files, childIn, 3);
-    posix_spawn_file_actions_adddup2(&files, childOut, 4);
-    posix_spawn_file_actions_addopen(&files, 0, "/dev/null", O_RDONLY, 0);
-    posix_spawn_file_actions_addopen(&files, 1, "/dev/null", O_WRONLY, 0);
-    posix_spawn_file_actions_addopen(&files, 2, "/dev/null", O_WRONLY, 0);
-    posix_spawnattr_t attrs;
-    posix_spawnattr_init(&attrs);
-    posix_spawnattr_setflags(&attrs, POSIX_SPAWN_CLOEXEC_DEFAULT);
-    responsibility_spawnattrs_setdisclaim(&attrs, 1);
     pid_t pid = 0;
-    int status = posix_spawn(&pid, argv[0], &files, &attrs, (char *const *)argv, (char *const *)envp);
-    posix_spawn_file_actions_destroy(&files);
-    posix_spawnattr_destroy(&attrs);
-    if (childIn != toHelper[0]) close(childIn);
-    if (childOut != fromHelper[1]) close(childOut);
-    free(envp);
-    return status == 0 ? pid : 0;
+    if (childIn >= 0 && childOut >= 0) {
+        posix_spawn_file_actions_t files;
+        posix_spawn_file_actions_init(&files);
+        posix_spawn_file_actions_adddup2(&files, childIn, 3);
+        posix_spawn_file_actions_adddup2(&files, childOut, 4);
+        for (int fd = 0; fd < 3; fd++) posix_spawn_file_actions_addopen(&files, fd, "/dev/null", fd ? O_WRONLY : O_RDONLY, 0);
+        pid = DPSpawnDisclaimed(argv, @[ [@"CFFIXED_USER_HOME=" stringByAppendingString:data] ], &files);
+        posix_spawn_file_actions_destroy(&files);
+    }
+    if (childIn >= 0 && childIn != toHelper[0]) close(childIn);
+    if (childOut >= 0 && childOut != fromHelper[1]) close(childOut);
+    return pid;
 }
 
 static BOOL hasWindowOnScreen(pid_t pid) {
@@ -428,7 +403,6 @@ static BOOL openOrigin(NSString *session, NSString *origin, NSString *pagePath) 
         }
     }
 
-    // Only synthesize a document after the real server at expectedOrigin completed TLS and responded or redirected cross-origin.
     if (!landed && !sawTLSError && (sawCrossOriginRedirect || sawServerResponse)) {
         synthetic = YES;
         NSDictionary *nav = sendWithEvents(@"Page.navigate", @{ @"url" : [expectedOrigin stringByAppendingString:@"/"] }, session, onEvent);

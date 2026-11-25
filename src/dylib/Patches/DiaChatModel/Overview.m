@@ -43,7 +43,7 @@ NSString *DPVerifyDiaModelOverview(DPPatch *patch) {
     for (NSView *overview in DPFindViews("DPOverviewView")) {
         if (overview.hiddenOrHasHiddenAncestor) continue;
         NSTextField *note = DPModelNote(overview);
-        if (!note) continue;  // The Settings list can be filtered to another tweak.
+        if (!note) continue;
         if (patch->on && (note.hidden || ![note.stringValue isEqual:DPModelSummary()])) return @"the selected model is not shown in the tweak list";
         if (!patch->on && !note.hidden) return @"the model summary is shown while the tweak is off";
     }

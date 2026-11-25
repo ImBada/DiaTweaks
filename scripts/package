@@ -2,7 +2,7 @@
 # Name and contents are what diapatch self-update expects.
 set -eu
 cd "$(dirname "$0")/.."
-make -s
+make -s -j"$(sysctl -n hw.ncpu 2>/dev/null || echo 4)"
 cargo build --release --quiet --manifest-path cli/Cargo.toml
 stage=$(mktemp -d)
 trap 'rm -rf "$stage"' EXIT

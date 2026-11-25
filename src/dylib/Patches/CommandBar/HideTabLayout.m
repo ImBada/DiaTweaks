@@ -1,12 +1,19 @@
 #import "Patches/CommandBar/HideTab.h"
 
-static char DPFrozenKey, DPFrozenSizeKey;
+static char DPFrozenKey, DPFrozenSizeKey, DPFrozenCountKey;
+static _Thread_local BOOL DPInTransition;
 
 static NSCollectionViewLayoutAttributes *DPLayout_item(NSCollectionViewLayout *self, SEL _cmd, NSIndexPath *path);
 
 NSRect DPDiaRowFrame(NSCollectionViewLayout *layout, NSIndexPath *path) {
     SEL sel = @selector(layoutAttributesForItemAtIndexPath:);
     return ((NSCollectionViewLayoutAttributes * (*)(id, SEL, NSIndexPath *)) DPOriginalIMP(layout, sel, (IMP)DPLayout_item))(layout, sel, path).frame;
+}
+
+static NSInteger DPItemCount(NSCollectionView *list) {
+    NSInteger count = 0;
+    for (NSInteger section = 0; section < list.numberOfSections; section++) count += [list numberOfItemsInSection:section];
+    return count;
 }
 
 void DPFreezeLists(NSWindow *window) {
@@ -21,13 +28,18 @@ void DPFreezeLists(NSWindow *window) {
                 if (name && !DPIsLeftOutRow(list, path)) frames[name] = [NSValue valueWithRect:NSOffsetRect(frame, 0, -DPClosedUp(list.collectionViewLayout, frame))];
             }
         DPSet(list, &DPFrozenSizeKey, [NSValue valueWithSize:list.collectionViewLayout.collectionViewContentSize]);
+        DPSet(list, &DPFrozenCountKey, @(DPItemCount(list)));
         DPSet(list, &DPFrozenKey, frames);
     }
 }
 
+// A row added is what the frozen frames hold the list for; a row taken away leaves them describing rows that are no longer there.
 static NSDictionary<NSString *, NSValue *> *DPFrozen(NSCollectionView *list) {
     NSDictionary *frames = DPGet(list, &DPFrozenKey);
-    if (frames && !DPHidingATab(list.window)) DPSet(list, &DPFrozenKey, frames = nil);
+    if (!frames) return nil;
+    NSInteger count = DPItemCount(list), before = [DPGet(list, &DPFrozenCountKey) integerValue];
+    if (count != before) DPSet(list, &DPFrozenCountKey, @(count));
+    if (count < before || !DPHidingATab(list.window)) DPSet(list, &DPFrozenKey, frames = nil);
     return frames;
 }
 
@@ -76,16 +88,27 @@ static NSArray *DPLayout_elements(NSCollectionViewLayout *self, SEL _cmd, NSRect
     return kept;
 }
 
+// Dia builds a row's appearing and disappearing attributes from its item attributes, so those are left for the one shift made on the way out.
 static NSCollectionViewLayoutAttributes *DPLayout_item(NSCollectionViewLayout *self, SEL _cmd, NSIndexPath *path) {
-    return DPFrozenAttributes(self, DPCallOriginal(DPLayout_item, self, path));
+    NSCollectionViewLayoutAttributes *attributes = DPCallOriginal(DPLayout_item, self, path);
+    return DPInTransition ? attributes : DPFrozenAttributes(self, attributes);
 }
 
+static void DPEndTransition(BOOL *outer) { DPInTransition = *outer; }
+
+#define DPDuringTransition(hook, self, path)                                                    \
+    ({                                                                                          \
+        BOOL dp_outer __attribute__((cleanup(DPEndTransition))) = DPInTransition;               \
+        DPInTransition = YES;                                                                   \
+        DPCallOriginal(hook, self, path);                                                       \
+    })
+
 static NSCollectionViewLayoutAttributes *DPLayout_appearing(NSCollectionViewLayout *self, SEL _cmd, NSIndexPath *path) {
-    return DPFrozenAttributes(self, DPCallOriginal(DPLayout_appearing, self, path));
+    return DPFrozenAttributes(self, DPDuringTransition(DPLayout_appearing, self, path));
 }
 
 static NSCollectionViewLayoutAttributes *DPLayout_disappearing(NSCollectionViewLayout *self, SEL _cmd, NSIndexPath *path) {
-    return DPFrozenAttributes(self, DPCallOriginal(DPLayout_disappearing, self, path));
+    return DPFrozenAttributes(self, DPDuringTransition(DPLayout_disappearing, self, path));
 }
 
 static NSSize DPLayout_size(NSCollectionViewLayout *self, SEL _cmd) {

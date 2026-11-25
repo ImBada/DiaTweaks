@@ -7,10 +7,16 @@ static const NSInteger DPFollowerCount = sizeof(DPFollowerTags) / sizeof(DPFollo
 static NSHashTable<NSMenu *> *DPGroupMenus;
 static BOOL DPInserting;
 
+// A weak table retains and autoreleases the menus it touches, which would keep Dia's scratch menu holding its items
+// until the pool drains, so Dia's move of those items into the Tabs menu throws.
 static void DPTrackGroupMenu(NSMenu *menu) {
     if (!menu) return;
     if (!DPGroupMenus) DPGroupMenus = [NSHashTable weakObjectsHashTable];
-    [DPGroupMenus addObject:menu];
+    @autoreleasepool { [DPGroupMenus addObject:menu]; }
+}
+
+static BOOL DPIsTrackedGroupMenu(NSMenu *menu) {
+    @autoreleasepool { return [DPGroupMenus containsObject:menu]; }
 }
 
 static BOOL DPIsFollowerTag(NSInteger tag) {
@@ -19,12 +25,6 @@ static BOOL DPIsFollowerTag(NSInteger tag) {
 
 static BOOL DPIsCommandTag(NSInteger tag) {
     return tag >= DPGroupMenuTag && tag <= DPGroupSelectedMenuTag;
-}
-
-static BOOL DPHasGroupOrFollower(NSMenu *menu) {
-    for (NSMenuItem *each in menu.itemArray)
-        if (DPIsCommandTag(each.tag)) return YES;
-    return NO;
 }
 
 static BOOL DPIsNewGroupTitle(NSString *title) {
@@ -139,7 +139,6 @@ static void DPPlaceGroupItem(NSMenu *menu) {
     }
     [menu insertItem:item atIndex:end];
     DPInserting = NO;
-    DPTrackGroupMenu(menu);
     DPPlaceFollowerItems(menu);
 }
 
@@ -170,7 +169,7 @@ static void DPInstallMenuBarItem(void) {
 }
 
 static void DPMenuAdded(NSMenu *menu, NSMenuItem *item) {
-    if ((DPGroupTabs.on && DPIsNewGroupTitle(item.title)) || DPHasGroupOrFollower(menu)) DPPlaceGroupItem(menu);
+    if (DPIsCommandTag(item.tag) || (DPGroupTabs.on && DPIsNewGroupTitle(item.title)) || DPIsTrackedGroupMenu(menu)) DPPlaceGroupItem(menu);
 }
 
 static void DPMenu_addItem(NSMenu *self, SEL _cmd, NSMenuItem *item) {
@@ -191,11 +190,9 @@ void DPInstallGroupMenus(void) {
 
 static void DPApplyGroupTabs(DPPatch *patch) {
     if (!patch->on) DPForgetGroupingUndo();
-    for (NSMenuItem *top in NSApp.mainMenu.itemArray) {
-        [top.submenu itemWithTag:DPGroupMenuTag].hidden = !patch->on;
-        for (NSInteger i = 0; i < DPFollowerCount; i++) [top.submenu itemWithTag:DPFollowerTags[i]].hidden = !patch->on;
+    @autoreleasepool {
+        for (NSMenu *menu in DPGroupMenus.allObjects) DPSyncMenuVisibility(menu);
     }
-    for (NSMenu *menu in DPGroupMenus.allObjects) DPSyncMenuVisibility(menu);
 }
 
 static NSString *DPVerifyGroupTabs(DPPatch *patch) {

@@ -19,7 +19,8 @@ void DPOpenLinkInLittleDia(NSURL *url) { [gOpened addObject:url]; }
 void DPOpenBlankLittleDia(void) { gBlankOpened++; }
 id DPCommandBrowser(void) { return gBrowser; }
 id DPMsg(id object, SEL sel) { return [object respondsToSelector:sel] ? ((id (*)(id, SEL))objc_msgSend)(object, sel) : nil; }
-BOOL DPLittleDiaReady(void) { return YES; }
+static BOOL gReady = YES;
+BOOL DPLittleDiaReady(void) { return gReady; }
 NSMenuItem *DPMenuItem(NSString *title, void (^action)(void)) {
     gNewWindowAction = [action copy];
     return [[NSMenuItem alloc] initWithTitle:title action:nil keyEquivalent:@""];
@@ -139,6 +140,19 @@ int main(void) {
         DPLittleDiaLauncher.apply(&DPLittleDiaLauncher);
         CHECK(!DPLittleDiaLauncherVisible(), "turning Little Dia off closes the launcher");
         DPLittleDia.on = YES;
+
+        DPLittleDia.on = YES;
+        gReady = NO;
+        gLooks = 500;
+        DPRefreshLittleDiaNewWindow();
+        CHECK([DPFileMenu() indexOfItem:gItem] < 0, "the File menu leaves the item out while the extension isn't ready");
+        DPLittleDia.on = NO;
+        DPRefreshLittleDiaNewWindow();
+        DPLittleDia.on = YES;
+        DPRefreshLittleDiaNewWindow();
+        gReady = YES;
+        [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.8]];
+        CHECK([DPFileMenu() indexOfItem:gItem] >= 0, "turning Little Dia back on shows New Little Dia Window within a second, not after the slow poll");
 
         if (failures) return 1;
         puts("PASS: Little Dia launcher opens, resolves URLs and searches, and dismisses cleanly");

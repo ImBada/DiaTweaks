@@ -59,6 +59,7 @@ void DPTidyTabsNow(NSWindow *window) {}
 NSString *DPTidyUnavailableReason(void) { return nil; }
 void DPTrackGrainHost(NSView *host) {}
 void DPRefreshSidebarGrain(void) { gGrainRefreshes++; }
+void DPRefreshSidebarGrainFrames(void) {}
 NSEvent *DPGrainRightClick(NSEvent *event) { return event; }
 NSMenu *DPGrainTextureMenu(void) { return [NSMenu new]; }
 NSString *DPVerifyGrainHosts(DPPatch *patch) { return nil; }
@@ -1090,6 +1091,7 @@ static void TestPlainTabGlowLittleDiaAndTurnOffAI(void) {
 
 int main(void) {
     @autoreleasepool {
+        unsetenv("DIATWEAKS_DOMAIN");
         [NSApplication sharedApplication];
         DPArmTestWatchdog(120);
         DPPanes = [NSHashTable weakObjectsHashTable];

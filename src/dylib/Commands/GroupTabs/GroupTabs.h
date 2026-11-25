@@ -14,6 +14,8 @@ long long DPSessionOf(id contents);
 long long DPActiveSession(id browser);
 
 long long DPLongID(id value);
+void DPLoadTabGroups(id delegate, id browser, void (^use)(NSArray *groups));
+void DPRemoveFromGroups(id delegate, id browser, NSArray *ids, void (^done)(void));
 id DPMsg(id object, SEL sel);
 BOOL DPMsgBool(id object, SEL sel);
 NSString *DPText(id value);

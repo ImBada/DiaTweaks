@@ -10,12 +10,12 @@ static NSString *const DPOpenTabsKey = @"commandBarOpenTabs";
 
 static void DPNoteTab(NSString *key, NSString *tabID, BOOL keep) {
     if (!tabID) return;
-    NSArray *noted = [DPSettings() arrayForKey:key] ?: @[];
+    NSArray *noted = [DPSettingsDefaults() arrayForKey:key] ?: @[];
     if (keep == [noted containsObject:tabID]) return;
     NSMutableArray *tabs = noted.mutableCopy;
     if (keep) [tabs addObject:tabID];
     else [tabs removeObject:tabID];
-    [DPSettings() setObject:tabs forKey:key];
+    [DPSettingsDefaults() setObject:tabs forKey:key];
 }
 
 void DPNoteSpare(NSString *tabID, BOOL parked) {
@@ -84,11 +84,11 @@ void DPCloseLeftSpares(NSArray<NSString *> *left, BOOL last) {
 void DPCloseLeftBarTabs(void) {
     if (!DPHiding()) {
         // Nothing hides these tabs any more, so forget them rather than closing tabs the user can see.
-        [DPSettings() setObject:@[] forKey:DPOpenTabsKey];
+        [DPSettingsDefaults() setObject:@[] forKey:DPOpenTabsKey];
         return;
     }
-    NSArray *open = [DPSettings() arrayForKey:DPOpenTabsKey];
-    NSArray *spares = [DPSettings() arrayForKey:DPSparesKey];
+    NSArray *open = [DPSettingsDefaults() arrayForKey:DPOpenTabsKey];
+    NSArray *spares = [DPSettingsDefaults() arrayForKey:DPSparesKey];
     if (!open.count && !spares.count) return;
     DPCloseLeftOpenTabs(open, NO);
     DPCloseLeftSpares(spares, NO);

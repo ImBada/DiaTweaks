@@ -72,6 +72,7 @@ NSString *DPTabIn(NSString *rowName) { return [rowName containsString:@"parked-1
 
 @interface DPFakeContext : NSObject
 @property (strong) DPFakeContextID *id;
+@property (copy) NSString *userVisibleName;
 @end
 @implementation DPFakeContext
 @end
@@ -101,6 +102,14 @@ BOOL DPMsgBool(id object, SEL sel) { return ((BOOL (*)(id, SEL))objc_msgSend)(ob
 - (void)_updateWindowCornerMask {}
 - (BOOL)isVisible { return self.fakeVisible; }
 - (void)performWindowDragWithEvent:(NSEvent *)event { gWindowDragCalls++; }
+@end
+
+@interface DPRadiuslessWindow : _TtC6Window14PlatformWindow
+@property NSInteger setterCalls;
+@end
+@implementation DPRadiuslessWindow
+- (BOOL)respondsToSelector:(SEL)sel { return sel != @selector(_setCornerRadius:) && [super respondsToSelector:sel]; }
+- (void)_setCornerRadius:(CGFloat)r { self.setterCalls++; }
 @end
 
 @interface _TtC6Window24PlatformWindowThemeFrame : NSView
@@ -261,13 +270,17 @@ static int failures;
 
 int main(void) {
     @autoreleasepool {
+        unsetenv("DIATWEAKS_DOMAIN");
         [NSApplication sharedApplication];
         gFakeDefaults = [DPFakeDefaults new];
         DPHookClass(NSUserDefaults.class, @selector(initWithSuiteName:), (IMP)DPDefaults_initWithSuite);
         DPHookClass(NSApp.class, @selector(windows), (IMP)DPApp_windows);
         DPHookClass(NSApp.class, @selector(orderedWindows), (IMP)DPApp_orderedWindows);
 
+        IMP layerShadow = class_getMethodImplementation(CALayer.class, @selector(setShadowPath:));
         DPWindowCorners.install();
+        CHECK(class_getMethodImplementation(CALayer.class, @selector(setShadowPath:)) == layerShadow,
+              "WindowCorners leaves every CALayer unhooked while it is off");
         DPWindowMaterial.install();
         DPPrivateWindowTheme.install();
         DPHideTrafficLights.install();
@@ -293,6 +306,7 @@ int main(void) {
 
         DPWindowCorners.on = YES;
         DPWindowCorners.apply(&DPWindowCorners);
+        CHECK(class_getMethodImplementation(CALayer.class, @selector(setShadowPath:)) != layerShadow, "WindowCorners hooks CALayer once it is on");
         CHECK(cornerItem.layer.cornerRadius == 0, "WindowCorners sets corner item radius to 0 when radius=0");
         CHECK(floating.layer.cornerRadius == 0, "WindowCorners sets floating sidebar radius to 0 when radius=0");
 
@@ -301,6 +315,20 @@ int main(void) {
         CHECK(cornerItem.layer.cornerRadius == 12, "WindowCorners restores corner item from 0 back to Dia's 12 pt");
         CHECK(floating.layer.cornerRadius == 12, "WindowCorners restores floating sidebar from 0 back to Dia's 12 pt");
         [gFakeDefaults removeObjectForKey:@"windowCornerRadius"];
+
+        DPRadiuslessWindow *radiusless = [[DPRadiuslessWindow alloc] initWithContentRect:NSMakeRect(-30000, -30000, 400, 300)
+                                                                               styleMask:NSWindowStyleMaskTitled backing:NSBackingStoreBuffered defer:YES];
+        radiusless.fakeVisible = YES;
+        radiusless.fakeCornerRadius = 10;
+        gFakeWindows = @[ radiusless ];
+        DPWindowCorners.on = YES;
+        DPWindowCorners.apply(&DPWindowCorners);
+        [radiusless becomeKeyWindow];
+        CHECK(radiusless.setterCalls == 0 && DPWindowCornerGrowth(radiusless) == 0 && DPWindowCorners.verify(&DPWindowCorners) == nil,
+              "WindowCorners leaves a window without _setCornerRadius: alone");
+        DPWindowCorners.on = NO;
+        DPWindowCorners.apply(&DPWindowCorners);
+        gFakeWindows = @[ win ];
 
         _TtC6Window20ContentContainerView *container = [[_TtC6Window20ContentContainerView alloc] initWithFrame:NSMakeRect(0, 0, 600, 500)];
         _TtC13NavigationBar17NavigationBarView *nav = [[_TtC13NavigationBar17NavigationBarView alloc] initWithFrame:NSMakeRect(0, 460, 600, 40)];
@@ -348,6 +376,18 @@ int main(void) {
         DPWindowMaterial.apply(&DPWindowMaterial);
         CHECK(!floatWash.hidden && floatEffect.material == NSVisualEffectMaterialUnderWindowBackground,
               "WindowMaterial turning off restores minimized floating sidebar wash and material");
+        BOOL washHeld = YES;
+        for (int i = 0; i < 50; i++) {
+            DPWindowMaterial.on = YES;
+            DPWindowMaterial.apply(&DPWindowMaterial);
+            floatWash.hidden = i % 2;
+            washHeld = washHeld && floatWash.hidden;
+            DPWindowMaterial.on = NO;
+            DPWindowMaterial.apply(&DPWindowMaterial);
+            washHeld = washHeld && floatWash.hidden == (i % 2);
+        }
+        floatWash.hidden = NO;
+        CHECK(washHeld && !floatWash.hidden, "WindowMaterial keeps the wash hidden and hands back Dia's own choice across repeated toggles");
 
         _TtC6Window28FloatingSidebarContainerView *kvoFloat = [[_TtC6Window28FloatingSidebarContainerView alloc] initWithFrame:NSMakeRect(0, 0, 220, 600)];
         kvoFloat.wantsLayer = YES;
@@ -449,6 +489,33 @@ int main(void) {
         DPPrivateWindowTheme.apply(&DPPrivateWindowTheme);
         CHECK([privLayer1.colors isEqual:privColors] && [privLayer2.colors isEqual:privColors] && nilLayer.colors == nil,
               "PrivateWindowTheme turning off restores both gradients and restores nil colors as nil");
+
+        _TtC6Window14PlatformWindow *workWin = DPMakeBrowserWindow(NO, YES);
+        NSArray *workColors = @[ (id)NSColor.systemOrangeColor.CGColor, (id)NSColor.systemRedColor.CGColor ];
+        _TtC15WindowTreatment31WindowBackgroundOverlayTintView *workTint = [[_TtC15WindowTreatment31WindowBackgroundOverlayTintView alloc] initWithFrame:NSMakeRect(0, 0, 100, 100)];
+        _TtC5ARCUI12GradientView *workGrad = [[_TtC5ARCUI12GradientView alloc] initWithFrame:workTint.bounds];
+        workGrad.wantsLayer = YES;
+        CAGradientLayer *workLayer = [CAGradientLayer layer];
+        workLayer.colors = workColors;
+        [workGrad.layer addSublayer:workLayer];
+        [workTint addSubview:workGrad];
+        [workWin.contentView addSubview:workTint];
+        ((DPFakeBrowser *)DPGet(workWin, "browser")).context.userVisibleName = @"Work";
+        ((DPFakeBrowser *)DPGet(normalWin, "browser")).context.userVisibleName = @"Home";
+        ((DPFakeBrowser *)DPGet(privWin, "browser")).context.userVisibleName = @"Home";
+        gFakeWindows = @[ workWin, normalWin, privWin ];
+        DPPrivateWindowTheme.on = YES;
+        DPPrivateWindowTheme.apply(&DPPrivateWindowTheme);
+        CHECK([privLayer1.colors isEqual:normalColors] && DPPrivateWindowTheme.verify(&DPPrivateWindowTheme) == nil,
+              "PrivateWindowTheme gives a private window its own profile's colors, not the frontmost window's");
+        ((DPFakeBrowser *)DPGet(privWin, "browser")).context.userVisibleName = @"Elsewhere";
+        DPPrivateWindowTheme.apply(&DPPrivateWindowTheme);
+        CHECK([privLayer1.colors isEqual:workColors] && DPPrivateWindowTheme.verify(&DPPrivateWindowTheme) == nil,
+              "PrivateWindowTheme falls back to the frontmost window when no window shares the profile");
+        DPPrivateWindowTheme.on = NO;
+        DPPrivateWindowTheme.apply(&DPPrivateWindowTheme);
+        CHECK([privLayer1.colors isEqual:privColors], "PrivateWindowTheme off restores Dia's private colors after following a profile");
+        gFakeWindows = @[ normalWin, privWin ];
 
         _TtC10TabSidebar17SidebarHeaderView *tlHeader = [[_TtC10TabSidebar17SidebarHeaderView alloc] initWithFrame:NSMakeRect(0, 0, 220, 40)];
         NSStackView *tlStack = [[NSStackView alloc] initWithFrame:NSMakeRect(16, 4, 200, 32)];

@@ -1,6 +1,7 @@
 use std::{
     cmp::Ordering,
-    fs,
+    fs::{self, File},
+    io::Read,
     os::unix::fs::MetadataExt,
     path::{Path, PathBuf},
     process::Command,
@@ -13,12 +14,15 @@ use serde::Deserialize;
 
 use crate::{
     child::{self, Finished, OnInterrupt},
-    env::Env,
+    env::{Env, DEFAULT_APP},
     signals::{self, Cancelled},
     ui::Spinner,
 };
 
-pub struct Diapatch(PathBuf);
+pub struct Diapatch {
+    path: PathBuf,
+    app: Option<PathBuf>,
+}
 
 #[derive(Deserialize)]
 pub struct Status {
@@ -43,15 +47,25 @@ impl Diapatch {
         let path = env.diapatch();
         if !path.is_file() {
             bail!(
-                "DiaTweaks isn't installed: {} is missing. Run install.sh first.",
-                path.display()
+                "DiaTweaks isn't installed: {} is missing. Run {} first.",
+                path.display(),
+                env.install_hint()
             );
         }
-        Ok(Self(path))
+        let app = (env.app != Path::new(DEFAULT_APP)).then(|| env.app.clone());
+        Ok(Self { path, app })
     }
 
     pub fn path(&self) -> &Path {
-        &self.0
+        &self.path
+    }
+
+    pub fn command(&self) -> Command {
+        let mut command = Command::new(&self.path);
+        if let Some(app) = &self.app {
+            command.env("DIAPATCH_APP", app);
+        }
+        command
     }
 
     pub fn run(
@@ -60,7 +74,7 @@ impl Diapatch {
         on_interrupt: OnInterrupt,
         spinner: &Spinner,
     ) -> Result<Finished> {
-        child::run(Command::new(&self.0).args(args), on_interrupt, spinner)
+        child::run(self.command().args(args), on_interrupt, spinner)
     }
 
     pub fn status(&self, spinner: &Spinner) -> Result<Status> {
@@ -70,9 +84,13 @@ impl Diapatch {
         }
         let json = done.output.lines().rev().find(|line| line.starts_with('{'));
         match (done.status.success(), json) {
-            (true, Some(json)) => serde_json::from_str(json)
-                .context("diapatch status gave an answer diatweaks can't read"),
-            _ => bail!("diapatch status failed:\n{}", done.tail(5)),
+            (true, Some(json)) => serde_json::from_str(json).context(
+                "diatweaks and diapatch don't match. Run `diatweaks update` to bring both up to date.",
+            ),
+            _ => bail!(
+                "Couldn't check Dia's status:\n{}\nRun `diatweaks doctor` to see what needs fixing.",
+                done.tail(5)
+            ),
         }
     }
 }
@@ -185,6 +203,29 @@ pub fn version_of(app: &Path) -> Option<String> {
     Some(format!("{short} ({build})"))
 }
 
+pub fn is_arm64(app: &Path) -> Option<bool> {
+    const ARM64: u32 = 0x0100_000c;
+    let info = dictionary(app.join("Contents/Info.plist"))?;
+    let executable = info.get("CFBundleExecutable")?.as_string()?;
+    let mut header = [0u8; 4096];
+    let length = File::open(app.join("Contents/MacOS").join(executable))
+        .ok()?
+        .read(&mut header)
+        .ok()?;
+    let word = |at: usize| {
+        let bytes: [u8; 4] = header[..length].get(at..at + 4)?.try_into().ok()?;
+        Some(u32::from_be_bytes(bytes))
+    };
+    let stride = match word(0)? {
+        0xcafe_babe => 20,
+        0xcafe_babf => 32,
+        0xcffa_edfe => return Some(word(4)?.swap_bytes() == ARM64),
+        _ => return Some(false),
+    };
+    let count = word(4)? as usize;
+    Some((0..count).any(|index| word(8 + index * stride) == Some(ARM64)))
+}
+
 pub fn is_patched(app: &Path) -> bool {
     dictionary(app.join("Contents/Info.plist"))
         .and_then(|info| info.get("DiaPatches")?.as_boolean())
@@ -250,9 +291,11 @@ pub fn has_brief_language(app: &Path) -> bool {
 }
 
 pub fn sync_icon(env: &Env) {
-    let diapatch = env.diapatch();
-    if has_linked_icon_catalog(&env.app) && diapatch.is_file() {
-        child::quick(Command::new(diapatch).arg("set-icon"));
+    if !has_linked_icon_catalog(&env.app) {
+        return;
+    }
+    if let Ok(diapatch) = Diapatch::find(env) {
+        child::quick(diapatch.command().arg("set-icon"));
     }
 }
 
@@ -272,19 +315,19 @@ pub fn is_running(app: &Path) -> bool {
 pub fn quit(app: &Path) -> Result<()> {
     let root = app.canonicalize()?;
     let macos = root.join("Contents/MacOS");
-    let mut sent_terminate = false;
-    for pid in child::all_pids() {
-        let Some(path) = child::pid_path(pid) else {
-            continue;
-        };
-        if path.parent() != Some(macos.as_path()) {
-            continue;
-        }
-        sent_terminate = true;
-        let script = format!(
-            "ObjC.import('AppKit'); $.NSRunningApplication.runningApplicationWithProcessIdentifier({pid}).terminate"
-        );
-        child::quick(Command::new("/usr/bin/osascript").args(["-l", "JavaScript", "-e", &script]));
+    let pids: Vec<String> = child::all_pids()
+        .into_iter()
+        .filter(|&pid| child::pid_path(pid).is_some_and(|path| path.parent() == Some(&macos)))
+        .map(|pid| pid.to_string())
+        .collect();
+    let sent_terminate = !pids.is_empty();
+    if sent_terminate {
+        child::quick(Command::new("/usr/bin/osascript").args([
+            "-l",
+            "JavaScript",
+            "-e",
+            &terminate_script(&pids),
+        ]));
     }
     let timeout = if sent_terminate { 60 } else { 5 };
     let deadline = Instant::now() + Duration::from_secs(timeout);
@@ -307,9 +350,32 @@ pub fn quit(app: &Path) -> Result<()> {
     Ok(())
 }
 
+fn terminate_script(pids: &[String]) -> String {
+    format!(
+        "ObjC.import('AppKit'); [{}].forEach(pid => {{ const app = $.NSRunningApplication.runningApplicationWithProcessIdentifier(pid); if (!app.isNil()) app.terminate; }})",
+        pids.join(",")
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn one_script_quits_every_dia_process() {
+        let script = terminate_script(&["1".into(), "999999".into()]);
+        assert!(script.contains("[1,999999].forEach"));
+        let ran = Command::new("/usr/bin/osascript")
+            .args(["-l", "JavaScript", "-e"])
+            .arg(script.replace("app.terminate", "app.processIdentifier"))
+            .output()
+            .unwrap();
+        assert!(
+            ran.status.success(),
+            "{}",
+            String::from_utf8_lossy(&ran.stderr)
+        );
+    }
 
     #[test]
     fn compares_versions_and_builds() {
@@ -384,6 +450,41 @@ mod tests {
         assert!(has_linked_icon_catalog(&app));
         write_icon("AppIcon");
         assert!(!has_linked_icon_catalog(&app));
+    }
+
+    #[test]
+    fn arm64_reads_thin_and_universal_headers() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = dir.path().join("Dia.app");
+        fs::create_dir_all(app.join("Contents/MacOS")).unwrap();
+        fs::write(
+            app.join("Contents/Info.plist"),
+            "<plist version=\"1.0\"><dict><key>CFBundleExecutable</key><string>Dia</string></dict></plist>",
+        )
+        .unwrap();
+        let binary = app.join("Contents/MacOS/Dia");
+        let fat = |arches: &[u32]| {
+            let mut bytes = 0xcafe_babe_u32.to_be_bytes().to_vec();
+            bytes.extend((arches.len() as u32).to_be_bytes());
+            for arch in arches {
+                bytes.extend(arch.to_be_bytes());
+                bytes.extend([0; 16]);
+            }
+            bytes
+        };
+        let thin = |arch: u32| [0xfeed_facf_u32.to_le_bytes(), arch.to_le_bytes()].concat();
+
+        assert_eq!(is_arm64(&app), None);
+        for (bytes, arm64) in [
+            (thin(0x0100_000c), true),
+            (thin(0x0100_0007), false),
+            (fat(&[0x0100_0007, 0x0100_000c]), true),
+            (fat(&[0x0100_0007]), false),
+            (b"#!/bin/sh".to_vec(), false),
+        ] {
+            fs::write(&binary, bytes).unwrap();
+            assert_eq!(is_arm64(&app), Some(arm64));
+        }
     }
 
     #[test]

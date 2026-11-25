@@ -4,20 +4,30 @@
 #import "Patches/CommandBar/AutoPip.h"
 
 extern DPPatch DPNewTabNextToCurrent, DPCommandBarSpare;
-static __weak NSWindow *DPSpareWindow;
-static CFTimeInterval DPSpareUntil;
+static NSMapTable<NSWindow *, NSNumber *> *DPSpareAttempts;
 static BOOL DPWanted = YES;
 static NSTimer *DPSpareTimer;
 
 void DPWantSpare(void) { DPWanted = YES; }
-void DPNotMakingSpare(void) { DPSpareUntil = 0; }
+void DPNotMakingSpare(void) { [DPSpareAttempts removeAllObjects]; }
+
+static BOOL DPMakingSpareIn(NSWindow *window) {
+    return window && [[DPSpareAttempts objectForKey:window] doubleValue] > CACurrentMediaTime();
+}
+
+static BOOL DPMakingAnySpare(void) {
+    CFTimeInterval now = CACurrentMediaTime();
+    for (NSNumber *until in DPSpareAttempts.objectEnumerator)
+        if (until.doubleValue > now) return YES;
+    return NO;
+}
 
 void DPDropUnwantedSpares(void) {
     for (NSWindow *window in NSApp.windows)
         if (DPSpareIn(window) && (!DPSparesOn() || DPHasStrip(window))) DPDropSpare(window);
 }
 
-// Only when frontmost, idle and not full screen, since switching tabs exits full screen.
+// Never in full screen: the spare's tab switch exits it.
 static void DPMakeSpare(void) {
     DPDropUnwantedSpares();
     if (!DPSparesOn()) return DPUpdateSpareTimer();
@@ -34,7 +44,7 @@ static void DPMakeSpare(void) {
     BOOL anySpare = NO;
     for (NSWindow *other in NSApp.windows)
         if (DPSpareIn(other)) { anySpare = YES; break; }
-    if (!DPWanted && !anySpare && CACurrentMediaTime() >= DPSpareUntil) DPWanted = YES;
+    if (!DPWanted && !anySpare && !DPMakingAnySpare()) DPWanted = YES;
     if (!DPWanted) return;
     if (DPSpareIn(window) || DPGet(window, &DPOverlayKey) || DPHidingATab(window) || DPHasStrip(window) || DPVisiblePeek(window)) return;
     id scriptWindow = DPScriptWindow(window);
@@ -47,15 +57,15 @@ static void DPMakeSpare(void) {
     if (!DPIsKind(window.firstResponder, "RenderWidgetHostViewCocoa")) return;
     NSMenuItem *item = DPMenuItemTitled(NSApp.mainMenu, @"New Tab");
     if (!item.action) return;
-    DPSpareWindow = window;
-    DPSpareUntil = CACurrentMediaTime() + 1;
+    if (!DPSpareAttempts) DPSpareAttempts = [NSMapTable weakToStrongObjectsMapTable];
+    [DPSpareAttempts setObject:@(CACurrentMediaTime() + 1) forKey:window];
     DPWanted = NO;
     DPExpectNewTab(window);
     __weak NSResponder *typing = window.firstResponder;
     // sendAction: bypasses menu/shortcut PiP hooks, so hold PiP explicitly.
     DPHoldAutoPip();
     if (![NSApp sendAction:item.action to:item.target from:item]) {
-        DPSpareUntil = 0;
+        [DPSpareAttempts removeObjectForKey:window];
         DPStopExpecting();
         return DPWantSpare();
     }
@@ -68,8 +78,9 @@ static void DPMakeSpare(void) {
 }
 
 void DPParkIfSpare(DPCommandBarOverlay *overlay) {
-    if (overlay.host != DPSpareWindow || CACurrentMediaTime() >= DPSpareUntil) return;
-    DPSpareUntil = 0;
+    NSWindow *window = overlay.host;
+    if (!DPMakingSpareIn(window)) return;
+    [DPSpareAttempts removeObjectForKey:window];
     overlay.hidden = YES;
     if (DPParkSpare(overlay)) return;
     DPCancelCommandBar(overlay);
@@ -110,9 +121,10 @@ static NSString *DPVerifySpares(DPPatch *patch) {
 
 DP_PATCH(DPCommandBarSpare) {
     .key = @"commandBarSpare",
+    .experimental = YES,
     .order = 89,
     .title = @"Open the Bar Instantly",
-    .detail = @"Keep a new tab ready, hidden, so the command bar opens at once instead of waiting for Dia to make one. Needs tabs in the sidebar, and isn’t used with Open New Tabs Next to Current. Experimental.",
+    .detail = @"Keep a new tab ready, hidden, so the command bar opens at once instead of waiting for Dia to make one. Needs tabs in the sidebar, and isn’t used with Open New Tabs Next to Current.",
     .symbol = @"bolt.fill",
     .tint = @"systemOrangeColor",
     .requires = @"commandBarHideTab",

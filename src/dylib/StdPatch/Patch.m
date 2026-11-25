@@ -11,7 +11,6 @@ static const CFTimeInterval DPAnimationDuration = 0.25;
 
 DPPatch *const *DPPatches;
 NSUInteger DPPatchCount;
-static NSUserDefaults *DPDefaults;
 static NSMutableDictionary<NSString *, NSString *> *DPAppliedChoices;
 
 NSNotificationName const DPPatchesDidChangeNotification = @"DPPatchesDidChange";
@@ -85,7 +84,7 @@ static void DPEnsureReady(DPPatch *patch) {
     if (!problem || DPTesting) return;
     NSLog(@"DiaPatches: %@ couldn't turn on: %@", patch->title, problem);
     patch->on = NO;
-    [DPDefaults setBool:NO forKey:patch->key];
+    [DPSettingsDefaults() setBool:NO forKey:patch->key];
     if (patch->apply) patch->apply(patch);
     dispatch_async(dispatch_get_main_queue(), ^{
         [NSNotificationCenter.defaultCenter postNotificationName:DPPatchesDidChangeNotification object:nil];
@@ -97,7 +96,7 @@ static void DPEnsureReady(DPPatch *patch) {
 }
 
 void DPSetPatch(DPPatch *patch, BOOL on, BOOL save) {
-    if (save) [DPDefaults setBool:on forKey:patch->key];
+    if (save) [DPSettingsDefaults() setBool:on forKey:patch->key];
     if (DPPaused) on = NO;
     if (patch->on == on) return;
     patch->on = on;
@@ -111,19 +110,15 @@ void DPSetPatch(DPPatch *patch, BOOL on, BOOL save) {
 BOOL DPEffectiveOn(DPPatch *patch) { return !DPPaused && DPSavedOn(patch); }
 
 NSString *DPAppSupport(NSString *path) {
-    static NSString *base;
-    static BOOL overridden;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{
-        const char *home = getenv("DIAPATCH_HOME");
-        overridden = home && *home;
-        base = overridden ? @(home) : NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES).firstObject;
-    });
-    if (overridden) {
-        if ([path isEqualToString:@"DiaPatches"]) return base;
-        if ([path hasPrefix:@"DiaPatches/"]) return [base stringByAppendingPathComponent:[path substringFromIndex:11]];
+    const char *home = getenv("DIAPATCH_HOME");
+    if (!home || !*home) {
+        static NSString *system;
+        static dispatch_once_t once;
+        dispatch_once(&once, ^{ system = NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES).firstObject; });
+        return [system stringByAppendingPathComponent:path];
     }
-    return [base stringByAppendingPathComponent:path];
+    if ([path isEqualToString:@"DiaPatches"]) return @(home);
+    return [@(home) stringByAppendingPathComponent:[path hasPrefix:@"DiaPatches/"] ? [path substringFromIndex:11] : path];
 }
 
 static NSMapTable<NSValue *, NSString *> *DPLocalIDs, *DPLocalProblems;
@@ -146,12 +141,12 @@ BOOL DPIsLocalPatch(DPPatch *patch) { return DPLocalIdentifier(patch) != nil; }
 NSString *DPLocalProblem(DPPatch *patch) { return patch ? [DPLocalProblems objectForKey:[NSValue valueWithPointer:patch]] : nil; }
 
 BOOL DPSavedOn(DPPatch *patch) {
-    id value = [DPDefaults objectForKey:patch->key];
+    id value = [DPSettingsDefaults() objectForKey:patch->key];
     return !patch->unavailable && (value ? [value boolValue] : patch->defaultOn);
 }
 
 NSString *DPChoice(DPPatch *patch) {
-    id value = patch && patch->choice ? [DPDefaults objectForKey:patch->choice] : nil;
+    id value = patch && patch->choice ? [DPSettingsDefaults() objectForKey:patch->choice] : nil;
     return [value isKindOfClass:NSString.class] ? value : patch ? patch->defaultChoice : nil;
 }
 
@@ -165,7 +160,7 @@ static void DPRecordChoice(DPPatch *patch) {
 
 void DPSetChoice(DPPatch *patch, NSString *value) {
     if (!patch || !patch->choice) return;
-    [DPDefaults setObject:value forKey:patch->choice];
+    [DPSettingsDefaults() setObject:value forKey:patch->choice];
     if (!DPSafeMode && !DPPausedAtLaunch && patch->on && patch->apply) {
         DPRecordChoice(patch);
         patch->apply(patch);
@@ -219,7 +214,6 @@ static void DPReadPatches(BOOL includeLocal) {
 }
 
 void DPLoadPatches(void) {
-    DPDefaults = [[NSUserDefaults alloc] initWithSuiteName:@"com.diapatches"];
     DPReadPatches(YES);
 
     for (NSUInteger i = 0; i < DPPatchCount; i++) {
@@ -248,7 +242,7 @@ void DPLoadPatches(void) {
 }
 
 void DPApplySavedSettings(void) {
-    CFPreferencesAppSynchronize(CFSTR("com.diapatches"));
+    CFPreferencesAppSynchronize((__bridge CFStringRef)DPSettingsDomain());
     DPPaused = DPPauseSaved();
     for (NSUInteger i = 0; i < DPPatchCount; i++) {
         DPPatch *patch = DPPatches[i];
@@ -268,7 +262,8 @@ void DPWatchSavedSettings(void) {
     static dispatch_once_t once;
     dispatch_once(&once, ^{
         int token;
-        notify_register_dispatch("com.diapatches.changed", &token, dispatch_get_main_queue(), ^(int _) { DPApplySavedSettings(); });
+        notify_register_dispatch([DPSettingsDomain() stringByAppendingString:@".changed"].UTF8String, &token, dispatch_get_main_queue(),
+                                 ^(int _) { DPApplySavedSettings(); });
     });
 }
 
@@ -282,6 +277,48 @@ void DPInstallPatches(void) {
         for (NSUInteger i = 0; i < DPPatchCount; i++) if (DPPatches[i]->on && DPPatches[i]->ready) DPEnsureReady(DPPatches[i]);
     });
     DPInstallHides();
+}
+
+NSNumber *DPCleanNumber(double value) {
+    return [NSDecimalNumber decimalNumberWithString:[NSString stringWithFormat:@"%.10g", value]];
+}
+
+NSArray<NSString *> *DPChoiceValues(DPPatch *patch) {
+    NSMutableArray<NSString *> *values = [NSMutableArray new];
+    for (NSMenuItem *item in patch->choices ? patch->choices().itemArray : @[])
+        if ([item.representedObject isKindOfClass:NSString.class]) [values addObject:item.representedObject];
+    return values;
+}
+
+static NSArray<NSDictionary *> *DPSettingEntries(DPPatch *patch) {
+    NSMutableArray<NSDictionary *> *entries = [NSMutableArray new];
+    for (const DPSetting *setting = patch->settings; setting && setting->kind; setting++) {
+        NSMutableDictionary *entry = [@{@"key": setting->key, @"min": NSNull.null, @"max": NSNull.null} mutableCopy];
+        if (setting->kind == DPSettingBool) {
+            entry[@"type"] = @"bool";
+            entry[@"default"] = @(setting->defaultBool);
+        } else if (setting->kind == DPSettingNumber) {
+            entry[@"type"] = @"number";
+            entry[@"default"] = DPCleanNumber(setting->defaultNumber);
+            entry[@"min"] = DPCleanNumber(setting->min);
+            entry[@"max"] = DPCleanNumber(setting->max);
+        } else {
+            entry[@"type"] = @"string";
+            entry[@"default"] = setting->defaultString ?: @"";
+        }
+        [entries addObject:entry];
+    }
+    return entries;
+}
+
+static id DPChoiceEntry(DPPatch *patch) {
+    if (!patch->choice) return NSNull.null;
+    return @{@"key": patch->choice, @"default": patch->defaultChoice ?: NSNull.null, @"values": DPChoiceValues(patch)};
+}
+
+static id DPShortcutEntry(DPPatch *patch) {
+    if (!patch->shortcut) return NSNull.null;
+    return @{@"key": patch->shortcut, @"default": (patch->defaultShortcut ? patch->defaultShortcut() : nil) ?: NSNull.null};
 }
 
 BOOL DPWriteManifest(NSString *path) {
@@ -301,6 +338,7 @@ BOOL DPWriteManifest(NSString *path) {
             @"title": patch->title,
             @"detail": patch->detail,
             @"defaultOn": @(patch->defaultOn),
+            @"experimental": @(patch->experimental),
             @"requires": required ? required->key : NSNull.null,
             @"disabledBy": disabler ? disabler->key : NSNull.null,
             @"coveredBy": cover ? cover->key : NSNull.null,
@@ -309,6 +347,9 @@ BOOL DPWriteManifest(NSString *path) {
             @"group": patch->group ?: NSNull.null,
             @"tint": patch->tint ?: NSNull.null,
             @"symbol": patch->symbol ?: NSNull.null,
+            @"choice": DPChoiceEntry(patch),
+            @"shortcut": DPShortcutEntry(patch),
+            @"settings": DPSettingEntries(patch),
         }];
     }
     NSData *json = [NSJSONSerialization dataWithJSONObject:@{@"version": @1, @"patches": patches}

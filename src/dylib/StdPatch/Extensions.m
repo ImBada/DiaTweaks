@@ -53,7 +53,6 @@ static void DPDropFlags(NSMutableArray<NSString *> *args) {
     }
 }
 
-// Strip stale DiaPatches extension folders from relaunches and merge all extensions into one --load-extension flag.
 static id DPConfiguration_init(id self, SEL _cmd, int argc, NSArray<NSString *> *argv, NSString *profilePath, NSUInteger applicationID,
                                BOOL isProduction, NSUInteger restorationPolicy, BOOL loadAllProfiles, BOOL quitRunLoop, NSString *suiteName) {
     static NSString *const flag = @"--load-extension=";

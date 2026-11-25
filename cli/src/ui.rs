@@ -26,6 +26,16 @@ impl Ui {
         }
     }
 
+    #[cfg(test)]
+    pub fn headless(yes: bool) -> Self {
+        Self {
+            interactive: false,
+            yes,
+            framed: Cell::new(false),
+            in_menu: Cell::new(false),
+        }
+    }
+
     pub fn intro(&self) {
         self.framed.set(true);
         cliclack::set_theme(Frame);
@@ -70,9 +80,9 @@ impl Ui {
 
     pub fn error(&self, err: &Error) {
         if self.framed.get() {
-            let _ = cliclack::log::error(format!("{err:#}"));
+            let _ = cliclack::log::error(describe(err));
         } else {
-            complain(format_args!("diatweaks: {err:#}"));
+            complain(format_args!("diatweaks: {}", describe(err)));
         }
     }
 
@@ -102,9 +112,9 @@ impl Ui {
 
     pub fn failed(&self, err: &Error) {
         if self.framed.get() {
-            let _ = cliclack::outro_cancel(format!("{err:#}"));
+            let _ = cliclack::outro_cancel(describe(err));
         } else {
-            complain(format_args!("diatweaks: {err:#}"));
+            complain(format_args!("diatweaks: {}", describe(err)));
         }
     }
 
@@ -121,6 +131,13 @@ impl Ui {
     pub fn proceed(&self, question: impl Display) -> Result<bool> {
         if self.yes || !self.interactive {
             return Ok(true);
+        }
+        prompt(cliclack::confirm(question).initial_value(true).interact())
+    }
+
+    pub fn ask(&self, question: impl Display) -> Result<bool> {
+        if self.yes || !self.interactive {
+            return Ok(false);
         }
         prompt(cliclack::confirm(question).initial_value(true).interact())
     }
@@ -164,6 +181,38 @@ pub fn prompt<T>(result: io::Result<T>) -> Result<T> {
     Ok(result?)
 }
 
+fn describe(err: &Error) -> String {
+    let mut text = without_os_errors(&format!("{err:#}"));
+    let denied = err.chain().any(|cause| {
+        cause
+            .downcast_ref::<io::Error>()
+            .is_some_and(|io| io.kind() == io::ErrorKind::PermissionDenied)
+    });
+    if denied && !text.contains("sudo chown") {
+        text.push_str("\nRun `diatweaks doctor` to see what's in the way.");
+    }
+    text
+}
+
+fn without_os_errors(text: &str) -> String {
+    const MARK: &str = " (os error ";
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(start) = rest.find(MARK) {
+        out.push_str(&rest[..start]);
+        let tail = &rest[start + MARK.len()..];
+        let digits = tail.bytes().take_while(u8::is_ascii_digit).count();
+        if digits > 0 && tail[digits..].starts_with(')') {
+            rest = &tail[digits + 1..];
+        } else {
+            out.push_str(MARK);
+            rest = tail;
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
 // Output errors are ignored so a closed pipe never aborts a step mid-way.
 pub fn say(message: impl Display) {
     let _ = writeln!(io::stdout().lock(), "{message}");
@@ -205,5 +254,43 @@ impl Spinner {
             }
         }
         err
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use anyhow::Context;
+
+    #[test]
+    fn errors_read_without_os_error_codes() {
+        let err = Err::<(), _>(io::Error::from_raw_os_error(libc::ENOENT))
+            .context("Couldn't read /x")
+            .unwrap_err();
+        assert_eq!(
+            describe(&err),
+            "Couldn't read /x: No such file or directory"
+        );
+        assert_eq!(
+            without_os_errors("a (os error x) b (os error 1)"),
+            "a (os error x) b"
+        );
+    }
+
+    #[test]
+    fn permission_errors_point_at_doctor() {
+        let err = Err::<(), _>(io::Error::from_raw_os_error(libc::EACCES))
+            .context("Couldn't write /x")
+            .unwrap_err();
+        assert_eq!(
+            describe(&err),
+            "Couldn't write /x: Permission denied\nRun `diatweaks doctor` to see what's in the way."
+        );
+    }
+
+    #[test]
+    fn ask_never_answers_for_the_user() {
+        assert!(!Ui::headless(true).ask("Did you mean x?").unwrap());
+        assert!(!Ui::headless(false).ask("Did you mean x?").unwrap());
     }
 }

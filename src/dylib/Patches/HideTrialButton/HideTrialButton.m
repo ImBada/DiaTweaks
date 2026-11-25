@@ -2,16 +2,7 @@
 
 static BOOL DPIsTrialButton(NSView *view) { return DPIsKind(view, DPDiaTrialButton); }
 
-// The pill doesn't clip, so host it wherever Dia puts it rather than trusting the toolbar.
-static void DPTrialButton_layout(NSView *self, SEL _cmd) {
-    [DPHideHosts addObject:self];
-    DPEnforceHides(self);
-    DPCallOriginal(DPTrialButton_layout, self);
-}
-
-static void DPInstallHideTrialButton(void) {
-    DPHook(DPDiaTrialButton, @selector(layout), (IMP)DPTrialButton_layout);
-}
+static void DPInstallHideTrialButton(void) { DPHostHides(DPDiaTrialButton); }
 
 DP_PATCH(DPHideTrialButton) {
     .key = @"hideTrialButton",

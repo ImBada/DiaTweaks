@@ -16,6 +16,8 @@ void DPOnQuit(void (^block)(void)) { DPQuit = [block copy]; }
 
 #import "SafeMode/SafeMode.m"
 
+extern const struct mach_header_64 _mh_execute_header;
+
 static void child(const char *support, const char *home) {
     @autoreleasepool {
         NSURL *reports = [NSURL fileURLWithPath:@(home)];
@@ -27,7 +29,10 @@ static void child(const char *support, const char *home) {
         printf("level %ld paused %d\n", (long)DPSafeMode, DPPaused);
         fflush(stdout);
         char command[16] = "";
-        if (fgets(command, sizeof command, stdin) && !strncmp(command, "quit", 4)) DPQuit();
+        if (fgets(command, sizeof command, stdin)) {
+            if (!strncmp(command, "quit", 4)) DPQuit();
+            else if (!strncmp(command, "pause", 5)) DPSetPaused(YES);
+        }
         printf("done\n");
         fflush(stdout);
         _exit(0);
@@ -194,6 +199,41 @@ int main(int argc, const char *argv[]) {
         DPLaunch *afterCompact = launch();
         expect([state()[@"crashes"] integerValue] == 1, @"compact .ips pid format is counted as a crash");
         [afterCompact end:@"quit"];
+
+        NSString *stateFile = [support stringByAppendingPathComponent:@"safe-mode.plist"];
+        NSString *build = DPBuildUUID(&_mh_execute_header);
+        NSString *bigReport = [NSString stringWithFormat:@"%@-big-%d.ips", NSProcessInfo.processInfo.processName, getpid()];
+        DPLaunch *bigCrash = launch();
+        [bigCrash end:@"crash"];
+        NSMutableString *big = [NSMutableString stringWithFormat:@"{\n  \"pid\" : %d,\n", bigCrash.task.processIdentifier];
+        for (int i = 0; i < 4096; i++) [big appendString:@"  \"padding\" : \"0123456789012345678901234567890123456789\",\n"];
+        [big writeToFile:[folder stringByAppendingPathComponent:bigReport] atomically:YES encoding:NSUTF8StringEncoding error:nil];
+        DPLaunch *afterBig = launch();
+        expect([state()[@"crashes"] integerValue] == 1, @"a crash report larger than the part we read still counts by its pid");
+        [afterBig end:@"quit"];
+
+        NSDictionary *wrongTypes = @{ @"build" : build, @"level" : @[ @1 ], @"crashes" : @{}, @"launching" : @"yes", @"pid" : @[ @1 ], @"launched" : @5, @"steppedDown" : @[], @"localOff" : @"x" };
+        NSArray<NSData *> *broken = @[
+            NSData.data,
+            [@"<?xml version=\"1.0\"?><plist version=\"1.0\"><array><string>x</string></array></plist>" dataUsingEncoding:NSUTF8StringEncoding],
+            [NSData dataWithBytes:"\x00\xff\xfe not a plist \x80" length:sizeof "\x00\xff\xfe not a plist \x80" - 1],
+            [NSPropertyListSerialization dataWithPropertyList:wrongTypes format:NSPropertyListXMLFormat_v1_0 options:0 error:nil],
+        ];
+        for (NSData *bytes in broken) {
+            [bytes writeToFile:stateFile atomically:YES];
+            DPLaunch *afterBroken = launch();
+            expect(afterBroken.level == 0 && [state()[@"launching"] boolValue], @"an unreadable or mistyped safe-mode.plist starts a fresh one");
+            [afterBroken end:@"quit"];
+            expect([state() isKindOfClass:NSDictionary.class] && ![state()[@"launching"] boolValue] && [state()[@"build"] isEqual:build], @"the fresh safe-mode.plist is a valid dictionary again");
+        }
+
+        [NSFileManager.defaultManager removeItemAtPath:support error:nil];
+        DPLaunch *noFolder = launch();
+        expect([state()[@"launching"] boolValue], @"a launch recreates a missing DiaPatches folder to write its marker");
+        [NSFileManager.defaultManager removeItemAtPath:support error:nil];
+        [noFolder end:@"pause"];
+        expect([NSFileManager.defaultManager fileExistsAtPath:pause], @"pausing recreates a missing DiaPatches folder to write the pause file");
+        [NSFileManager.defaultManager removeItemAtPath:pause error:nil];
 
         [NSFileManager.defaultManager removeItemAtPath:temporary error:nil];
     }

@@ -3,7 +3,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{bail, Result};
 
 use crate::{
     child::OnInterrupt,
@@ -88,7 +88,7 @@ pub fn run(env: &Env, ui: &Ui, mut purge: bool) -> Result<()> {
             return Err(Cancelled::nothing_changed().into());
         }
     }
-    let _lock = lock::acquire(&env.support)?;
+    let _lock = lock::acquire(env, ui)?;
 
     let spinner = ui.spinner("Restoring the original Dia");
     let was_running = dia::is_running(&env.app);
@@ -113,7 +113,7 @@ pub fn run(env: &Env, ui: &Ui, mut purge: bool) -> Result<()> {
         &spinner,
     ))?;
     if !done.status.success() {
-        return Err(spinner.fail(anyhow!("Couldn't restore Dia:\n{}", done.tail(5))));
+        return Err(spinner.fail(done.failure("Couldn't restore Dia:", 5, &env.support)));
     }
     let label = match dia::version_of(&env.app) {
         Some(version) => format!("the original Dia {version}"),

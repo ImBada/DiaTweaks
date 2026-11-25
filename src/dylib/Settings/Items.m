@@ -18,6 +18,35 @@ NSArray<NSValue *> *DPFolderMembers(NSString *key) {
 
 BOOL DPShownOn(DPPatch *patch) { return patch && (DPPaused ? DPSavedOn(patch) : patch->on); }
 
+static NSString *const DPShowsExperimentalKey = @"showExperimentalTweaks";
+
+BOOL DPShowsExperimental(void) { return [DPSettingsDefaults() boolForKey:DPShowsExperimentalKey]; }
+
+void DPSetShowsExperimental(BOOL on) {
+    [DPSettingsDefaults() setBool:on forKey:DPShowsExperimentalKey];
+    [NSNotificationCenter.defaultCenter postNotificationName:DPPatchesDidChangeNotification object:nil];
+}
+
+BOOL DPExperimentalShown(DPPatch *patch) {
+    if (!patch->experimental || DPShowsExperimental() || DPShownOn(patch)) return YES;
+    __block BOOL shown = NO;
+    DPForEachOption(patch, ^(DPPatch *option) { shown |= option->experimental && DPShownOn(option); });
+    return shown;
+}
+
+NSArray<NSValue *> *DPShownMembers(NSArray<NSValue *> *members) {
+    NSMutableArray<NSValue *> *shown = [NSMutableArray new];
+    for (NSValue *member in members)
+        if (DPExperimentalShown(member.pointerValue)) [shown addObject:member];
+    return shown;
+}
+
+NSUInteger DPHiddenExperimentalCount(void) {
+    NSUInteger count = 0;
+    for (NSUInteger i = 0; i < DPPatchCount; i++) count += !DPExperimentalShown(DPPatches[i]);
+    return count;
+}
+
 NSString *DPActiveSummary(DPPatch *patch) {
     NSString *why = DPWhyDisabled(patch);
     if (why || !DPShownOn(patch)) return why;
@@ -111,11 +140,9 @@ void DPSetTweaksPaused(BOOL paused, NSWindow *window) {
                              [waiting componentsJoinedByString:@", "], waiting.count == 1 ? @"stops" : @"stop"];
     [alert addButtonWithTitle:@"Relaunch"];
     [alert addButtonWithTitle:@"Later"];
-    void (^finish)(NSModalResponse) = ^(NSModalResponse response) {
+    DPPresentAlert(alert, window, ^(NSModalResponse response) {
         if (response == NSAlertFirstButtonReturn) DPHandOffAndQuit(@[@"apply"]);
-    };
-    if (window) [alert beginSheetModalForWindow:window completionHandler:finish];
-    else finish([alert runModal]);
+    });
 }
 
 @implementation DPPatchSwitch

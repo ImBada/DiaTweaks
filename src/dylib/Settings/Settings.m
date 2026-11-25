@@ -12,8 +12,8 @@ static DPSidebarRow DPOurRow(NSTableView *table, NSInteger row) {
 
 static void DPRemoveDiaPaneItems(NSToolbar *toolbar) {
     void **slot = DPIvar(toolbar.delegate, "paneToolbarItems");
-    // A Swift array of objects is its storage, an NSArray; one bridged from Objective-C is tagged and left alone.
-    if (!slot || !*slot || ((uintptr_t)*slot & 0xC000000000000001)) return;
+    // A Swift array of objects is its NSArray storage; a tagged, misaligned or below-4GB word is some other layout.
+    if (!slot || (uintptr_t)*slot < 0x100000000 || ((uintptr_t)*slot & 0xC000000000000007)) return;
     id raw = (__bridge id)*slot;
     if (![raw isKindOfClass:NSArray.class]) return;
     NSMutableSet *identifiers = [NSMutableSet set];
@@ -92,6 +92,10 @@ static __weak DPPaneView *DPShownPane;
     return nil;
 }
 
+- (BOOL)isPrepared:(DPSidebarRow)row {
+    return (row == DPHomeRow ? self.home : self.patches).superview != nil;
+}
+
 - (void)preparePane:(DPPaneView *)pane {
     NSViewController *controller = self.table.window.contentViewController;
     NSView *detail = [controller isKindOfClass:NSSplitViewController.class] ? ((NSSplitViewController *)controller).splitViewItems.lastObject.viewController.view : nil;
@@ -151,6 +155,7 @@ static __weak DPPaneView *DPShownPane;
         if (index > 0 && index - 1 < toolbar.items.count && [toolbar.items[index - 1].itemIdentifier isEqualToString:NSToolbarFlexibleSpaceItemIdentifier])
             [toolbar removeItemAtIndex:index - 1];
     }
+    DPSet(toolbar, &DPSearchItemKey, nil);
     NSString *shown = self.title.stringValue;
     if (pane.showsPage) [self borrowBack:NO];
     [pane reset];
@@ -218,11 +223,34 @@ static NSView *DPDividerCell(NSTableView *table) {
     return cell;
 }
 
+static NSTableCellView *DPPlainLinkCell(void) {
+    NSTableCellView *cell = [NSTableCellView new];
+    NSImageView *image = [NSImageView new];
+    NSTextField *text = [NSTextField labelWithString:@""];
+    text.lineBreakMode = NSLineBreakByTruncatingTail;
+    for (NSView *view in @[ image, text ]) {
+        view.translatesAutoresizingMaskIntoConstraints = NO;
+        [cell addSubview:view];
+    }
+    [NSLayoutConstraint activateConstraints:@[
+        [image.leadingAnchor constraintEqualToAnchor:cell.leadingAnchor constant:8],
+        [image.centerYAnchor constraintEqualToAnchor:cell.centerYAnchor],
+        [image.widthAnchor constraintEqualToConstant:16],
+        [image.heightAnchor constraintEqualToConstant:16],
+        [text.leadingAnchor constraintEqualToAnchor:image.trailingAnchor constant:6],
+        [text.trailingAnchor constraintLessThanOrEqualToAnchor:cell.trailingAnchor constant:-8],
+        [text.centerYAnchor constraintEqualToAnchor:cell.centerYAnchor],
+    ]];
+    cell.imageView = image;
+    cell.textField = text;
+    return cell;
+}
+
 static NSView *DPLinkCell(NSTableView *table, NSString *title, NSString *symbol) {
     NSString *identifier = [@"DiaPatchesCell." stringByAppendingString:title];
     NSTableCellView *cell = [table makeViewWithIdentifier:identifier owner:nil];
     if (cell) return cell;
-    cell = [objc_getClass(DPDiaSettingsSidebarCell) new];
+    cell = [objc_getClass(DPDiaSettingsSidebarCell) new] ?: DPPlainLinkCell();
     cell.identifier = identifier;
     cell.textField.stringValue = title;
     cell.imageView.image = [NSImage imageWithSystemSymbolName:symbol accessibilityDescription:title];
@@ -238,7 +266,7 @@ static NSView *DPSidebar_viewForRow(id self, SEL _cmd, NSTableView *table, NSTab
     if (ours == DPDiaRow) return DPCallOriginal(DPSidebar_viewForRow, self, table, column, row);
     DPSettings *settings = [DPSettings forTable:table];
     if (ours == DPDividerRow) return DPDividerCell(table);
-    dispatch_async(dispatch_get_main_queue(), ^{ [settings preparePane:[settings paneFor:ours]]; });
+    if (![settings isPrepared:ours]) dispatch_async(dispatch_get_main_queue(), ^{ [settings preparePane:[settings paneFor:ours]]; });
     return ours == DPHomeRow ? DPLinkCell(table, @"Home", @"house") : DPLinkCell(table, @"Patches", @"wand.and.stars");
 }
 
@@ -288,6 +316,7 @@ static void DPAddSidebarMethod(SEL sel, IMP imp) {
 
 void DPInstallSettings(void) {
     DPInstallPreviews();
+    if (!objc_getClass(DPDiaSettingsSidebar)) return;
     DPHook(DPDiaSettingsController, @selector(handleBack), (IMP)DPSettings_handleBack);
     DPHook(DPDiaSettingsSidebar, @selector(numberOfRowsInTableView:), (IMP)DPSidebar_numberOfRows);
     DPHook(DPDiaSettingsSidebar, @selector(tableView:viewForTableColumn:row:), (IMP)DPSidebar_viewForRow);

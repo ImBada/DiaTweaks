@@ -76,9 +76,10 @@ static NSString *DPVerifySkipAccount(DPPatch *patch) {
 
 DP_PATCH(DPSkipAccount) {
     .key = @"skipAccount",
+    .experimental = YES,
     .order = 99,
     .title = @"Skip Account",
-    .detail = @"Use Dia without signing in. Relaunch to apply. Hides Sign In and the Account, Morning Brief and Sync settings. Only works on a Dia that has never signed in. Chat needs an account, so pair it with Turn Off AI. Experimental.",
+    .detail = @"Use Dia without signing in. Relaunch to apply. Hides Sign In and the Account, Morning Brief and Sync settings. Only works on a Dia that has never signed in. Chat needs an account, so pair it with Turn Off AI.",
     .symbol = @"person.crop.circle.badge.minus person.crop.circle",
     .tint = @"systemYellowColor",
     .section = @"App",

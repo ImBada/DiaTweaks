@@ -2,16 +2,7 @@
 
 static BOOL DPIsDefaultBrowserBanner(NSView *view) { return DPIsKind(view, DPDiaDefaultBrowserBanner); }
 
-// The new tab page lays the banner out, so host it wherever Dia puts it.
-static void DPBanner_layout(NSView *self, SEL _cmd) {
-    [DPHideHosts addObject:self];
-    DPEnforceHides(self);
-    DPCallOriginal(DPBanner_layout, self);
-}
-
-static void DPInstallHideDefaultBrowserBanner(void) {
-    DPHook(DPDiaDefaultBrowserBanner, @selector(layout), (IMP)DPBanner_layout);
-}
+static void DPInstallHideDefaultBrowserBanner(void) { DPHostHides(DPDiaDefaultBrowserBanner); }
 
 DP_PATCH(DPHideDefaultBrowserBanner) {
     .key = @"hideDefaultBrowserBanner",

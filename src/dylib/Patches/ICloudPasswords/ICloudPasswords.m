@@ -58,9 +58,10 @@ static NSError *DPRegisterHost(NSString *name, NSString *description, NSArray<NS
     NSString *kept = DPAppSupport([NSString stringWithFormat:@"DiaPatches/%@", file]);
     NSDictionary *host = DPHostAt(path);
     NSError *error;
-    if ([files fileExistsAtPath:path] && ![host[@"path"] isEqual:relay]) {
+    NSString *current = [host[@"path"] isKindOfClass:NSString.class] ? host[@"path"] : nil;
+    if ([files fileExistsAtPath:path] && ![current isEqual:relay]) {
         NSString *apple = DPAppleHelperPath();
-        BOOL replaceable = (apple && [host[@"path"] isEqual:apple]) || [[host[@"path"] lastPathComponent] isEqual:@"OpenPasswordsHelper"];
+        BOOL replaceable = (apple && [current isEqual:apple]) || [current.lastPathComponent isEqual:@"OpenPasswordsHelper"];
         if (!replaceable) return nil;
         [files removeItemAtPath:kept error:nil];
         if (![files moveItemAtPath:path toPath:kept error:&error]) {
@@ -126,7 +127,7 @@ static void DPStopOriginalDia(void) {
     int count = proc_listallpids(pids, capacity * (int)sizeof *pids);
     if (count > capacity) count = capacity;
     for (int i = 0; i < count; i++) {
-        if (proc_pidpath(pids[i], path, sizeof path) <= 0 || (strcmp(path, pristine.fileSystemRepresentation) && ![@(path) hasPrefix:@"/Applications/.DiaTweaks/"])) continue;
+        if (pids[i] == getpid() || proc_pidpath(pids[i], path, sizeof path) <= 0 || (strcmp(path, pristine.fileSystemRepresentation) && ![@(path) hasPrefix:@"/Applications/.DiaTweaks/"])) continue;
         kill(pids[i], SIGKILL);
         for (int tries = 0; tries < 50 && kill(pids[i], 0) == 0; tries++) usleep(20000);
     }
@@ -142,9 +143,10 @@ static void DPApplyICloudPasswords(DPPatch *patch) { DPRegisterHosts(patch->on);
 
 DP_PATCH(DPICloudPasswords) {
     .key = @"icloudPasswords",
+    .experimental = YES,
     .order = 101,
     .title = @"Allow iCloud Passwords",
-    .detail = @"AutoFill passwords from Apple Passwords with the iCloud Passwords, Better Passwords or Open Passwords extension. A patched Dia can’t start Apple’s helper, so each time one connects, the original Dia that DiaTweaks keeps opens briefly, without windows, to start it. Experimental.",
+    .detail = @"AutoFill passwords from Apple Passwords with the iCloud Passwords, Better Passwords or Open Passwords extension. A patched Dia can’t start Apple’s helper, so each time one connects, the original Dia that DiaTweaks keeps opens briefly, without windows, to start it.",
     .symbol = @"apple.passwords key.fill",
     .tint = @"systemGreenColor",
     .section = @"Passwords",

@@ -4,15 +4,8 @@
 static NSString *const DPPeekDarknessKey = @"peekDarkness", *const DPPeekSpeedKey = @"peekSpeed", *const DPPeekGenieKey = @"peekGenie",
                 *const DPPeekToolbarKey = @"peekToolbar";
 
-static NSUserDefaults *DPSettings(void) {
-    static NSUserDefaults *settings;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{ settings = [[NSUserDefaults alloc] initWithSuiteName:@"com.diapatches"]; });
-    return settings;
-}
-
 static double DPPeekTuned(NSString *key) {
-    id value = [DPSettings() objectForKey:key];
+    id value = [DPSettingsDefaults() objectForKey:key];
     if (value) return [value doubleValue];
     static NSDictionary<NSString *, NSNumber *> *defaults;
     static dispatch_once_t once;
@@ -46,7 +39,7 @@ static double DPPeekArrowStep(SEL command) {
                                                           : round(MIN(MAX(control.doubleValue, self.slider.minValue), self.slider.maxValue));
     self.slider.doubleValue = shown;
     self.field.doubleValue = shown;
-    [DPSettings() setDouble:shown / self.scale forKey:self.key];
+    [DPSettingsDefaults() setDouble:shown / self.scale forKey:self.key];
     CGColorRef dim = [NSColor colorWithWhite:0 alpha:DPPeekDarkness()].CGColor;
     for (DPPeekCard *peek in DPPeekAllCards(nil)) peek.dim.layer.backgroundColor = dim;
 }

@@ -1,7 +1,7 @@
 #import "StdPatch/StdPatch.h"
 
 extern DPPatch DPHideTabGroupBackground;
-static char DPHiddenKey;
+static char DPHiddenKey, DPTouchedKey;
 
 static BOOL DPIsGrey(CGColorRef color) {
     NSColor *rgb = [[NSColor colorWithCGColor:color] colorUsingColorSpace:NSColorSpace.sRGBColorSpace];
@@ -11,13 +11,15 @@ static BOOL DPIsGrey(CGColorRef color) {
 }
 
 static void DPStyleBackground(NSView *cell) {
+    BOOL on = DPHideTabGroupBackground.on;
+    if (!on && !DPGet(cell, &DPTouchedKey)) return;
     CALayer *layer = DPSubview(cell, DPDiaTabGroupBackground).layer;
-    if (!layer) return;
     NSArray *hidden = DPGet(layer, &DPHiddenKey);
-    if (DPHideTabGroupBackground.on && layer.backgroundColor && DPIsGrey(layer.backgroundColor)) {
+    if (on && layer.backgroundColor && DPIsGrey(layer.backgroundColor)) {
         NSMutableArray *shadows = hidden ? hidden[1] : [NSMutableArray new];
         hidden = @[ hidden ? hidden[0] : @(layer.borderWidth), shadows, (__bridge id)layer.backgroundColor ];
         DPSet(layer, &DPHiddenKey, hidden);
+        DPSet(cell, &DPTouchedKey, @YES);
         DPWithoutAnimation(^{
             for (CALayer *shadow in layer.sublayers) {
                 if (shadow.hidden) continue;
@@ -27,7 +29,9 @@ static void DPStyleBackground(NSView *cell) {
             layer.backgroundColor = nil;
             layer.borderWidth = 0;
         });
-    } else if (hidden && (!DPHideTabGroupBackground.on || layer.backgroundColor)) {
+        return;
+    }
+    if (hidden && (!on || layer.backgroundColor)) {
         DPWithoutAnimation(^{
             if (!layer.backgroundColor) layer.backgroundColor = (__bridge CGColorRef)hidden[2];
             layer.borderWidth = [hidden[0] doubleValue];
@@ -35,6 +39,7 @@ static void DPStyleBackground(NSView *cell) {
         });
         DPSet(layer, &DPHiddenKey, nil);
     }
+    if (!on) DPSet(cell, &DPTouchedKey, nil);
 }
 
 static void DPGroupCell_updateLayer(NSView *self, SEL _cmd) {
@@ -42,17 +47,8 @@ static void DPGroupCell_updateLayer(NSView *self, SEL _cmd) {
     DPStyleBackground(self);
 }
 
-static void DPCollectGroupCells(NSView *view, Class cls, NSMutableArray<NSView *> *out) {
-    if ([view isKindOfClass:cls]) [out addObject:view];
-    for (NSView *sub in view.subviews) DPCollectGroupCells(sub, cls, out);
-}
-
 static void DPApplyHideTabGroupBackground(DPPatch *patch) {
-    Class cls = objc_getClass(DPDiaTabGroupCell);
-    if (!cls) return;
-    NSMutableArray<NSView *> *cells = [NSMutableArray new];
-    for (NSWindow *window in NSApp.windows) DPCollectGroupCells(window.contentView, cls, cells);
-    for (NSView *cell in cells) {
+    for (NSView *cell in DPFindAllViews(DPDiaTabGroupCell)) {
         if (!patch->on) DPStyleBackground(cell);
         cell.needsDisplay = YES;
         DPSubview(cell, DPDiaTabGroupBackground).needsDisplay = YES;

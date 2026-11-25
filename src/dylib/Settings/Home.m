@@ -1,4 +1,5 @@
 #import "Settings.h"
+#import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 
 static NSString *const DPRepo = @"https://github.com/JaceThings/DiaTweaks";
 
@@ -24,6 +25,7 @@ static NSString *DPUpdateSummary(DPUpdates *updates) {
 @implementation DPHomeView {
     NSTextField *_version, *_updateSummary, *_pauseLabel;
     NSButton *_pauseButton;
+    NSSwitch *_experimental;
 }
 
 - (instancetype)initWithFrame:(NSRect)frame {
@@ -50,14 +52,30 @@ static NSString *DPUpdateSummary(DPUpdates *updates) {
     NSView *restoreRow = DPRow(DPLabel(@"Restore the original Dia without patches.", 13, NSFontWeightRegular, NSColor.labelColor),
                                [NSButton buttonWithTitle:@"Restore…" target:self action:@selector(restore:)]);
 
+    _experimental = [NSSwitch new];
+    _experimental.controlSize = NSControlSizeSmall;
+    _experimental.accessibilityLabel = @"Show Experimental Tweaks";
+    _experimental.target = self;
+    _experimental.action = @selector(toggleExperimental:);
+    NSView *experimentalRow = DPRow(DPColumn(@[DPLabel(@"Show Experimental Tweaks", 13, NSFontWeightRegular, NSColor.labelColor),
+                                               DPLabel(@"Show tweaks that are still being tested and may break when Dia updates.", 11, NSFontWeightRegular, NSColor.secondaryLabelColor)], 2),
+                                    _experimental);
+    NSView *fileRows = DPGroup(@[
+        DPRow(DPLabel(@"Save your tweaks and their settings to a file.", 13, NSFontWeightRegular, NSColor.labelColor),
+              [NSButton buttonWithTitle:@"Export…" target:self action:@selector(exportSettings:)]),
+        DPRow(DPLabel(@"Load tweaks and settings from a file.", 13, NSFontWeightRegular, NSColor.labelColor),
+              [NSButton buttonWithTitle:@"Import…" target:self action:@selector(importSettings:)]),
+    ]);
+
     NSTextField *notice = DPLabel(@"DiaTweaks is unofficial and not affiliated with The Browser Company.", 11, NSFontWeightRegular, NSColor.tertiaryLabelColor);
     NSView *help = DPGroup(@[DPWebRow(@"Wiki", @"/wiki"), DPWebRow(@"Report a Bug", @"/issues/new/choose"), DPWebRow(@"GitHub", @"")]);
-    DPFillStack(self, @[about, DPGroup(@[updateRow]), DPHeader(@"Help"), help, DPGroup(@[pauseRow, restoreRow]), notice]);
+    DPFillStack(self, @[about, DPGroup(@[updateRow]), DPGroup(@[experimentalRow]), DPHeader(@"Settings File"), fileRows, DPHeader(@"Help"), help,
+                        DPGroup(@[pauseRow, restoreRow]), notice]);
     [self setCustomSpacing:20 afterView:about];
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(updatesDidChange) name:DPUpdatesDidChangeNotification object:nil];
-    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(syncPause) name:DPPatchesDidChangeNotification object:nil];
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(syncRows) name:DPPatchesDidChangeNotification object:nil];
     [self updatesDidChange];
-    [self syncPause];
+    [self syncRows];
     return self;
 }
 
@@ -69,22 +87,24 @@ static NSString *DPUpdateSummary(DPUpdates *updates) {
     DPUpdates *updates = DPUpdates.shared;
     _updateSummary.stringValue = DPUpdateSummary(updates);
 
-    static NSCharacterSet *vSet;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{ vSet = [NSCharacterSet characterSetWithCharactersInString:@"v"]; });
     id installed = updates.found[DPTweaks][@"installed"];
-    if ([installed isKindOfClass:NSString.class]) _version.stringValue = [@"Version " stringByAppendingString:[installed stringByTrimmingCharactersInSet:vSet]];
+    if ([installed isKindOfClass:NSString.class]) _version.stringValue = [@"Version " stringByAppendingString:[installed hasPrefix:@"v"] ? [installed substringFromIndex:1] : installed];
     else _version.stringValue = updates.found ? @"Development build" : @"";
     _version.hidden = !_version.stringValue.length;
 }
 
-- (void)syncPause { DPSyncPauseRow(_pauseLabel, _pauseButton); }
+- (void)syncRows {
+    DPSyncPauseRow(_pauseLabel, _pauseButton);
+    _experimental.state = DPShowsExperimental() ? NSControlStateValueOn : NSControlStateValueOff;
+}
+
+- (void)toggleExperimental:(NSSwitch *)sender { DPSetShowsExperimental(sender.state == NSControlStateValueOn); }
 
 - (void)togglePause:(id)sender { DPSetTweaksPaused(!DPPaused, self.window); }
 
 - (void)refresh {
     [self updatesDidChange];
-    [self syncPause];
+    [self syncRows];
     [DPUpdates.shared check:nil];
 }
 
@@ -94,10 +114,72 @@ static NSString *DPUpdateSummary(DPUpdates *updates) {
     alert.informativeText = @"Dia will relaunch without patches, and its own updater takes over again. Run the installer to patch it again later.";
     [alert addButtonWithTitle:@"Restore and Relaunch"];
     [alert addButtonWithTitle:@"Cancel"];
-    void (^finish)(NSModalResponse) = ^(NSModalResponse response) {
+    DPPresentAlert(alert, self.window, ^(NSModalResponse response) {
         if (response == NSAlertFirstButtonReturn) DPHandOffAndQuit(@[@"uninstall"]);
-    };
-    if (self.window) [alert beginSheetModalForWindow:self.window completionHandler:finish];
-    else finish([alert runModal]);
+    });
+}
+
+- (void)report:(NSString *)title text:(NSString *)text {
+    NSAlert *alert = [NSAlert new];
+    alert.messageText = title;
+    alert.informativeText = text ?: @"";
+    DPPresentAlert(alert, self.window, ^(NSModalResponse response) {});
+}
+
+- (void)exportSettings:(id)sender {
+    NSError *error = nil;
+    NSData *json = DPExportConfigJSON(&error);
+    if (!json) return [self report:@"Couldn’t export settings" text:error.localizedDescription];
+    NSSavePanel *panel = [NSSavePanel savePanel];
+    panel.allowedContentTypes = @[ UTTypeJSON ];
+    panel.nameFieldStringValue = @"diatweaks-config.json";
+    DPPresentPanel(panel, self.window, ^(NSModalResponse response) {
+        NSError *writeError = nil;
+        if (response == NSModalResponseOK && ![json writeToURL:panel.URL options:NSDataWritingAtomic error:&writeError])
+            [self report:@"Couldn’t save the file" text:writeError.localizedDescription];
+    });
+}
+
+- (void)importSettings:(id)sender {
+    NSOpenPanel *panel = [NSOpenPanel openPanel];
+    panel.allowedContentTypes = @[ UTTypeJSON ];
+    DPPresentPanel(panel, self.window, ^(NSModalResponse response) {
+        NSError *error = nil;
+        NSData *data = response == NSModalResponseOK ? [NSData dataWithContentsOfURL:panel.URL options:0 error:&error] : nil;
+        if (data) [self confirmImport:data];
+        else if (response == NSModalResponseOK) [self report:@"Couldn’t read the file" text:error.localizedDescription];
+    });
+}
+
+- (void)confirmImport:(NSData *)data {
+    NSAlert *alert = [NSAlert new];
+    alert.messageText = @"Import settings?";
+    alert.informativeText = @"Merge changes only what the file mentions. Replace All also puts every other tweak and setting back to its default.";
+    for (NSString *title in @[ @"Merge", @"Replace All", @"Cancel" ]) [alert addButtonWithTitle:title];
+    DPPresentAlert(alert, self.window, ^(NSModalResponse response) {
+        if (response == NSAlertThirdButtonReturn) return;
+        NSError *error = nil;
+        DPConfigImport *result = DPImportConfigData(data, response == NSAlertSecondButtonReturn, &error);
+        if (result) [self summarize:result];
+        else [self report:@"Couldn’t import settings" text:error.localizedDescription];
+    });
+}
+
+- (void)summarize:(DPConfigImport *)result {
+    NSMutableArray<NSString *> *lines = [NSMutableArray new];
+    NSString *applied = [NSString stringWithFormat:@"%lu setting%@ applied", result.appliedCount, result.appliedCount == 1 ? @"" : @"s"];
+    [lines addObject:result.resetCount ? [applied stringByAppendingFormat:@" and %lu reset to default.", result.resetCount] : [applied stringByAppendingString:@"."]];
+    [lines addObjectsFromArray:result.warnings];
+    if (result.unknownKeys.count) [lines addObject:[@"Skipped what this version doesn’t know: " stringByAppendingFormat:@"%@.", [result.unknownKeys componentsJoinedByString:@", "]]];
+    if (result.relaunchTitles.count) [lines addObject:[@"Relaunch Dia to finish: " stringByAppendingFormat:@"%@.", [result.relaunchTitles componentsJoinedByString:@", "]]];
+    NSAlert *alert = [NSAlert new];
+    alert.messageText = @"Settings imported";
+    alert.informativeText = [lines componentsJoinedByString:@"\n"];
+    [alert addButtonWithTitle:result.relaunchTitles.count ? @"Relaunch Now" : @"OK"];
+    if (result.relaunchTitles.count) [alert addButtonWithTitle:@"Later"];
+    BOOL relaunch = result.relaunchTitles.count > 0;
+    DPPresentAlert(alert, self.window, ^(NSModalResponse response) {
+        if (relaunch && response == NSAlertFirstButtonReturn) DPHandOffAndQuit(@[@"apply"]);
+    });
 }
 @end

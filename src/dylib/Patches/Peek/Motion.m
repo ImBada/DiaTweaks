@@ -156,6 +156,11 @@ static char DPGrowthKey, DPInTimerKey;
     growth.start = CACurrentMediaTime();
     DPSet(peek, &DPGrowthKey, growth);  // The display link doesn't retain it.
     growth.link = [peek.window displayLinkWithTarget:growth selector:@selector(step)];
+    if (!growth.link) {
+        DPSet(peek, &DPGrowthKey, nil);
+        if (done) dispatch_async(dispatch_get_main_queue(), done);
+        return;
+    }
     growth.link.preferredFrameRateRange = DPPeekFrameRate;
     [growth.link addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];
 }

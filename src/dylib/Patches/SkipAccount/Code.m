@@ -12,8 +12,10 @@ static BOOL DPMatches(const uint32_t *code, const DPSkipInstruction *signature, 
 
 BOOL DPSkipFindPatterns(DPSkipPattern *patterns, NSUInteger count) {
     const struct mach_header_64 *header = NULL;
-    for (uint32_t i = 0; i < _dyld_image_count(); i++)
-        if (_dyld_get_image_header(i)->filetype == MH_EXECUTE) { header = (const struct mach_header_64 *)_dyld_get_image_header(i); break; }
+    for (uint32_t i = 0; i < _dyld_image_count() && !header; i++) {
+        const struct mach_header *image = _dyld_get_image_header(i);
+        if (image && image->filetype == MH_EXECUTE) header = (const struct mach_header_64 *)image;
+    }
     if (!header || !count) return NO;
     unsigned long size = 0;
     const uint32_t *text = (const uint32_t *)getsectiondata(header, "__TEXT", "__text", &size);

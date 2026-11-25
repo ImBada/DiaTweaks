@@ -23,6 +23,14 @@ static void DPBar_layout(NSView *self, SEL _cmd) {
     if (DPIsKind(self, DPDiaSidebarFooter)) DPCenterSpaceSwitcher(self);
 }
 
+static void DPSelfHost_layout(NSView *self, SEL _cmd) {
+    [DPHideHosts addObject:self];
+    DPEnforceHides(self);
+    DPCallOriginal(DPSelfHost_layout, self);
+}
+
+void DPHostHides(const char *className) { DPHook(className, @selector(layout), (IMP)DPSelfHost_layout); }
+
 static void DPSetHeight(NSView *view, CGFloat height) {
     if (NSHeight(view.frame) != height) [view setFrameSize:NSMakeSize(NSWidth(view.frame), height)];
 }
@@ -33,6 +41,8 @@ static void DPSidebar_viewDidLayout(NSViewController *self, SEL _cmd) {
     [DPHideHosts addObject:sidebar];
     if (!footer || !sidebar.isFlipped) return;
     DPEnforceHides(footer);
+    NSHashTable<NSView *> *grown = DPGet(footer, &DPGrownKey);
+    if (!grown && !DPAnyHidesOn()) return;
     BOOL empty = NO, hidden = YES;
     for (NSView *item in footer.subviews) {
         DPPatch *patch = DPHider(item);
@@ -40,7 +50,6 @@ static void DPSidebar_viewDidLayout(NSViewController *self, SEL _cmd) {
         empty |= patch != NULL;
     }
     empty &= hidden;
-    NSHashTable<NSView *> *grown = DPGet(footer, &DPGrownKey);
     if ((!empty && !grown) || !DPMayAdjust(footer)) return;
     if (empty) {
         if (!grown) DPSet(footer, &DPGrownKey, grown = [NSHashTable weakObjectsHashTable]);
@@ -60,7 +69,7 @@ static void DPSidebar_viewDidLayout(NSViewController *self, SEL _cmd) {
 
 static void DPTabStrip_viewWillLayout(NSViewController *self, SEL _cmd) {
     [DPHideHosts addObject:self.view];
-    for (NSView *sub in self.view.subviews) if (DPHider(sub)) DPEnforceHides(sub);
+    if (DPAnyHidesOn()) for (NSView *sub in self.view.subviews) if (DPHider(sub)) DPEnforceHides(sub);
     DPCallOriginal(DPTabStrip_viewWillLayout, self);
 }
 

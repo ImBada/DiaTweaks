@@ -41,7 +41,6 @@ static NSArray<NSString *> *DPScanChatModels(void) {
     return @[];
 }
 
-// A found list is kept for the build; an empty one is retried a few times before it's trusted.
 NSArray<NSString *> *DPInstalledChatModels(void) {
     static NSArray<NSString *> *found;
     static NSUInteger misses;

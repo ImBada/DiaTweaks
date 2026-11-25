@@ -11,7 +11,8 @@ static NSArray *DPPinnedCmdClickList(id object, SEL sel) {
 
 // Favorite icons aren't pinned rows, so ask the scripting tabs whether the page is pinned.
 static BOOL DPPinnedCmdClickOnIcon(id page) {
-    NSString *url = [DPValueForKey(page, @"url") absoluteString];
+    NSURL *pageURL = DPValueForKey(page, @"url");
+    NSString *url = [pageURL isKindOfClass:NSURL.class] ? pageURL.absoluteString : nil;
     if (!url.length) return NO;
     BOOL pinned = NO;
     for (id window in DPPinnedCmdClickList(NSApp.delegate, @selector(appleScriptWindows)))
@@ -24,11 +25,12 @@ static BOOL DPPinnedCmdClickOnIcon(id page) {
     return pinned;
 }
 
+// The page's own window, not the key one: another window's selected pinned row would answer for it.
 static BOOL DPPinnedCmdClickSourcePinned(id page) {
-    return page && (DPPeekInPinnedRow(NSApp.keyWindow, page) || DPPinnedCmdClickOnIcon(page));
+    NSWindow *window = page ? DPBrowserWindow(DPBrowserOfContents(page)) : nil;
+    return page && ((window && DPPeekInPinnedRow(window, page)) || DPPinnedCmdClickOnIcon(page));
 }
 
-// A background tab is a ⌘- or middle-click; a foreground one only counts with ⌘ or the middle button held.
 static BOOL DPPinnedCmdClickWanted(NSInteger disposition) {
     if (disposition == DPBackgroundTab) return YES;
     if (disposition != DPForegroundTab) return NO;

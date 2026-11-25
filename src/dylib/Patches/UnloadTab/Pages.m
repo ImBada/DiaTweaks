@@ -255,8 +255,9 @@ static void DPWebContent_finalizeDiscard(id self, SEL _cmd, id page, BOOL discar
 }
 
 static void DPWebContent_didClose(id self, SEL _cmd, id page, id sessionID) {
-    DPCallOriginal(DPWebContent_didClose, self, page, sessionID);
-    DPForgetPage(page);
+    __attribute__((objc_precise_lifetime)) id closing = page;
+    DPCallOriginal(DPWebContent_didClose, self, closing, sessionID);
+    DPForgetPage(closing);
 }
 
 void DPInstallUnloadPages(void) {

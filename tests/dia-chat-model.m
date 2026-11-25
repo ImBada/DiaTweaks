@@ -128,6 +128,30 @@ static void TestRequestRewrite(void) {
     CHECK(!DPSelectedDiaChatModel(@"bad\nmodel", @[], NO), "an invalid saved choice stays native");
 }
 
+static void TestOddShapes(void) {
+    NSArray *odd = @[ NSNull.null, @[], @"text", @7, @{} ];
+    NSArray<NSString *> *paths = @[ @"type", @"payload", @"payload.agent", @"payload.prompt", @"payload.spec_override",
+        @"payload.spec_override.settings", @"payload.spec_override.settings.model", @"payload.spec_override.settings.env" ];
+    for (NSString *path in paths)
+        for (id value in odd) {
+            NSMutableDictionary *message = [NSJSONSerialization JSONObjectWithData:Frame(@"a", @"default", YES, @{ @"KEEP": @"yes" })
+                                                                           options:NSJSONReadingMutableContainers error:nil];
+            NSArray<NSString *> *keys = [path componentsSeparatedByString:@"."];
+            NSMutableDictionary *parent = message;
+            for (NSUInteger i = 0; i + 1 < keys.count; i++) parent = parent[keys[i]];
+            parent[keys.lastObject] = value;
+            NSData *frame = JSON(message), *out = DPChatAgentRequest(frame, @"b");
+            BOOL rewrites = ([path hasSuffix:@".env"] && [value isEqual:@{}])
+                || (([path hasSuffix:@".prompt"] || [path hasSuffix:@".model"]) && [value isKindOfClass:NSString.class]);
+            CHECK(rewrites ? [ModelIn(out) isEqual:@"b"] && !memchr(out.bytes, '\n', out.length) : out == frame,
+                  "%s = %s must %s", path.UTF8String, [value description].UTF8String, rewrites ? "rewrite" : "pass through untouched");
+        }
+    for (id top in @[ @[ @{ @"type": @"RUN" } ], @"RUN spec_override model", @7 ]) {
+        NSData *frame = [NSJSONSerialization dataWithJSONObject:top options:NSJSONWritingFragmentsAllowed error:nil];
+        CHECK(DPChatAgentRequest(frame, @"b") == frame, "a %s frame passes through untouched", NSStringFromClass([top class]).UTF8String);
+    }
+}
+
 static void TestSelection(void) {
     NSArray *models = @[ @"claude-haiku-5-5", @"claude-opus-5-5" ];
     CHECK([DPSelectedDiaChatModel(@"claude-opus-5-5", models, YES) isEqual:@"claude-opus-5-5"], "listed model is kept");
@@ -677,6 +701,7 @@ int main(int argc, char **argv) { @autoreleasepool {
     if (argc == 3 && !strcmp(argv[1], "--agent")) RunFakeAgent(argv[2]);
     TestOffIsUntouched();
     TestRequestRewrite();
+    TestOddShapes();
     TestSelection();
     TestPatchLifecycle();
     TestRelayPassThrough();

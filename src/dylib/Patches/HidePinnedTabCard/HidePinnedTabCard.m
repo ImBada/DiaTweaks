@@ -8,9 +8,10 @@ static void DPCard_orderWindow(NSWindow *self, SEL _cmd, NSWindowOrderingMode pl
 }
 
 static NSArray<NSWindow *> *DPOpenCards(void) {
-    return [NSApp.windows filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSWindow *window, id _) {
-        return window.visible && DPIsKind(window, DPDiaPinnedTabCard);
-    }]];
+    NSMutableArray<NSWindow *> *cards = [NSMutableArray new];
+    for (NSWindow *window in NSApp.windows)
+        if (window.visible && DPIsKind(window, DPDiaPinnedTabCard)) [cards addObject:window];
+    return cards;
 }
 
 static void DPApplyHidePinnedTabCard(DPPatch *patch) {

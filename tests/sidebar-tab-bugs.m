@@ -3,6 +3,7 @@
 #import "Patches/PullRequestRepo/PullRequestRepo.h"
 #import "Patches/CompactTabRows/CompactTabRows.h"
 #import "Patches/CommandBar/HideTab.h"
+#import "Patches/CommandBar/Tabs.h"
 #import "Patches/CommandBar/CommandBarOverlay.h"
 
 extern DPPatch DPHideSleepingTabs, DPCollapsePinned, DPHideTabGroupBackground, DPUndoCloseTab, DPSavePageAs;
@@ -10,7 +11,13 @@ extern DPPatch DPProfileEmoji, DPKeepFoldersOpen, DPUnloadTab, DPCompactSidebarH
 DPPatch DPCommandBar;
 
 static NSString *DPTestSuiteName(void) {
-    return [NSString stringWithFormat:@"com.diapatches.sidebar-tab-bugs.%d", getpid()];
+    static NSString *suite;
+    if (!suite) {
+        char *dir = mkdtemp(strdup([NSTemporaryDirectory() stringByAppendingPathComponent:@"sidebar-tab-bugs.XXXXXX"].fileSystemRepresentation));
+        suite = [@(dir) stringByAppendingPathComponent:@"com.diapatches"];
+        free(dir);
+    }
+    return suite;
 }
 
 @interface NSUserDefaults (DPSidebarTabTestSuite)
@@ -105,12 +112,16 @@ static void Check(BOOL ok, NSString *msg) {
 - (id)safeSwiftValueForKey:(NSString *)key { return [self valueForKey:key]; }
 @end
 
+static int gSwitcherReads;
 @interface DPFakeSwitcherVM : NSObject
 @property DPFakeSubject *stateSubject;
 @property DPFakeSwitcherDelegate *delegate;
 @end
 @implementation DPFakeSwitcherVM
-- (id)safeSwiftValueForKey:(NSString *)key { return [self valueForKey:key]; }
+- (id)safeSwiftValueForKey:(NSString *)key {
+    if ([key isEqual:@"stateSubject"]) gSwitcherReads++;
+    return [self valueForKey:key];
+}
 @end
 
 @interface DPFakeGrid : NSCollectionView
@@ -143,6 +154,9 @@ static NSCollectionView *gNestedGrid;
 static void TestHideSleepingTabs(void) {
     DPHideSleepingTabs.install();
     DPHideSleepingTabs.on = YES;
+    NSUInteger monitors = gMonitors.count;
+    DPHideSleepingTabs.apply(&DPHideSleepingTabs);
+    Check(gMonitors.count == monitors + 1, @"HideSleepingTabs: its Control-Tab monitor is installed when the tweak turns on");
     _TtC10RecentTabs24RecentTabsViewController *vc = [_TtC10RecentTabs24RecentTabsViewController new];
     vc.view = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 1000, 600)];
     vc.collectionView = [DPFakeGrid new];
@@ -190,6 +204,15 @@ static void TestHideSleepingTabs(void) {
         w.constant = 152 + 5 * 200;
         Check(fabs(w.constant - (152 + 5 * 200)) < 0.5, @"HideSleepingTabs: 5 awake tabs use 5 columns");
         Check(fabs(h.constant - (152 + 1 * 150)) < 0.5, @"HideSleepingTabs: 5 awake tabs shrink height to 1 row even when height set before width");
+
+        [vc collectionView:vc.collectionView numberOfItemsInSection:0];
+        int reads = gSwitcherReads;
+        for (NSInteger i = 0; i < 5; i++) {
+            NSIndexPath *cell = [NSIndexPath indexPathForItem:i inSection:0];
+            [vc collectionView:vc.collectionView layout:vc.collectionView.collectionViewLayout sizeForItemAtIndexPath:cell];
+            [vc collectionView:vc.collectionView itemForRepresentedObjectAtIndexPath:cell];
+        }
+        Check(gSwitcherReads == reads, @"HideSleepingTabs: the cells of one pass reuse the switcher state the count read");
 
         DPFakeGrid *nested = [DPFakeGrid new];
         gNestedGrid = nested;
@@ -260,10 +283,20 @@ static void TestHideTabGroupBackground(void) {
 @public
     id viewModel;
     BOOL shouldDisplayExpandedContainer;
+    int clicks;
 }
 @end
 @implementation _TtC5TabUI12TabGroupView
 - (void)layout {}
+- (void)mouseUp:(NSEvent *)event { clicks++; }
+@end
+
+static int gPointerValues;
+@implementation NSValue (DPCountPointers)
++ (NSValue *)dp_countValueWithPointer:(const void *)pointer {
+    gPointerValues++;
+    return [self dp_countValueWithPointer:pointer];
+}
 @end
 
 static void TestKeepFoldersOpen(void) {
@@ -285,6 +318,23 @@ static void TestKeepFoldersOpen(void) {
         folder->viewModel = nil;
     }
     Check(weakVM == nil, @"KeepFoldersOpen: does not strongly retain Dia's viewModel");
+
+    NSObject *model = [NSObject new];
+    folder->viewModel = model;
+    DPKeepFoldersOpen.on = YES;
+    [folder layout];
+    Method pointers = class_getClassMethod(NSValue.class, @selector(valueWithPointer:)), counted = class_getClassMethod(NSValue.class, @selector(dp_countValueWithPointer:));
+    method_exchangeImplementations(pointers, counted);
+    gPointerValues = 0;
+    for (int i = 0; i < 100; i++) @autoreleasepool { [folder layout]; }
+    method_exchangeImplementations(pointers, counted);
+    Check(gPointerValues == 0, @"KeepFoldersOpen: an unchanged folder's layout allocates nothing");
+    folder->shouldDisplayExpandedContainer = NO;
+    [folder layout];
+    [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.3]];
+    Check(folder->clicks == 1, @"KeepFoldersOpen: a folder that collapses on its own is opened again");
+    folder->shouldDisplayExpandedContainer = YES;
+    folder->viewModel = nil;
 
     DPKeepFoldersOpen.on = NO;
     DPKeepFoldersOpen.apply(&DPKeepFoldersOpen);
@@ -328,19 +378,29 @@ static NSArray<NSArray<NSNumber *> *> *gFakeHeights;
 
 @interface _TtC7TabList27TabListCollectionViewLayout : NSCollectionViewLayout {
 @public
+    BOOL reuse, lazy;
+    NSInteger invalidations;
     double contentHeight;
     NSMutableDictionary<NSIndexPath *, NSCollectionViewLayoutAttributes *> *cache;
 }
 @end
 @implementation _TtC7TabList27TabListCollectionViewLayout
+- (void)invalidateLayout {
+    invalidations++;
+    [super invalidateLayout];
+}
 - (void)prepareLayout {
-    cache = [NSMutableDictionary new];
     NSArray<NSArray<NSNumber *> *> *sections = gFakeHeights ?: @[ @[ @37, @10 ] ];
+    NSUInteger total = 0;
+    for (NSArray *section in sections) total += section.count;
+    if (lazy && cache.count == total) return;
+    NSDictionary *kept = reuse ? cache : nil;
+    cache = [NSMutableDictionary new];
     CGFloat y = 0;
     for (NSUInteger section = 0; section < sections.count; section++)
         for (NSUInteger item = 0; item < sections[section].count; item++) {
             NSIndexPath *path = [NSIndexPath indexPathForItem:item inSection:section];
-            NSCollectionViewLayoutAttributes *a = [NSCollectionViewLayoutAttributes layoutAttributesForItemWithIndexPath:path];
+            NSCollectionViewLayoutAttributes *a = kept[path] ?: [NSCollectionViewLayoutAttributes layoutAttributesForItemWithIndexPath:path];
             a.frame = NSMakeRect(0, y, 200, sections[section][item].doubleValue);
             y += NSHeight(a.frame);
             cache[path] = a;
@@ -355,6 +415,16 @@ static NSArray<NSArray<NSNumber *> *> *gFakeHeights;
     return found;
 }
 - (NSCollectionViewLayoutAttributes *)layoutAttributesForItemAtIndexPath:(NSIndexPath *)indexPath { return cache[indexPath]; }
+- (NSCollectionViewLayoutAttributes *)initialLayoutAttributesForAppearingItemAtIndexPath:(NSIndexPath *)path {
+    NSCollectionViewLayoutAttributes *a = [[self layoutAttributesForItemAtIndexPath:path] copy];
+    a.alpha = 0;
+    return a;
+}
+- (NSCollectionViewLayoutAttributes *)finalLayoutAttributesForDisappearingItemAtIndexPath:(NSIndexPath *)path {
+    NSCollectionViewLayoutAttributes *a = [[self layoutAttributesForItemAtIndexPath:path] copy];
+    a.alpha = 0;
+    return a;
+}
 @end
 
 @interface DPFakePinDS : NSObject <NSCollectionViewDataSource>
@@ -389,6 +459,15 @@ static void TestCollapsePinned(void) {
     for (NSView *sub in cv.subviews) if ([NSStringFromClass(sub.class) isEqualToString:@"DPPinnedHeader"]) header = sub;
     Check(header != nil && !header.hidden, @"CollapsePinned: creates visible Pinned header when on");
 
+    NSImageView *chevron = [header valueForKey:@"chevron"];
+    [header setValue:@YES forKey:@"collapsed"];
+    CASpringAnimation *turn = (CASpringAnimation *)[chevron.layer animationForKey:@"turn"];
+    Check([turn isKindOfClass:CASpringAnimation.class] && [turn.fromValue CATransform3DValue].m12 > 0.99 && CATransform3DIsIdentity([turn.toValue CATransform3DValue]),
+          @"CollapsePinned: folding turns the chevron from down to right on a spring, like a folder's (#595)");
+    Check(header.layer.geometryFlipped, @"CollapsePinned: the header's layer is flipped, so a positive turn is clockwise on screen");
+    [header setValue:@NO forKey:@"collapsed"];
+    turn = (CASpringAnimation *)[chevron.layer animationForKey:@"turn"];
+    Check([turn.fromValue CATransform3DValue].m12 < -0.99, @"CollapsePinned: unfolding turns the chevron back from right to down");
     [header setValue:@YES forKey:@"collapsed"];
     DPFakeDrag *drag = [DPFakeDrag new];
     drag.draggingLocation = [cv convertPoint:NSMakePoint(50, 10) toView:nil];
@@ -402,11 +481,36 @@ static void TestCollapsePinned(void) {
     DPCollapsePinned.on = NO;
     DPCollapsePinned.apply(&DPCollapsePinned);
     Check(header.hidden, @"CollapsePinned: off hides header even in minimized/non-visible window");
+    [layout prepareLayout];
+    header.hidden = NO;
+    [layout prepareLayout];
+    Check(!header.hidden, @"CollapsePinned: once off and restored, Dia's layouts no longer reach the tweak");
+    header.hidden = YES;
     gDragEnteredCalls = gDragUpdatedCalls = 0;
     [(id)tabList draggingEntered:(id)drag];
     [(id)tabList draggingUpdated:(id)drag];
     [(id)tabList draggingUpdated:(id)drag];
     Check(gDragEnteredCalls == 1 && gDragUpdatedCalls == 2, @"CollapsePinned: off clears refused state and forwards draggingUpdated normally");
+
+    layout->reuse = YES;
+    DPCollapsePinned.on = YES;
+    DPCollapsePinned.apply(&DPCollapsePinned);
+    [layout prepareLayout];
+    NSCollectionViewLayoutAttributes *first = layout->cache[[NSIndexPath indexPathForItem:0 inSection:0]];
+    Check(NSMinY(first.frame) > 0, @"CollapsePinned: on moves Dia's cached rows under the Pinned line");
+    DPCollapsePinned.on = NO;
+    DPCollapsePinned.apply(&DPCollapsePinned);
+    [layout prepareLayout];
+    Check(NSMinY(first.frame) == 0, @"CollapsePinned: off leaves Dia's rows where Dia put them");
+    DPCollapsePinned.on = YES;
+    DPCollapsePinned.apply(&DPCollapsePinned);
+    [layout prepareLayout];
+    Check(first == layout->cache[[NSIndexPath indexPathForItem:0 inSection:0]] && NSMinY(first.frame) > 0,
+          @"CollapsePinned: turning off forgets which rows Dia keeps were moved, so turning on moves them again");
+    DPCollapsePinned.on = NO;
+    DPCollapsePinned.apply(&DPCollapsePinned);
+    [layout prepareLayout];
+    layout->reuse = NO;
 }
 
 static NSArray<NSArray<NSString *> *> *gFakeNames;
@@ -543,6 +647,16 @@ static void TestCollapsePinnedWithHideTab(void) {
     Check(!DPHidingATab(w) && RowFrame(1, 0).origin.y == 29 && RowFrame(1, 1).origin.y == 59, @"CollapsePinned: Escape closes the bar and leaves the rows under the Pinned line");
     gSmallRows = DPCompactTabRows.on = NO;
 
+    FakeRows(@[ @[ P1, P2, P3, @".sep" ], @[ @".newtab", N, R1, R2, R3 ] ]);
+    [layout prepareLayout];
+    DPHideTabRow(NEW, w);
+    [layout prepareLayout];
+    Check(DPHidingATab(w) && NSHeight(RowFrame(1, 1)) == 0 && RowFrame(1, 2).origin.y == 66 && RowFrame(1, 3).origin.y == 103,
+          @"HideTab: a launch tab no ⌘T announced still hides behind the bar, and the rows close up under it (#606)");
+    DPShowTabRow(NEW, NO);
+    [layout prepareLayout];
+    Check(!DPHidingATab(w) && RowFrame(1, 1).origin.y == 66 && NSHeight(RowFrame(1, 1)) == 37, @"HideTab: the launch tab's row comes back once the bar opens it");
+
     [defaults setObject:@[] forKey:@"collapsedPinned"];
     DPCleanHideTab();
     FakeRows(@[ @[ P1, P2, P3, @".sep" ], @[ @".newtab", N, R1, R2, R3 ] ]);
@@ -552,6 +666,240 @@ static void TestCollapsePinnedWithHideTab(void) {
     DPCommandBar.on = DPCommandBarHideTab.on = DPCollapsePinned.on = NO;
     DPCollapsePinned.apply(&DPCollapsePinned);
     [defaults removeObjectForKey:@"collapsedPinned"];
+    gFakeHeights = nil;
+    gFakeNames = nil;
+    gFakeList = nil;
+    [w close];
+}
+
+static void MakeFakeList(DPFakeVisibleWindow **window, _TtC7TabList27TabListCollectionViewLayout **layout) {
+    DPFakeVisibleWindow *w = [[DPFakeVisibleWindow alloc] initWithContentRect:NSMakeRect(0, 0, 300, 500) styleMask:NSWindowStyleMaskTitled backing:NSBackingStoreBuffered defer:NO];
+    w.releasedWhenClosed = NO;
+    _TtC7TabList11TabListView *tabList = [[_TtC7TabList11TabListView alloc] initWithFrame:NSMakeRect(0, 0, 200, 500)];
+    tabList.space = [DPFakeSpace new];
+    tabList.space.spaceID = @"space-fake";
+    _TtCC7TabList11TabListView14CollectionView *cv = [[_TtCC7TabList11TabListView14CollectionView alloc] initWithFrame:NSMakeRect(0, 0, 200, 500)];
+    _TtC7TabList27TabListCollectionViewLayout *list = [_TtC7TabList27TabListCollectionViewLayout new];
+    DPFakeRowsDS *ds = [DPFakeRowsDS new];
+    ds->_impl = [DPFakeRowSource new];
+    cv.dataSource = ds;
+    cv.collectionViewLayout = list;
+    [tabList addSubview:cv];
+    [w.contentView addSubview:tabList];
+    *window = w;
+    *layout = list;
+    gFakeList = cv;
+}
+
+static NSString *DisagreeingTransition(NSCollectionViewLayout *layout) {
+    for (NSInteger section = 0; section < (NSInteger)gFakeHeights.count; section++)
+        for (NSInteger item = 0; item < (NSInteger)gFakeHeights[section].count; item++) {
+            NSIndexPath *path = [NSIndexPath indexPathForItem:item inSection:section];
+            NSRect shown = [layout layoutAttributesForItemAtIndexPath:path].frame;
+            if (!NSEqualRects([layout initialLayoutAttributesForAppearingItemAtIndexPath:path].frame, shown)) return [NSString stringWithFormat:@"appearing %ld.%ld", (long)section, (long)item];
+            if (!NSEqualRects([layout finalLayoutAttributesForDisappearingItemAtIndexPath:path].frame, shown)) return [NSString stringWithFormat:@"disappearing %ld.%ld", (long)section, (long)item];
+        }
+    return nil;
+}
+
+static void TestTabCloseKeepsRowsInPlace(void) {
+    NSString *P1 = @".tab(11111111-1111-1111-1111-111111111111)", *P2 = @".tab(22222222-2222-2222-2222-222222222222)", *P3 = @".tab(33333333-3333-3333-3333-333333333333)";
+    NSString *R1 = @".tab(44444444-4444-4444-4444-444444444444)", *R2 = @".tab(55555555-5555-5555-5555-555555555555)", *R3 = @".tab(66666666-6666-6666-6666-666666666666)";
+    NSString *NEW = @"77777777-7777-7777-7777-777777777777", *N = [NSString stringWithFormat:@".tab(%@)", NEW];
+    NSUserDefaults *defaults = [[NSUserDefaults alloc] initWithSuiteName:@"com.diapatches"];
+    [defaults setObject:@[ @"space-fake" ] forKey:@"collapsedPinned"];
+    FakeRows(@[ @[ P1, P2, P3, @".sep" ], @[ @".newtab", N, R1, R2, R3 ] ]);
+    DPCompactTabRows.install();
+    DPCollapsePinned.install();
+    DPCommandBarHideTab.install();
+    DPCommandBar.on = DPCommandBarHideTab.on = DPCollapsePinned.on = YES;
+    DPFakeVisibleWindow *w;
+    _TtC7TabList27TabListCollectionViewLayout *layout;
+    MakeFakeList(&w, &layout);
+    [layout prepareLayout];
+    DPHideTabRow(NEW, w);
+    [layout prepareLayout];
+
+    Check(RowFrame(1, 2).origin.y == 66 && RowFrame(1, 3).origin.y == 103, @"#604: setup rows close up under the folded Pinned line");
+    NSString *bad = DisagreeingTransition(layout);
+    Check(!bad, [NSString stringWithFormat:@"#604: closing a tab moves the %@ row exactly once for the Pinned line and the hidden tab", bad]);
+    NSRect appears = [layout initialLayoutAttributesForAppearingItemAtIndexPath:[NSIndexPath indexPathForItem:3 inSection:1]].frame;
+    Check(appears.origin.y == 103, @"#604: a neighbour animates from its final row, not a row above it");
+    NSArray<NSCollectionViewLayoutAttributes *> *twice = [layout layoutAttributesForElementsInRect:NSMakeRect(-1e5, -1e5, 2e5, 1e7)];
+    Check(twice.count && [layout layoutAttributesForElementsInRect:NSMakeRect(-1e5, -1e5, 2e5, 1e7)].count == twice.count && RowFrame(1, 3).origin.y == 103,
+          @"#604: asking for the rows again moves nothing");
+
+    gSmallRows = DPCompactTabRows.on = YES;
+    [layout invalidateLayout];
+    [layout prepareLayout];
+    bad = DisagreeingTransition(layout);
+    Check(!bad && RowFrame(1, 3).origin.y == 89, [NSString stringWithFormat:@"#604: Compact Tab Rows leaves the %@ row where the list shows it", bad]);
+    gSmallRows = DPCompactTabRows.on = NO;
+
+    DPCleanHideTab();
+    FakeRows(@[ @[ P1, P2, P3, @".sep" ], @[ @".newtab", R1, R2, R3 ] ]);
+    [layout prepareLayout];
+    DPExpectNewTab(w);
+    FakeRows(@[ @[ P1, P2, P3, @".sep" ], @[ @".newtab", N, R1, R2, R3 ] ]);
+    [layout prepareLayout];
+    DPHideTabRow(NEW, w);
+    [layout prepareLayout];
+    Check(RowFrame(1, 2).origin.y == 66 && RowFrame(1, 3).origin.y == 103 && layout.collectionViewContentSize.height == 177,
+          @"#604: the bar holds the pre-⌘T rows while Dia adds the hidden tab");
+    FakeRows(@[ @[ P1, P2, P3, @".sep" ], @[ @".newtab", N, R2, R3 ] ]);
+    [layout prepareLayout];
+    Check(DPHidingATab(w) && RowFrame(1, 2).origin.y == 66 && RowFrame(1, 3).origin.y == 103 && layout.collectionViewContentSize.height == 140,
+          @"#604: rows close up after a tab closes while the bar holds the new tab, not under the old list's frames");
+    bad = DisagreeingTransition(layout);
+    Check(!bad, [NSString stringWithFormat:@"#604: the %@ row is moved once after a close behind the bar", bad]);
+
+    DPCleanHideTab();
+    [defaults setObject:@[ @"space-fake" ] forKey:@"collapsedPinned"];
+    FakeRows(@[ @[ P1, P2, P3, @".sep" ], @[ @".newtab", R1, R2, R3 ] ]);
+    layout->lazy = NO;
+    [layout invalidateLayout];
+    [layout prepareLayout];
+    layout->lazy = YES;
+    [defaults setObject:@[] forKey:@"collapsedPinned"];
+    [layout prepareLayout];
+    Check(RowFrame(0, 0).origin.y == 28 && RowFrame(0, 3).origin.y == 139 && RowFrame(1, 0).origin.y == 140 && layout.collectionViewContentSize.height == 260 + 28,
+          @"#604: unfolding moves the rows Dia kept by the new Pinned line, not the old one");
+    [defaults setObject:@[ @"space-fake" ] forKey:@"collapsedPinned"];
+    [layout prepareLayout];
+    Check(RowFrame(0, 0).origin.y == 28 && RowFrame(1, 0).origin.y == 29 && RowFrame(1, 1).origin.y == 66 && layout.collectionViewContentSize.height == 260 - 83,
+          @"#604: folding moves the rows Dia kept back under the Pinned line");
+
+    gSmallRows = DPCompactTabRows.on = YES;
+    layout->lazy = NO;
+    [layout invalidateLayout];
+    [layout prepareLayout];
+    layout->lazy = YES;
+    NSRect compact = RowFrame(1, 3);
+    CGFloat compactHeight = layout.collectionViewContentSize.height;
+    [layout prepareLayout];
+    [layout prepareLayout];
+    Check(NSEqualRects(RowFrame(1, 3), compact) && layout.collectionViewContentSize.height == compactHeight,
+          @"#604: a prepareLayout Dia answers from its cache doesn't compact the rows again");
+    gSmallRows = DPCompactTabRows.on = NO;
+    layout->lazy = NO;
+
+    DPCommandBar.on = DPCommandBarHideTab.on = DPCollapsePinned.on = NO;
+    DPCollapsePinned.apply(&DPCollapsePinned);
+    DPCleanHideTab();
+    [defaults removeObjectForKey:@"collapsedPinned"];
+    gFakeHeights = nil;
+    gFakeNames = nil;
+    gFakeList = nil;
+    [w close];
+}
+
+@interface DPFakeReapTab : NSObject
+@property(copy) NSString *tabId;
+@end
+@implementation DPFakeReapTab
+@end
+
+@interface DPFakeReapWindow : NSObject
+@property(copy) NSString *windowId;
+@property(strong) NSMutableArray<DPFakeReapTab *> *appleScriptTabs;
+@property(strong) NSArray *appleScriptProfiles;
+@end
+@implementation DPFakeReapWindow
+@end
+
+@interface DPFakeReapDelegate : NSObject <NSApplicationDelegate>
+@property(strong) NSArray *appleScriptWindows;
+@end
+@implementation DPFakeReapDelegate
+@end
+
+@interface DPFakeBar : NSObject
+@property(strong) id openedTab;
+@end
+@implementation DPFakeBar
+@end
+
+static DPFakeReapTab *ReapTab(NSString *identifier) {
+    DPFakeReapTab *tab = [DPFakeReapTab new];
+    tab.tabId = identifier;
+    return tab;
+}
+
+static void Spin(NSTimeInterval seconds) { [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:seconds]]; }
+
+static void TestHiddenTabsAreNeverStranded(void) {
+    NSString *P1 = @".tab(11111111-1111-1111-1111-111111111111)", *R1 = @".tab(44444444-4444-4444-4444-444444444444)", *R2 = @".tab(55555555-5555-5555-5555-555555555555)";
+    NSString *NEW = @"77777777-7777-7777-7777-777777777777", *N = [NSString stringWithFormat:@".tab(%@)", NEW];
+    NSString *KNOWN = @"44444444-4444-4444-4444-444444444444";
+    FakeRows(@[ @[ P1, @".sep" ], @[ @".newtab", N, R1, R2 ] ]);
+    DPCommandBar.on = DPCommandBarHideTab.on = YES;
+    DPCommandBarHideTab.install();
+    DPFakeVisibleWindow *w;
+    _TtC7TabList27TabListCollectionViewLayout *layout;
+    MakeFakeList(&w, &layout);
+    w.identifier = @"window-reap";
+    DPFakeReapTab *newTab = ReapTab(NEW), *known = ReapTab(KNOWN);
+    DPFakeReapWindow *script = [DPFakeReapWindow new];
+    script.windowId = @"window-reap";
+    script.appleScriptTabs = [@[ ReapTab(@"11111111-1111-1111-1111-111111111111"), known, newTab ] mutableCopy];
+    script.appleScriptProfiles = @[ script ];
+    DPFakeReapDelegate *delegate = [DPFakeReapDelegate new];
+    delegate.appleScriptWindows = @[ script ];
+    id before = NSApp.delegate;
+    NSApp.delegate = delegate;
+
+    [layout prepareLayout];
+    DPHideTabRow(NEW, w);
+    [layout prepareLayout];
+    Spin(0.25);
+    Check(DPHidingATab(w) && NSHeight(RowFrame(1, 1)) == 0, @"#605: setup hides the new tab's row");
+    Spin(0.25);
+    [script.appleScriptTabs removeObject:newTab];
+    FakeRows(@[ @[ P1, @".sep" ], @[ @".newtab", R1, R2 ] ]);
+    Spin(0.25);
+    Check(!DPHidingATab(w) && !DPHiddenTab(NEW), @"#605: a hidden tab closed by a route that never dismissed the bar no longer holds the list");
+    [layout prepareLayout];
+    Check(NSHeight(RowFrame(1, 1)) == 37 && NSHeight(RowFrame(1, 2)) == 37, @"#605: the rows after it are not left zero-height");
+
+    DPCleanHideTab();
+    FakeRows(@[ @[ P1, @".sep" ], @[ @".newtab", R1, R2 ] ]);
+    [script.appleScriptTabs removeAllObjects];
+    DPHideTabRow(KNOWN, w);
+    Check(DPHiddenTab(KNOWN) && DPHidingATab(w), @"#605: a tab Dia hasn't listed yet isn't reaped the moment it is hidden");
+    [script.appleScriptTabs addObject:known];
+    Spin(0.3);
+    Check(DPHiddenTab(KNOWN), @"#605: a tab listed after it was hidden stays hidden");
+    DPCleanHideTab();
+
+    FakeRows(@[ @[ P1, @".sep" ], @[ @".newtab", N, R1, R2 ] ]);
+    DPFakeBar *bar = [DPFakeBar new];
+    bar.openedTab = known;
+    DPSet(w, &DPOverlayKey, bar);
+    DPExpectNewTab(w);
+    DPHideTabRow(KNOWN, w);
+    Check(!DPHiddenTab(KNOWN), @"#606: while ⌘T is awaited, a tab the list already held is not hidden at once");
+    Spin(1.2);
+    Check(DPHiddenTab(KNOWN), @"#606: a bar open over that tab still hides its row once the wait is over");
+    DPSet(w, &DPOverlayKey, nil);
+    DPCleanHideTab();
+
+    DPFakeRowsDS *ds = (DPFakeRowsDS *)gFakeList.dataSource;
+    id source = ds->_impl;
+    ds->_impl = nil;
+    [layout invalidateLayout];
+    [layout prepareLayout];
+    DPHideTabRow(NEW, w);
+    [layout prepareLayout];
+    NSInteger asked = layout->invalidations;
+    Check(NSHeight(RowFrame(1, 1)) == 37, @"#606: setup has a sidebar that can't name its rows yet");
+    ds->_impl = source;
+    Spin(0.9);
+    [layout prepareLayout];
+    Check(layout->invalidations > asked && NSHeight(RowFrame(1, 1)) == 0, @"#606: a sidebar that names its rows after the tab was hidden still parks the row");
+
+    NSApp.delegate = before;
+    DPCommandBar.on = DPCommandBarHideTab.on = NO;
+    DPCleanHideTab();
     gFakeHeights = nil;
     gFakeNames = nil;
     gFakeList = nil;
@@ -713,8 +1061,11 @@ static void TestCollapsePinnedPill(void) {
 @end
 
 static void TestUndoCloseTabAndSavePageAs(void) {
-    NSUInteger before = gMonitors.count;
     DPUndoCloseTab.install();
+    NSUInteger before = gMonitors.count;
+    DPUndoCloseTab.on = YES;
+    DPUndoCloseTab.apply(&DPUndoCloseTab);
+    Check(gMonitors.count == before + 1, @"UndoCloseTab: its event monitor is installed when the tweak turns on");
     NSEvent *(^undoMonitor)(NSEvent *) = gMonitors[before];
 
     NSMenu *bar = [NSMenu new];
@@ -726,7 +1077,6 @@ static void TestUndoCloseTabAndSavePageAs(void) {
     [bar addItem:top];
     NSApp.mainMenu = bar;
 
-    DPUndoCloseTab.on = YES;
     ArcWebContents *page = [ArcWebContents new];
     [page closeWithForegroundCommitTiming:0];
     DPUndoCloseTab.on = NO;
@@ -1016,15 +1366,17 @@ static void TestTidyTabsCleanup(void) {
 
 int main(void) {
     @autoreleasepool {
+        unsetenv("DIATWEAKS_DOMAIN");
         [NSApplication sharedApplication];
         method_exchangeImplementations(class_getInstanceMethod(NSUserDefaults.class, @selector(initWithSuiteName:)),
             class_getInstanceMethod(NSUserDefaults.class, @selector(dp_testInitWithSuiteName:)));
-        [[[NSUserDefaults alloc] initWithSuiteName:@"com.diapatches"] removePersistentDomainForName:DPTestSuiteName()];
         DPHookClass(object_getClass(NSEvent.class), @selector(addLocalMonitorForEventsMatchingMask:handler:), (IMP)CaptureMonitor);
         TestHideSleepingTabs();
         TestHideTabGroupBackground();
         TestKeepFoldersOpen();
         TestCollapsePinnedWithHideTab();
+        TestTabCloseKeepsRowsInPlace();
+        TestHiddenTabsAreNeverStranded();
         TestCollapsePinnedPill();
         TestCollapsePinned();
         TestUndoCloseTabAndSavePageAs();
@@ -1033,7 +1385,7 @@ int main(void) {
         TestUnloadTab();
         TestCompactSidebarHeader();
         TestTidyTabsCleanup();
-        [[[NSUserDefaults alloc] initWithSuiteName:@"com.diapatches"] removePersistentDomainForName:DPTestSuiteName()];
+        [NSFileManager.defaultManager removeItemAtPath:DPTestSuiteName().stringByDeletingLastPathComponent error:nil];
     }
     if (failures) return 1;
     puts("PASS: all sidebar & tab bug regression checks passed");

@@ -89,18 +89,29 @@ static id DPSelection(NSWindow *window, NSArray *controllers) {
     return nil;
 }
 
+static NSArray<NSView *> *DPViewsInWindow(NSWindow *window, const char *first, const char *second) {
+    NSMutableArray<NSView *> *views = [NSMutableArray array];
+    for (NSView *view in [DPFindViews(first) arrayByAddingObjectsFromArray:DPFindViews(second)])
+        if (view.window == window) [views addObject:view];
+    return views;
+}
+
 static NSArray *DPTabControllers(NSWindow *window) {
     NSMutableArray *controllers = [NSMutableArray array];
     NSMutableSet *seen = [NSMutableSet set];
     DPWalk(window, controllers, seen, 0);
-    for (NSView *view in [DPFindViews(DPDiaTabList) arrayByAddingObjectsFromArray:DPFindViews(DPDiaTabStrip)])
-        if (view.window == window) DPWalk(DPSwiftValue(DPSwiftValue(view, @"viewModel"), @"presenter"), controllers, seen, 0);
+    for (NSView *view in DPViewsInWindow(window, DPDiaTabList, DPDiaTabStrip))
+        DPWalk(DPSwiftValue(DPSwiftValue(view, @"viewModel"), @"presenter"), controllers, seen, 0);
     return controllers;
 }
 
 BOOL DPCanReadSelection(id browser) {
+    static __weak NSWindow *readable;
     NSWindow *window = DPBrowserWindow(browser);
-    return !window || DPSelection(window, DPTabControllers(window));
+    if (!window || window == readable) return YES;
+    if (!DPSelection(window, nil) && !DPSelection(window, DPTabControllers(window))) return NO;
+    readable = window;
+    return YES;
 }
 
 NSSet<NSNumber *> *DPSelectedSessions(id browser) {
@@ -123,8 +134,7 @@ NSSet<NSNumber *> *DPSelectedSessions(id browser) {
     }
     NSMutableDictionary *sessions = [NSMutableDictionary dictionary], *urls = [NSMutableDictionary dictionary];
     for (id controller in controllers) DPEachValue(DPSwiftValue(controller, @"tabControllers"), ^(id tab) { DPReadTab(tab, tracked, sessions, urls); });
-    for (NSView *tab in [DPFindViews(DPDiaTabView) arrayByAddingObjectsFromArray:DPFindViews(DPDiaPinnedTab)])
-        if (tab.window == window) DPReadTab(tab, tracked, sessions, urls);
+    for (NSView *tab in DPViewsInWindow(window, DPDiaTabView, DPDiaPinnedTab)) DPReadTab(tab, tracked, sessions, urls);
 
     NSMutableSet<NSNumber *> *chosen = [NSMutableSet set];
     for (NSString *key in keys) {

@@ -74,7 +74,6 @@ NSToolbarItemIdentifier const DPSearchItemIdentifier = @"DiaPatchesSearch";
     entry.title = title;
     entry.page = page;
     entry.scroll = [self scrollFor:page];
-    // A folder page opens tweaks the same way the list does, one level deeper.
     if ([page respondsToSelector:@selector(setOpen:)]) {
         __weak DPPaneView *weakSelf = self;
         [(id)page setOpen:^(NSString *next, NSView *view) { [weakSelf pushPage:view title:next]; }];
@@ -120,8 +119,10 @@ NSToolbarItemIdentifier const DPSearchItemIdentifier = @"DiaPatchesSearch";
 }
 
 - (void)controlTextDidChange:(NSNotification *)notification {
-    if (self.searchItem.searchField.stringValue.length) [self popToRoot];
-    [self search];
+    NSString *query = self.searchItem.searchField.stringValue;
+    if (query.length) [self popToRoot];
+    if ([self.content respondsToSelector:@selector(filterWithQuery:)]) [self.content filterWithQuery:query];
+    else [self search];
 }
 
 - (void)patchesDidChange:(NSNotification *)notification {

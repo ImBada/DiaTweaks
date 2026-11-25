@@ -1,4 +1,5 @@
 #import "Updates/Updates.h"
+#include <sys/stat.h>
 #include <sys/xattr.h>
 
 NSString *const DPDia = @"dia", *const DPTweaks = @"tweaks";
@@ -36,25 +37,21 @@ static NSDictionary *DPUpdateEntry(NSDictionary *found, NSString *part) {
     return [entry isKindOfClass:NSDictionary.class] ? entry : nil;
 }
 
-static NSUserDefaults *DPUpdateDefaults(void) {
-    static NSUserDefaults *defaults;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{ defaults = [[NSUserDefaults alloc] initWithSuiteName:@"com.diapatches"]; });
-    return defaults;
-}
-
 BOOL DPIsLocalBuild(NSString *part) {
-    return [part isEqual:DPTweaks] && ![[NSDictionary dictionaryWithContentsOfFile:DPSupport(@"release.plist")][@"tag"] isKindOfClass:NSString.class];
+    static BOOL local;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ local = ![[NSDictionary dictionaryWithContentsOfFile:DPSupport(@"release.plist")][@"tag"] isKindOfClass:NSString.class]; });
+    return local && [part isEqual:DPTweaks];
 }
 
 static NSString *DPAutoKey(NSString *part) { return [part isEqual:DPDia] ? @"autoUpdateDia" : @"autoUpdateTweaks"; }
 
 DPAutoLevel DPAutoLevelOf(NSString *part) {
-    id level = [DPUpdateDefaults() objectForKey:DPAutoKey(part)];
+    id level = [DPSettingsDefaults() objectForKey:DPAutoKey(part)];
     return level ? MIN(MAX([level integerValue], DPAutoOff), DPAutoInstall) : DPAutoInstall;
 }
 
-void DPSetAutoLevel(NSString *part, DPAutoLevel level) { [DPUpdateDefaults() setInteger:level forKey:DPAutoKey(part)]; }
+void DPSetAutoLevel(NSString *part, DPAutoLevel level) { [DPSettingsDefaults() setInteger:level forKey:DPAutoKey(part)]; }
 
 static NSString *DPReasonIn(NSData *data) {
     NSString *text = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
@@ -137,7 +134,8 @@ void DPHandOffAndQuit(NSArray<NSString *> *args) {
     _checking = YES;
     [self changed];
     DPRunCLI(@[@"check", @"--json"], ^(NSString *output) {
-        id raw = output ? [NSJSONSerialization JSONObjectWithData:[output dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil] : nil;
+        NSData *json = [output dataUsingEncoding:NSUTF8StringEncoding];
+        id raw = json ? [NSJSONSerialization JSONObjectWithData:json options:0 error:nil] : nil;
         NSMutableDictionary *parsed = nil;
         if ([raw isKindOfClass:NSDictionary.class]) {
             parsed = [NSMutableDictionary new];
@@ -195,7 +193,10 @@ void DPHandOffAndQuit(NSArray<NSString *> *args) {
     return names.count ? [NSString stringWithFormat:@"Couldn’t check for %@ updates", names[0]] : nil;
 }
 
-- (BOOL)available:(NSString *)part { return [DPUpdateEntry(self.found, part)[@"available"] boolValue]; }
+- (BOOL)available:(NSString *)part {
+    id available = DPUpdateEntry(self.found, part)[@"available"];
+    return [available isKindOfClass:NSNumber.class] && [available boolValue];
+}
 - (BOOL)staged:(NSString *)part { return [DPUpdateEntry(self.found, part)[@"staged"] isKindOfClass:NSString.class]; }
 - (BOOL)downloading:(NSString *)part { return _whenDownloaded[part] != nil; }
 - (BOOL)failed:(NSString *)part { return _failed[part] != nil; }
@@ -211,7 +212,8 @@ void DPHandOffAndQuit(NSArray<NSString *> *args) {
     NSString *file = [cacheDir stringByAppendingPathComponent:[part isEqual:DPDia] ? @"download/Dia.zip" : @"release/DiaTweaks.zip"];
     id rawSize = DPUpdateEntry(self.found, part)[@"size"];
     double size = [rawSize isKindOfClass:NSNumber.class] ? [rawSize doubleValue] : 0;
-    double got = [[NSFileManager.defaultManager attributesOfItemAtPath:file error:nil][NSFileSize] doubleValue];
+    struct stat info;
+    double got = stat(file.fileSystemRepresentation, &info) == 0 ? info.st_size : 0;
     if (size > 0 && got < size) return got / size;
     return got > 0 ? -1 : 0;
 }
@@ -358,7 +360,7 @@ static void DPInstallOnQuit(void) {
 
 static void DPSaveDiaFeed(id<DPSparkleUpdater> updater) {
     NSString *feed = [updater respondsToSelector:@selector(feedURL)] ? updater.feedURL.absoluteString : nil;
-    if (feed) [DPUpdateDefaults() setObject:feed forKey:@"diaFeed"];
+    if (feed) [DPSettingsDefaults() setObject:feed forKey:@"diaFeed"];
 }
 
 static BOOL DPUpdater_startUpdater(id self, SEL _cmd, NSError **error) {

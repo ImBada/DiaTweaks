@@ -1,6 +1,6 @@
 #import "HideToolbar.h"
 
-static char DPFillKey, DPAppearanceKey, DPPlainAppliedKey;
+static char DPFillKey, DPAppearanceKey, DPPlainAppliedKey, DPShowingKey;
 static NSHashTable<NSView *> *DPTabFills;
 
 static BOOL DPIsTabFill(NSView *view) {
@@ -19,7 +19,9 @@ static CGFloat DPToolbarShowing(NSWindow *window) {
     return showing;
 }
 
-static BOOL DPPlain(NSView *fill) { return DPPlainSelectedTab.on && DPHideToolbar.on && DPToolbarShowing(fill.window) < 0.01; }
+static BOOL DPPlainActive(void) { return DPPlainSelectedTab.on && DPHideToolbar.on; }
+
+static BOOL DPPlain(NSView *fill) { return DPPlainActive() && DPToolbarShowing(fill.window) < 0.01; }
 
 static void DPPlainAppearance(NSView *fill, BOOL plain) {
     NSView *tab = fill.superview.superview.superview.superview;
@@ -38,8 +40,10 @@ static void DPPlainAppearance(NSView *fill, BOOL plain) {
 
 static void DPFill_updateLayer(NSView *self, SEL _cmd) {
     DPCallOriginal(DPFill_updateLayer, self);
-    if (!DPIsTabFill(self)) return;
-    if (!self.layer.backgroundColor) {
+    BOOL active = DPPlainActive();
+    if ((!active && !DPGet(self, &DPPlainAppliedKey)) || !DPIsTabFill(self)) return;
+    CGColorRef current = self.layer.backgroundColor;
+    if (!current) {
         if (DPGet(self, &DPPlainAppliedKey)) {
             DPPlainAppearance(self, NO);
             DPSet(self, &DPPlainAppliedKey, nil);
@@ -47,9 +51,9 @@ static void DPFill_updateLayer(NSView *self, SEL _cmd) {
         return;
     }
     [DPTabFills addObject:self];
-    NSColor *dia = [NSColor colorWithCGColor:self.layer.backgroundColor];
-    DPSet(self, &DPFillKey, dia);
-    CGFloat plain = DPPlainSelectedTab.on && DPHideToolbar.on ? 1 - DPToolbarShowing(self.window) : 0;
+    NSColor *dia = DPGet(self, &DPFillKey);
+    if (!CGColorEqualToColor(dia.CGColor, current)) DPSet(self, &DPFillKey, dia = [NSColor colorWithCGColor:current]);
+    CGFloat plain = active ? 1 - DPToolbarShowing(self.window) : 0;
     if (plain > 0.5 || DPGet(self, &DPPlainAppliedKey)) DPPlainAppearance(self, plain > 0.5);
     DPSet(self, &DPPlainAppliedKey, plain > 0 ? @YES : nil);
     if (plain <= 0) return;
@@ -61,8 +65,13 @@ static void DPFill_updateLayer(NSView *self, SEL _cmd) {
     if (fill) self.layer.backgroundColor = fill.CGColor;
 }
 
+// Hide Toolbar calls this on every pane layout and ease step; only a change in how plain the tabs should be repaints them.
 void DPRepaintTabs(NSWindow *window) {
-    BOOL active = DPPlainSelectedTab.on && DPHideToolbar.on;
+    BOOL active = DPPlainActive();
+    if (!window || (!active && !DPTabFills.count)) return;
+    NSNumber *state = @(active ? DPToolbarShowing(window) : -1);
+    if ([DPGet(window, &DPShowingKey) isEqual:state]) return;
+    DPSet(window, &DPShowingKey, state);
     for (NSView *fill in DPTabFills)
         if (fill.window == window && (active || DPGet(fill, &DPPlainAppliedKey))) fill.needsDisplay = YES;
 }
@@ -101,6 +110,10 @@ static void DPApplyPlainSelectedTab(DPPatch *patch) {
 static NSString *DPVerifyPlainSelectedTab(DPPatch *patch) {
     for (NSView *fill in DPFindViews(DPDiaColorView)) {
         if (!DPIsTabFill(fill) || fill.hiddenOrHasHiddenAncestor || !fill.layer.backgroundColor) continue;
+        if (!DPPlainActive()) {
+            if (DPGet(fill, &DPPlainAppliedKey)) return @"selected tab is still plain";
+            continue;
+        }
         NSColor *dia = DPGet(fill, &DPFillKey);
         if (!dia) return @"selected tab's fill isn't watched";
         if (!DPPlain(fill) && !CGColorEqualToColor(dia.CGColor, fill.layer.backgroundColor)) return @"selected tab lost the site's color";

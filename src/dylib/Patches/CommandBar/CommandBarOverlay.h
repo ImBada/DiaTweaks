@@ -7,10 +7,11 @@ extern DPPatch DPCommandBar, DPCommandBarKeepText;
 @property(weak) NSWindow *host;
 @property(strong) NSView *shade, *windowBlur;
 @property(strong) id openedTab, returnTab, keyMonitor;
+@property(strong) NSArray *textWatch;
 @property(strong) NSArray<NSView *> *shownShadows;
 @property(strong) NSTimer *watch;
 @property(copy) NSString *startURL;
-@property CGFloat collapsedHeight, collapsedWidth;
+@property CGFloat collapsedHeight, collapsedWidth, extraHeight;
 @property CFTimeInterval sizedAt, listlessSince;
 @property BOOL picked, overBlank, passingThrough;
 - (NSView *)viewUnder:(NSPoint)point;
@@ -19,11 +20,17 @@ extern DPPatch DPCommandBar, DPCommandBarKeepText;
 extern char DPOverlayKey;
 
 static inline BOOL DPOverPinnedHeader(NSView *tabList, id gesture) {
-    Class headerCls = NSClassFromString(@"DPPinnedHeader");
+    static Class headerCls;
+    if (!headerCls) headerCls = NSClassFromString(@"DPPinnedHeader");
     if (!headerCls || ![gesture respondsToSelector:@selector(locationInView:)]) return NO;
     NSView *header = DPFindView(tabList, ^BOOL(NSView *view) { return [view isKindOfClass:headerCls]; });
     if (!header || header.isHiddenOrHasHiddenAncestor || !header.superview) return NO;
     return NSPointInRect([gesture locationInView:header.superview], header.frame);
+}
+
+static inline void DPStopWatchingText(DPCommandBarOverlay *overlay) {
+    for (id observer in overlay.textWatch) [NSNotificationCenter.defaultCenter removeObserver:observer];
+    overlay.textWatch = nil;
 }
 
 static inline void DPStopWatching(DPCommandBarOverlay *overlay) {
@@ -31,6 +38,7 @@ static inline void DPStopWatching(DPCommandBarOverlay *overlay) {
     overlay.watch = nil;
     if (overlay.keyMonitor) [NSEvent removeMonitor:overlay.keyMonitor];
     overlay.keyMonitor = nil;
+    DPStopWatchingText(overlay);
 }
 
 static inline void DPRemoveShade(DPCommandBarOverlay *overlay) {
@@ -40,7 +48,8 @@ static inline void DPRemoveShade(DPCommandBarOverlay *overlay) {
 }
 
 static inline NSView *DPVisiblePeek(NSWindow *window) {
-    Class card = NSClassFromString(@"DPPeekCard");
+    static Class card;
+    if (!card) card = NSClassFromString(@"DPPeekCard");
     return card ? DPFindView(window.contentView, ^BOOL(NSView *view) { return [view isKindOfClass:card] && !view.isHiddenOrHasHiddenAncestor; }) : nil;
 }
 
@@ -56,7 +65,6 @@ NSMutableSet<NSString *> *DPBlanks(NSWindow *window);
 NSView *DPBlankPage(NSWindow *window);
 void DPMakeBlank(NSView *page, NSString *tab, NSString *closing);
 NSMenuItem *DPMenuItemTitled(NSMenu *menu, NSString *title);
-NSUserDefaults *DPSettings(void);
 void DPShowHiddenBars(void);
 BOOL DPHasStrip(NSWindow *window);
 

@@ -21,7 +21,7 @@ Each tweak changes one thing about Dia: it hides something you don't use, change
 | Passwords | Password managers and passkeys |
 | Links | Opening links in Peek and the address shown on hover |
 
-Turn them on and off in **Dia → Settings → Patches**, or with the `diatweaks` command. Each one's Settings page links to its wiki page, which says what it does and when you'd want it.
+Turn them on and off in **Dia → Settings → Patches**, or with the `diatweaks` command. Each one's Settings page links to its wiki page, which says what it does and when you'd want it. Experimental tweaks stay out of the list until you switch them on in **Settings → Home** (or at the bottom of **Patches**), where you can also back up or import your settings.
 
 [See all tweaks →](https://github.com/JaceThings/DiaTweaks/wiki)
 
@@ -32,10 +32,20 @@ Turn them on and off in **Dia → Settings → Patches**, or with the `diatweaks
 3. Paste this into Terminal:
 
    ```sh
-   git clone https://github.com/JaceThings/DiaTweaks.git ~/DiaTweaks && ~/DiaTweaks/install.sh
+   (if [ -e ~/DiaTweaks ] && [ ! -w ~/DiaTweaks ]; then
+     echo 'Run sudo chown -R "$USER" ~/DiaTweaks, then paste this again.' >&2; exit 1
+   elif [ -d ~/DiaTweaks/.git ]; then
+     git -C ~/DiaTweaks pull --ff-only || { echo "~/DiaTweaks has local changes or can't fast-forward. Move it aside (mv ~/DiaTweaks ~/DiaTweaks.old) and run this again." >&2; exit 1; }
+   elif [ -e ~/DiaTweaks ]; then
+     echo "~/DiaTweaks already exists but isn't a git clone. Move it aside (mv ~/DiaTweaks ~/DiaTweaks.old) and run this again." >&2; exit 1
+   else
+     git clone --depth 1 https://github.com/JaceThings/DiaTweaks.git ~/DiaTweaks
+   fi) && ~/DiaTweaks/install.sh
    ```
 
 Dia quits and reopens. If macOS asks about "Dia Safe Storage", enter your password and click **Always Allow**.
+
+Stopped it halfway, or something went wrong? Run `~/DiaTweaks/install.sh` again, or `diatweaks doctor` to see what needs fixing. Don't use `sudo`: DiaTweaks installs into your own home folder.
 
 ## The `diatweaks` command
 
@@ -44,21 +54,25 @@ Run `diatweaks` on its own for a menu, or:
 | Command | Does |
 |---|---|
 | `diatweaks list` | Shows every tweak and whether it's on |
-| `diatweaks enable hideToolbar` | Turns tweaks on; Dia changes straight away |
-| `diatweaks disable hideToolbar` | Turns tweaks off |
+| `diatweaks on hideToolbar` | Turns tweaks on; Dia changes straight away |
+| `diatweaks off hideToolbar` | Turns tweaks off |
+| `diatweaks toggle hideToolbar` | Turns each tweak named on if it's off, and off if it's on |
 | `diatweaks pause` | Turns every tweak off, keeping their settings, until `diatweaks resume` |
 | `diatweaks resume` | Turns the tweaks back on as they were |
 | `diatweaks status` | Shows Dia's version, safe mode and which tweaks are on |
+| `diatweaks doctor` | Checks Dia, DiaTweaks' folder and local tweaks, tidies up stopped updates, and says how to fix the rest |
 | `diatweaks update` | Installs the latest DiaTweaks release and patches Dia again |
 | `diatweaks update-dia` | Downloads a newer Dia and patches it |
+| `diatweaks export` | Saves your tweak switches and settings to `diatweaks-config.json` |
+| `diatweaks import diatweaks-config.json` | Loads tweak switches and settings from a file (`--replace` resets the rest) |
 | `diatweaks restore` | Puts the original Dia back |
-| `diatweaks local` | Lists, builds and shares tweaks you keep in your own folder |
+| `diatweaks local` | Lists, builds and shares tweaks you keep in your own folder, and installs optional ones |
 
-Tweak names work as keys or titles, like `hideToolbar` or `"Hide Toolbar"`, and `enable` and `disable` take several at once. Add `-y` to skip the questions.
+Tweak names work as keys or titles, like `hideToolbar` or `"Hide Toolbar"`, and `on`, `off` and `toggle` take several at once, or show a list to pick from when you name none. `enable`, `disable`, `ls`, `unpause`, `info`, `backup` and `uninstall` work too. Add `-y` to skip the questions.
 
 ### Local Tweaks
 
-Have a tweak of your own that isn't in DiaTweaks? Drop a `.m` file, a GitHub pull request `.patch`, or a prebuilt `.dylib` into `~/Library/Application Support/DiaPatches/local/` and it runs like any other tweak, with its own switch in Settings. It compiles against the headers inside the installed `DiaPatches.dylib`, so it keeps working across Dia and DiaTweaks updates, and no update or uninstall deletes it. **Settings → Patches → Local Tweaks** has **Add Tweak…**, **New Starter Tweak…** and **Open Folder**; `diatweaks local` does the same from a terminal. See [docs/local-tweaks.md](docs/local-tweaks.md).
+Have a tweak of your own that isn't in DiaTweaks? Drop a `.m` file, a GitHub pull request `.patch`, or a prebuilt `.dylib` into `~/Library/Application Support/DiaPatches/local/` and it runs like any other tweak, with its own switch in Settings. It compiles against the headers inside the installed `DiaPatches.dylib`, so it keeps working across Dia and DiaTweaks updates, and no update or uninstall deletes it. `diatweaks local add` also takes a GitHub link, like a pull request's address. **Settings → Patches → Local Tweaks** has **Add Tweak…**, **New Starter Tweak…** and **Open Folder**, and an **Available** list of optional tweaks that install in one click; `diatweaks local` does the same from a terminal. See [docs/local-tweaks.md](docs/local-tweaks.md).
 
 ## Updating
 

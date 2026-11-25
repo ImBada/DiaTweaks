@@ -23,7 +23,7 @@ NSArray<NSString *> *DPListedTabs(NSWindow *window) {
     NSMutableArray *tabs = [NSMutableArray array];
     for (NSCollectionView *list in DPFindViews(DPDiaTabListCollection)) {
         if (window && list.window != window) continue;
-        DPEachRow(list, ^(NSString *name, BOOL *stop) { [tabs addObject:DPTabIn(name) ?: @""]; });
+        DPEachRow(list, ^(NSString *name, BOOL *stop) { NSString *tab = DPTabIn(name); if (tab) [tabs addObject:tab]; });
     }
     return tabs;
 }

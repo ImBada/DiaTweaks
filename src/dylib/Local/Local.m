@@ -1,11 +1,11 @@
 #import "Local/Local.h"
 #import "SafeMode/SafeMode.h"
-#import <CommonCrypto/CommonDigest.h>
 #import <dlfcn.h>
 #import <mach-o/dyld.h>
 #import <mach-o/getsect.h>
 #import <mach-o/loader.h>
 #import <sys/stat.h>
+#import <sys/xattr.h>
 
 extern const struct mach_header_64 __dso_handle;
 
@@ -15,7 +15,7 @@ static NSMutableArray<NSDictionary *> *DPLocalStateItems;
 static DPPatch **DPLocalArray;
 static NSUInteger DPLocalArrayCount;
 static BOOL DPLocalLoaded;
-static NSDictionary *DPLocalSaved;  // local-state.json as read at the start of a load or a build
+static NSDictionary *DPLocalSaved;
 static NSSet<NSString *> *DPLocalOfficialKeys;
 
 NSString *DPLocalFolder(void) { return DPAppSupport(@"DiaPatches/local"); }
@@ -30,10 +30,7 @@ NSString *DPLocalStatePath(void) { return DPAppSupport(@"DiaPatches/local-state.
 
 BOOL DPLocalTweaksEnabled(void) {
     if (DPPaused || DPSafeMode >= 1 || DPLocalSafeModeOff()) return NO;
-    static NSUserDefaults *defaults;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{ defaults = [[NSUserDefaults alloc] initWithSuiteName:@"com.diapatches"]; });
-    id value = [defaults objectForKey:@"localTweaks"];
+    id value = [DPSettingsDefaults() objectForKey:@"localTweaks"];
     return value ? [value boolValue] : YES;
 }
 
@@ -57,6 +54,13 @@ static void DPLocalPack(void) {
     for (NSUInteger i = 0; i < DPLocalArrayCount; i++) DPLocalArray[i] = ((NSValue *)DPLocalTable[i]).pointerValue;
 }
 
+NSString *DPLocalStamp(NSString *path) {
+    struct stat info;
+    if (stat(path.fileSystemRepresentation, &info) != 0) return @"0";
+    return [NSString stringWithFormat:@"%llx-%llx", (unsigned long long)info.st_mtimespec.tv_sec * 1000000000ULL + info.st_mtimespec.tv_nsec,
+                                      (unsigned long long)info.st_size];
+}
+
 NSArray<NSDictionary *> *DPLocalFileStamps(NSArray<NSString *> *sources) {
     NSMutableArray<NSDictionary *> *stamps = [NSMutableArray new];
     for (NSString *source in sources) {
@@ -71,15 +75,12 @@ NSArray<NSDictionary *> *DPLocalFileStamps(NSArray<NSString *> *sources) {
     return stamps;
 }
 
+static BOOL DPLocalStampsMatch(id saved, NSArray<NSDictionary *> *stamps, NSUInteger count) {
+    return [saved isKindOfClass:NSArray.class] && [saved count] == count && [stamps isEqualToArray:saved];
+}
+
 BOOL DPLocalFilesMatch(NSArray<NSDictionary *> *saved, NSArray<NSString *> *sources) {
-    if (![saved isKindOfClass:NSArray.class] || saved.count != sources.count) return NO;
-    NSArray<NSDictionary *> *now = DPLocalFileStamps(sources);
-    if (now.count != saved.count) return NO;
-    for (NSUInteger i = 0; i < now.count; i++)
-        if (![now[i][@"path"] isEqual:saved[i][@"path"]] || ![now[i][@"mtime"] isEqual:saved[i][@"mtime"]]
-            || ![now[i][@"size"] isEqual:saved[i][@"size"]])
-            return NO;
-    return YES;
+    return DPLocalStampsMatch(saved, DPLocalFileStamps(sources), sources.count);
 }
 
 id DPLocalSavedValue(NSString *key) { return DPLocalSaved[key]; }
@@ -90,29 +91,41 @@ NSDictionary *DPLocalSavedItem(NSString *identifier) {
     return nil;
 }
 
-NSString *DPLocalRun(NSArray<NSString *> *argv) {
+int DPLocalExec(NSArray<NSString *> *argv, NSString **output) {
     NSTask *task = [NSTask new];
     task.executableURL = [NSURL fileURLWithPath:argv[0]];
     task.arguments = [argv subarrayWithRange:NSMakeRange(1, argv.count - 1)];
     NSPipe *pipe = NSPipe.pipe;
     task.standardOutput = task.standardError = pipe;
     task.standardInput = NSFileHandle.fileHandleWithNullDevice;
-    if (![task launchAndReturnError:NULL]) return nil;
+    *output = nil;
+    if (![task launchAndReturnError:NULL]) return -1;
     NSData *data = [pipe.fileHandleForReading readDataToEndOfFile];
     [task waitUntilExit];
-    if (task.terminationStatus != 0) return nil;
-    return [[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    *output = [[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    return task.terminationStatus;
 }
 
-static NSArray<NSString *> *DPLocalSourcesIn(NSString *folder) {
-    NSMutableArray<NSString *> *sources = [NSMutableArray new];
-    for (NSString *relative in [NSFileManager.defaultManager enumeratorAtPath:folder]) {
-        if ([relative.lastPathComponent hasPrefix:@"."]) continue;
-        if (![relative.pathExtension isEqual:@"m"]) continue;
-        [sources addObject:[folder stringByAppendingPathComponent:relative]];
+NSString *DPLocalRun(NSArray<NSString *> *argv) {
+    NSString *output = nil;
+    return DPLocalExec(argv, &output) == 0 ? output : nil;
+}
+
+static NSArray<NSString *> *DPLocalTracked(NSString *folder) {
+    NSMutableArray<NSString *> *found = [NSMutableArray new];
+    NSDirectoryEnumerator *walk = [NSFileManager.defaultManager enumeratorAtPath:folder];
+    for (NSString *relative in walk) {
+        if ([relative.lastPathComponent hasPrefix:@"."]) [walk skipDescendants];
+        else if ([@[ @"m", @"h" ] containsObject:relative.pathExtension.lowercaseString]) [found addObject:[folder stringByAppendingPathComponent:relative]];
     }
-    [sources sortUsingSelector:@selector(compare:)];
-    return sources;
+    [found sortUsingSelector:@selector(compare:)];
+    return found;
+}
+
+static NSArray<NSString *> *DPLocalSourcesIn(NSArray<NSString *> *tracked) {
+    return [tracked filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSString *path, id bindings) {
+        return [path.pathExtension.lowercaseString isEqual:@"m"];
+    }]];
 }
 
 static NSString *DPLocalBinaryKind(NSString *extension) {
@@ -122,56 +135,59 @@ static NSString *DPLocalBinaryKind(NSString *extension) {
     return nil;
 }
 
+static NSString *DPLocalUnreadable(void) {
+    NSString *folder = DPLocalFolder();
+    NSError *error = nil;
+    if ([NSFileManager.defaultManager contentsOfDirectoryAtPath:folder error:&error]) return nil;
+    BOOL directory = NO;
+    if (![NSFileManager.defaultManager fileExistsAtPath:folder isDirectory:&directory] || !directory) return nil;
+    return [NSString stringWithFormat:@"Couldn’t read %@: %@ To fix it, run: sudo chown -R \"%@\" \"%@\" && chmod -R u+rwX \"%@\"", folder,
+                                      error.localizedDescription, NSUserName(), folder, folder];
+}
+
+static BOOL DPLocalWritable(NSString *folder) {
+    while (folder.length > 1 && access(folder.fileSystemRepresentation, F_OK) != 0) folder = folder.stringByDeletingLastPathComponent;
+    return access(folder.fileSystemRepresentation, W_OK) == 0;
+}
+
 static NSArray<NSDictionary *> *DPLocalScan(void) {
     NSString *folder = DPLocalFolder();
     NSFileManager *files = NSFileManager.defaultManager;
-    NSArray<NSString *> *names = [files contentsOfDirectoryAtPath:folder error:NULL];
     NSMutableArray<NSDictionary *> *items = [NSMutableArray new];
     NSMutableSet<NSString *> *seen = [NSMutableSet new];
-    for (NSString *name in [names sortedArrayUsingSelector:@selector(localizedStandardCompare:)]) {
-        if ([name hasPrefix:@"."] || [name isEqual:@"README.md"]) continue;
-        NSString *path = [folder stringByAppendingPathComponent:name];
+    for (NSString *name in [[files contentsOfDirectoryAtPath:folder error:NULL] sortedArrayUsingSelector:@selector(localizedStandardCompare:)]) {
+        NSString *path = [folder stringByAppendingPathComponent:name], *identifier = name.stringByDeletingPathExtension, *extension = name.pathExtension.lowercaseString;
         BOOL directory = NO;
-        if (![files fileExistsAtPath:path isDirectory:&directory]) continue;
-        NSString *extension = name.pathExtension.lowercaseString, *identifier = name.stringByDeletingPathExtension;
-        NSDictionary *item;
-        if (directory) {
-            NSArray<NSString *> *sources = DPLocalSourcesIn(path);
+        if ([name hasPrefix:@"."] || [name isEqual:@"README.md"] || [seen containsObject:identifier] || ![files fileExistsAtPath:path isDirectory:&directory]) continue;
+        NSString *kind = directory || [extension isEqual:@"m"] ? @"source" : DPLocalBinaryKind(extension);
+        if (!kind) continue;
+        NSDictionary *item = @{ @"id" : identifier, @"kind" : kind, @"path" : path };
+        if ([kind isEqual:@"source"]) {
+            NSArray<NSString *> *tracked = directory ? DPLocalTracked(path) : @[ path ], *sources = DPLocalSourcesIn(tracked);
             if (!sources.count) continue;
-            item = @{ @"id" : identifier, @"kind" : @"source", @"path" : path, @"sources" : sources, @"dir" : path };
-        } else if ([extension isEqual:@"m"]) {
-            item = @{ @"id" : identifier, @"kind" : @"source", @"path" : path, @"sources" : @[ path ], @"dir" : folder };
-        } else {
-            NSString *kind = DPLocalBinaryKind(extension);
-            if (!kind) continue;
-            item = @{ @"id" : identifier, @"kind" : kind, @"path" : path };
+            item = @{ @"id" : identifier, @"kind" : kind, @"path" : path, @"sources" : sources, @"tracked" : tracked, @"dir" : directory ? path : folder };
         }
-        if ([seen containsObject:identifier]) continue;
         [seen addObject:identifier];
         [items addObject:item];
     }
     return items;
 }
 
-static NSString *DPLocalStamp(NSString *path) {
-    struct stat info;
-    if (stat(path.fileSystemRepresentation, &info) != 0) return @"0";
-    return [NSString stringWithFormat:@"%llx-%llx", (unsigned long long)info.st_mtimespec.tv_sec * 1000000000ULL + info.st_mtimespec.tv_nsec,
-                                      (unsigned long long)info.st_size];
+static NSString *DPLocalExtracted(NSDictionary *item) {
+    return [DPLocalCacheFolder() stringByAppendingPathComponent:[NSString stringWithFormat:@"extracted/%@/%@", item[@"id"], DPLocalStamp(item[@"path"])]];
+}
+
+static NSDictionary *DPLocalSourceFields(NSString *dir, NSArray<NSString *> *tracked, NSArray<NSString *> *sources, NSString *defines) {
+    NSMutableArray<NSString *> *dirs = [NSMutableArray arrayWithObject:dir];
+    for (NSString *source in sources) [dirs addObject:source.stringByDeletingLastPathComponent];
+    return @{ @"sources" : sources, @"tracked" : tracked, @"stamps" : DPLocalFileStamps(tracked), @"includeDirs" : dirs, @"defines" : defines };
 }
 
 static NSDictionary *DPLocalPrepare(NSDictionary *item) {
     NSString *kind = item[@"kind"], *path = item[@"path"];
-    if ([kind isEqual:@"source"]) {
-        NSMutableArray<NSString *> *dirs = [NSMutableArray arrayWithObject:item[@"dir"]];
-        for (NSString *source in item[@"sources"]) [dirs addObject:source.stringByDeletingLastPathComponent];
-        return @{ @"sources" : item[@"sources"], @"includeDirs" : dirs };
-    }
-    if ([kind isEqual:@"dylib"]) return @{ @"dylib" : path };
-
-    NSString *folder = [DPLocalCacheFolder() stringByAppendingPathComponent:
-                                             [NSString stringWithFormat:@"extracted/%@/%@", item[@"id"], DPLocalStamp(path)]];
-    NSString *marker = [folder stringByAppendingPathComponent:@".done"];
+    if ([kind isEqual:@"dylib"]) return @{ @"prebuilt" : path };
+    if ([kind isEqual:@"source"]) return DPLocalSourceFields(item[@"dir"], item[@"tracked"], item[@"sources"], @"");
+    NSString *folder = DPLocalExtracted(item), *marker = [folder stringByAppendingPathComponent:@".done"];
     NSFileManager *files = NSFileManager.defaultManager;
     if (![files fileExistsAtPath:marker]) {
         [files removeItemAtPath:folder error:NULL];
@@ -183,12 +199,10 @@ static NSDictionary *DPLocalPrepare(NSDictionary *item) {
         if (error) return @{ @"error" : error };
         [@"" writeToFile:marker atomically:YES encoding:NSUTF8StringEncoding error:NULL];
     }
-    NSArray<NSString *> *sources = DPLocalSourcesIn(folder);
+    NSArray<NSString *> *tracked = DPLocalTracked(folder), *sources = DPLocalSourcesIn(tracked);
     if (!sources.count) return @{ @"error" : @"This has no .m tweak files in it." };
-    NSMutableArray<NSString *> *dirs = [NSMutableArray arrayWithObject:folder];
-    for (NSString *source in sources) [dirs addObject:source.stringByDeletingLastPathComponent];
     NSString *defines = [folder stringByAppendingPathComponent:@"_dp_patch_defines.h"];
-    return @{ @"sources" : sources, @"includeDirs" : dirs, @"defines" : [files fileExistsAtPath:defines] ? defines : @"" };
+    return DPLocalSourceFields(folder, tracked, sources, [files fileExistsAtPath:defines] ? defines : @"");
 }
 
 static id DPLocalFail(NSString **error, NSString *message, NSString *cleanup) {
@@ -197,55 +211,34 @@ static id DPLocalFail(NSString **error, NSString *message, NSString *cleanup) {
     return nil;
 }
 
-static NSString *DPLocalHash(NSString *uuid, NSArray<NSString *> *sources, NSString *defines) {
-    NSMutableData *feed = [NSMutableData data];
-    [feed appendData:[uuid dataUsingEncoding:NSUTF8StringEncoding]];
-    [feed appendData:[@"1" dataUsingEncoding:NSUTF8StringEncoding]];  // Bump when the compile command changes.
-    for (NSDictionary *stamp in DPLocalFileStamps(sources)) {
-        [feed appendData:[stamp[@"path"] dataUsingEncoding:NSUTF8StringEncoding]];
-        [feed appendData:[[NSString stringWithFormat:@"%@:%@", stamp[@"mtime"], stamp[@"size"]] dataUsingEncoding:NSUTF8StringEncoding]];
-    }
-    if (defines.length) [feed appendData:[NSData dataWithContentsOfFile:defines] ?: NSData.data];
-    unsigned char digest[CC_SHA256_DIGEST_LENGTH];
-    CC_SHA256(feed.bytes, (CC_LONG)feed.length, digest);
-    NSMutableString *hex = [NSMutableString stringWithCapacity:CC_SHA256_DIGEST_LENGTH * 2];
-    for (int i = 0; i < CC_SHA256_DIGEST_LENGTH; i++) [hex appendFormat:@"%02x", digest[i]];
-    return [hex substringToIndex:16];
+static NSString *const DPLocalCompileRevision = @"2";
+
+static NSString *DPLocalHash(NSDictionary *job) {
+    NSMutableString *feed = [NSMutableString stringWithFormat:@"%@%@", DPDylibUUID(), DPLocalCompileRevision];
+    for (NSDictionary *stamp in job[@"stamps"]) [feed appendFormat:@"%@%@:%@", stamp[@"path"], stamp[@"mtime"], stamp[@"size"]];
+    NSMutableData *data = [[feed dataUsingEncoding:NSUTF8StringEncoding] mutableCopy];
+    if ([job[@"defines"] length]) [data appendData:[NSData dataWithContentsOfFile:job[@"defines"]] ?: NSData.data];
+    return DPLocalDigest(data);
 }
 
-// The warm path: a matching state entry and a dylib on disk means no hashing and no clang.
-static NSString *DPLocalEnsureBuilt(NSString *identifier, NSArray<NSString *> *sources, NSArray<NSString *> *includeDirs, NSString *defines, NSString **error) {
-    NSString *uuid = DPDylibUUID();
-    NSDictionary *saved = DPLocalSavedItem(identifier);
-    if (saved && [saved[@"uuid"] isEqual:uuid] && DPLocalFilesMatch(saved[@"files"], sources)) {
-        NSString *cached = saved[@"dylib"];
-        if ([cached isKindOfClass:NSString.class] && [NSFileManager.defaultManager fileExistsAtPath:cached]) return cached;
-    }
+static NSMutableDictionary *DPLocalJob(NSDictionary *item, BOOL force) {
+    NSMutableDictionary *job = [item mutableCopy];
+    [job addEntriesFromDictionary:DPLocalPrepare(item)];
+    if (!job[@"stamps"]) return job;
     NSFileManager *files = NSFileManager.defaultManager;
-    NSString *bin = [DPLocalCacheFolder() stringByAppendingPathComponent:@"bin"];
-    [files createDirectoryAtPath:bin withIntermediateDirectories:YES attributes:nil error:NULL];
-    NSString *final = [bin stringByAppendingPathComponent:[NSString stringWithFormat:@"%@-%@.dylib", identifier, DPLocalHash(uuid, sources, defines)]];
-    if ([files fileExistsAtPath:final]) return final;
-    NSString *temporary = [final stringByAppendingString:@".tmp"];
-    [files removeItemAtPath:temporary error:NULL];
-    if (!DPLocalCompile(sources, includeDirs, defines, temporary, error)) return DPLocalFail(error, *error, temporary);
-    // Rename over the old file: a running Dia may still have it mapped, and rename never disturbs that.
-    if (rename(temporary.fileSystemRepresentation, final.fileSystemRepresentation) != 0)
-        return DPLocalFail(error, @"Couldn’t put the built tweak in place.", temporary);
-    return final;
-}
-
-static const struct mach_header_64 *DPLocalImageFor(NSString *path) {
-    char want[PATH_MAX];
-    if (!realpath(path.fileSystemRepresentation, want)) return NULL;
-    for (uint32_t i = 0; i < _dyld_image_count(); i++) {
-        const char *name = _dyld_get_image_name(i);
-        if (name && !strcmp(name, want)) return (const void *)_dyld_get_image_header(i);
+    NSDictionary *saved = DPLocalSavedItem(item[@"id"]);
+    NSString *cached = saved[@"dylib"];
+    if (!force && [saved[@"uuid"] isEqual:DPDylibUUID()] && DPLocalStampsMatch(saved[@"files"], job[@"stamps"], [job[@"tracked"] count])
+        && [cached isKindOfClass:NSString.class] && [files fileExistsAtPath:cached]) {
+        job[@"dylib"] = cached;
+        return job;
     }
-    return NULL;
+    NSString *output = [DPLocalCacheFolder() stringByAppendingPathComponent:[NSString stringWithFormat:@"bin/%@-%@.dylib", item[@"id"], DPLocalHash(job)]];
+    if (!force && [files fileExistsAtPath:output]) job[@"dylib"] = output;
+    else job[@"output"] = output;
+    return job;
 }
 
-// dlopen refuses an unsigned dylib, so a prebuilt one is checked, signed and loaded from the cache.
 static NSString *DPLocalPrepareDylib(NSString *path, NSString *identifier, NSString **error) {
     NSFileHandle *handle = [NSFileHandle fileHandleForReadingAtPath:path];
     NSData *head = [handle readDataOfLength:32];
@@ -257,13 +250,13 @@ static NSString *DPLocalPrepareDylib(NSString *path, NSString *identifier, NSStr
         return DPLocalFail(error, [NSString stringWithFormat:@"It was built for another processor (cputype %u); Dia is arm64.", words[1]], nil);
     NSFileManager *files = NSFileManager.defaultManager;
     NSString *folder = [DPLocalCacheFolder() stringByAppendingPathComponent:@"dylibs"];
-    [files createDirectoryAtPath:folder withIntermediateDirectories:YES attributes:nil error:NULL];
     NSString *copy = [folder stringByAppendingPathComponent:[NSString stringWithFormat:@"%@-%@.dylib", identifier, DPLocalStamp(path)]];
     if ([files fileExistsAtPath:copy]) return copy;
     NSString *temporary = [copy stringByAppendingString:@".tmp"];
+    [files createDirectoryAtPath:folder withIntermediateDirectories:YES attributes:nil error:NULL];
     [files removeItemAtPath:temporary error:NULL];
     if (![files copyItemAtPath:path toPath:temporary error:NULL]) return DPLocalFail(error, @"Couldn’t copy it into the cache.", nil);
-    DPLocalRun(@[ @"/usr/bin/xattr", @"-dr", @"com.apple.quarantine", temporary ]);
+    removexattr(temporary.fileSystemRepresentation, "com.apple.quarantine", 0);
     if (!DPLocalRun(@[ @"/usr/bin/codesign", @"--force", @"--sign", @"-", temporary ]))
         return DPLocalFail(error, @"Couldn’t sign it, so macOS won’t load it.", temporary);
     if (rename(temporary.fileSystemRepresentation, copy.fileSystemRepresentation) != 0)
@@ -271,12 +264,66 @@ static NSString *DPLocalPrepareDylib(NSString *path, NSString *identifier, NSStr
     return copy;
 }
 
+static void DPLocalMake(NSMutableDictionary *job, NSString *pch) {
+    NSString *error = nil, *output = job[@"output"];
+    if (job[@"prebuilt"]) {
+        NSString *dylib = DPLocalPrepareDylib(job[@"prebuilt"], job[@"id"], &error);
+        [job addEntriesFromDictionary:dylib ? @{ @"dylib" : dylib } : @{ @"status" : @"incompatible", @"error" : error }];
+        return;
+    }
+    if (!output) return;
+    NSString *temporary = [output stringByAppendingString:@".tmp"];
+    [NSFileManager.defaultManager createDirectoryAtPath:output.stringByDeletingLastPathComponent withIntermediateDirectories:YES attributes:nil error:NULL];
+    [NSFileManager.defaultManager removeItemAtPath:temporary error:NULL];
+    // Rename over the old file: a running Dia may still have it mapped, and rename never disturbs that.
+    if (DPLocalCompile(job[@"sources"], job[@"includeDirs"], job[@"defines"], pch, temporary, &error)
+        && rename(temporary.fileSystemRepresentation, output.fileSystemRepresentation) == 0) {
+        job[@"dylib"] = output;
+        return;
+    }
+    [NSFileManager.defaultManager removeItemAtPath:temporary error:NULL];
+    [job addEntriesFromDictionary:@{ @"status" : @"failed", @"error" : error ?: @"Couldn’t put the built tweak in place." }];
+}
+
+static NSArray<NSMutableDictionary *> *DPLocalJobs(NSArray<NSDictionary *> *items, BOOL force) {
+    NSMutableArray<NSMutableDictionary *> *jobs = [NSMutableArray new], *compiles = [NSMutableArray new];
+    for (NSDictionary *item in items) {
+        NSMutableDictionary *job = DPLocalJob(item, force);
+        [jobs addObject:job];
+        if (job[@"output"]) [compiles addObject:job];
+    }
+    NSString *error = nil, *pch = nil;
+    if (compiles.count && DPLocalToolchain(&error) && DPLocalHeaders(&error)) pch = DPLocalEnsurePCH(compiles.count >= 2);
+    else
+        for (NSMutableDictionary *job in compiles) {
+            [job removeObjectForKey:@"output"];
+            [job addEntriesFromDictionary:@{ @"status" : @"failed", @"error" : error }];
+        }
+    void (^make)(size_t) = ^(size_t i) {
+        @autoreleasepool {
+            DPLocalMake(jobs[i], pch);
+        }
+    };
+    if (compiles.count >= 2) dispatch_apply(jobs.count, dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), make);
+    else for (size_t i = 0; i < jobs.count; i++) make(i);
+    return jobs;
+}
+
+static const struct mach_header_64 *DPLocalImageFor(NSString *path) {
+    char want[PATH_MAX];
+    if (!realpath(path.fileSystemRepresentation, want)) return NULL;
+    for (uint32_t i = _dyld_image_count(); i-- > 0;) {
+        const char *name = _dyld_get_image_name(i);
+        if (name && !strcmp(name, want)) return (const void *)_dyld_get_image_header(i);
+    }
+    return NULL;
+}
+
 static NSArray<NSValue *> *DPLocalOpen(NSString *dylib, NSString **error) {
     void *handle = dlopen(dylib.fileSystemRepresentation, RTLD_NOW | RTLD_LOCAL);
     if (!handle) return DPLocalFail(error, [NSString stringWithFormat:@"Couldn’t load it: %s", dlerror()], nil);
     const struct mach_header_64 *header = DPLocalImageFor(dylib);
     if (!header) return DPLocalFail(error, @"Couldn’t find the loaded tweak.", nil);
-    // No stamp means it was built against some other DPPatch layout, so reading its fields would be a guess.
     unsigned long abiSize = 0;
     const uint32_t *abi = (const uint32_t *)getsectiondata(header, "__DATA", "__dpabi", &abiSize);
     if (!abi || abiSize < 8 || abi[0] != DP_LOCAL_ABI || abi[1] != sizeof(DPPatch))
@@ -289,7 +336,7 @@ static NSArray<NSValue *> *DPLocalOpen(NSString *dylib, NSString **error) {
     return patches;
 }
 
-static NSSet<NSString *> *DPLocalOfficialKeySet(void) {
+NSSet<NSString *> *DPLocalOfficialKeySet(void) {
     if (DPLocalOfficialKeys) return DPLocalOfficialKeys;
     NSMutableSet<NSString *> *keys = [NSMutableSet new];
     unsigned long size = 0;
@@ -300,18 +347,18 @@ static NSSet<NSString *> *DPLocalOfficialKeySet(void) {
     return keys;
 }
 
-static NSDictionary *DPLocalRecord(NSString *identifier, NSString *kind, NSString *path, NSArray<NSString *> *sources,
-                                   NSArray<NSDictionary *> *patches, NSString *status, NSString *error, NSString *dylib) {
+static NSDictionary *DPLocalRecord(NSDictionary *job, NSArray<NSDictionary *> *patches, NSString *status, NSString *error, NSString *dylib) {
     NSMutableDictionary *record = [@{
-        @"id" : identifier,
-        @"kind" : kind,
-        @"path" : path,
+        @"id" : job[@"id"],
+        @"kind" : job[@"kind"],
+        @"path" : job[@"path"],
         @"status" : status,
         @"patches" : patches,
+        @"uuid" : DPDylibUUID(),
     } mutableCopy];
-    if (error) record[@"error"] = error;
-    if (dylib) record[@"dylib"] = dylib;
-    if (sources.count) record[@"files"] = DPLocalFileStamps(sources);
+    record[@"error"] = error;
+    record[@"dylib"] = dylib;
+    if ([job[@"tracked"] count]) record[@"files"] = job[@"stamps"];
     return record;
 }
 
@@ -319,6 +366,9 @@ static NSDictionary *DPLocalPatchRecord(DPPatch *patch) {
     return @{
         @"key" : patch->key,
         @"title" : patch->title,
+        @"symbol" : patch->symbol ?: @"",
+        @"tint" : patch->tint ?: @"systemOrangeColor",
+        @"section" : patch->section ?: (patch->requires ? NSNull.null : @"Local"),
         @"detail" : patch->detail ?: @"",
         @"defaultOn" : @(patch->defaultOn),
         @"requires" : patch->requires ?: NSNull.null,
@@ -328,31 +378,31 @@ static NSDictionary *DPLocalPatchRecord(DPPatch *patch) {
     };
 }
 
-static BOOL DPLocalHasKey(NSArray<NSValue *> *patches, NSString *key) {
-    for (NSValue *value in patches)
-        if ([((DPPatch *)value.pointerValue)->key isEqual:key]) return YES;
-    return NO;
+static BOOL DPLocalUnchanged(NSDictionary *saved, NSDictionary *job) {
+    NSUInteger count = [job[@"tracked"] count];
+    return [saved[@"uuid"] isEqual:DPDylibUUID()]
+           && (count ? DPLocalStampsMatch(saved[@"files"], job[@"stamps"], count) : [job[@"dylib"] isEqual:saved[@"dylib"]]);
 }
 
-static NSDictionary *DPLocalProcessItem(NSDictionary *item, BOOL splice) {
-    NSString *identifier = item[@"id"], *kind = item[@"kind"], *path = item[@"path"];
-    NSDictionary *prepared = DPLocalPrepare(item);
-    NSArray<NSString *> *sources = prepared[@"sources"] ?: @[];
-    NSDictionary *(^failed)(NSString *, NSString *, NSString *) = ^NSDictionary *(NSString *status, NSString *problem, NSString *dylib) {
-        return DPLocalRecord(identifier, kind, path, sources, @[], status, problem, dylib);
-    };
-    if (prepared[@"error"]) return failed(@"failed", prepared[@"error"], nil);
+static NSDictionary *DPLocalReuse(NSDictionary *saved, NSDictionary *job, NSMutableSet<NSString *> *taken, NSUInteger *total) {
+    if (!DPLocalUnchanged(saved, job) || saved[@"error"] || ![@[ @"loaded", @"ready" ] containsObject:saved[@"status"]]) return nil;
+    if (![saved[@"kind"] isEqual:job[@"kind"]] || ![saved[@"path"] isEqual:job[@"path"]] || ![saved[@"dylib"] isEqual:job[@"dylib"]]) return nil;
+    NSArray *patches = saved[@"patches"];
+    if (![patches isKindOfClass:NSArray.class] || !patches.count) return nil;
+    NSArray<NSString *> *keys = [patches valueForKey:@"key"];
+    if (*total + keys.count > 64 || [taken intersectsSet:[NSSet setWithArray:keys]]) return nil;
+    [taken addObjectsFromArray:keys];
+    *total += keys.count;
+    return saved;
+}
 
-    NSString *dylib = prepared[@"dylib"], *error = nil;
-    if (dylib) {
-        dylib = DPLocalPrepareDylib(dylib, identifier, &error);
-        if (!dylib) return failed(@"incompatible", error, nil);
-    } else {
-        dylib = DPLocalEnsureBuilt(identifier, sources, prepared[@"includeDirs"], prepared[@"defines"], &error);
-        if (!dylib) return failed(@"failed", error, nil);
-    }
+static NSDictionary *DPLocalAccept(NSDictionary *job, NSMutableSet<NSString *> *taken, NSUInteger *total, BOOL splice, BOOL force) {
+    NSString *dylib = job[@"dylib"], *error = nil;
+    if (!dylib) return DPLocalRecord(job, @[], job[@"status"] ?: @"failed", job[@"error"], nil);
+    NSDictionary *saved = DPLocalSavedItem(job[@"id"]), *reused = splice || force ? nil : DPLocalReuse(saved, job, taken, total);
+    if (reused) return reused;
     NSArray<NSValue *> *patches = DPLocalOpen(dylib, &error);
-    if (!patches) return failed(@"incompatible", error, dylib);
+    if (!patches) return DPLocalRecord(job, @[], @"incompatible", error, dylib);
 
     NSMutableArray<NSValue *> *accepted = [NSMutableArray new];
     NSMutableArray<NSDictionary *> *records = [NSMutableArray new];
@@ -363,30 +413,33 @@ static NSDictionary *DPLocalProcessItem(NSDictionary *item, BOOL splice) {
             [problems addObject:@"A tweak in it has no key or title."];
             continue;
         }
-        // `order` packs the table index into 8 bits, so the table can't grow past 255.
-        if (DPLocalTable.count + accepted.count >= 64) {
+        if (*total + accepted.count >= 64) {
             [problems addObject:@"DiaTweaks runs at most 64 local tweaks."];
             break;
         }
-        if ([DPLocalOfficialKeySet() containsObject:patch->key] || DPLocalHasKey(accepted, patch->key) || DPLocalHasKey(DPLocalTable, patch->key)) {
+        if ([taken containsObject:patch->key]) {
             [problems addObject:[NSString stringWithFormat:@"It uses the key “%@”, which DiaTweaks already has.", patch->key]];
             continue;
         }
-        if (!patch->section) patch->section = @"Local";
-        if (!patch->tint) patch->tint = @"systemOrangeColor";
-        // A tweak that names no order would sort ahead of every official one and put Local at the top of Settings.
-        if (patch->order <= 0) patch->order = 100000 + (int)(DPLocalTable.count + accepted.count);
+        if (splice) {
+            if (!patch->section && !patch->requires) patch->section = @"Local";
+            if (!patch->tint) patch->tint = @"systemOrangeColor";
+            if (patch->order <= 0) patch->order = 100000 + (int)(*total + accepted.count);
+        }
+        [taken addObject:patch->key];
         [accepted addObject:value];
         [records addObject:DPLocalPatchRecord(patch)];
     }
-    if (!accepted.count) return failed(@"failed", problems.firstObject ?: @"It has no tweaks in it.", dylib);
+    if (!accepted.count) return DPLocalRecord(job, @[], @"failed", problems.firstObject ?: @"It has no tweaks in it.", dylib);
 
-    NSString *problem = problems.count ? [problems componentsJoinedByString:@" "] : nil;
-    for (NSValue *value in accepted) {
-        DPNoteLocalPatch(value.pointerValue, identifier, nil);
-        if (splice) [DPLocalTable addObject:value];
-    }
-    return DPLocalRecord(identifier, kind, path, sources, records, splice ? @"loaded" : @"ready", problem, dylib);
+    *total += accepted.count;
+    if (splice)
+        for (NSValue *value in accepted) {
+            DPNoteLocalPatch(value.pointerValue, job[@"id"], nil);
+            [DPLocalTable addObject:value];
+        }
+    NSString *status = splice || ([saved[@"status"] isEqual:@"loaded"] && DPLocalUnchanged(saved, job)) ? @"loaded" : @"ready";
+    return DPLocalRecord(job, records, status, problems.count ? [problems componentsJoinedByString:@" "] : nil, dylib);
 }
 
 NSUInteger DPLocalLoad(void) {
@@ -397,11 +450,13 @@ NSUInteger DPLocalLoad(void) {
     if (!items.count) return 0;
     DPLocalTable = [NSMutableArray new];
     DPLocalSaved = DPLocalReadState();
+    NSMutableSet<NSString *> *taken = [DPLocalOfficialKeySet() mutableCopy];
+    NSUInteger total = 0;
     NSMutableArray<NSDictionary *> *state = [NSMutableArray new];
-    for (NSDictionary *item in items) [state addObject:DPLocalProcessItem(item, YES)];
+    for (NSDictionary *job in DPLocalJobs(items, NO)) [state addObject:DPLocalAccept(job, taken, &total, YES, NO)];
     DPLocalPack();
     DPLocalStateItems = state;
-    DPLocalWriteState(state);
+    DPLocalSaved = DPLocalUpdateState(state, DPLocalSaved);
     return DPLocalArrayCount;
 }
 
@@ -433,7 +488,7 @@ void DPLocalRepairLinks(void) {
         record[@"error"] = record[@"error"] ? [NSString stringWithFormat:@"%@ %@", record[@"error"], note] : note;
         DPLocalStateItems[i] = record;
     }
-    DPLocalWriteState(DPLocalStateItems);
+    DPLocalSaved = DPLocalUpdateState(DPLocalStateItems, DPLocalSaved);
 }
 
 NSArray<NSDictionary *> *DPLocalItems(void) {
@@ -441,15 +496,8 @@ NSArray<NSDictionary *> *DPLocalItems(void) {
     for (NSDictionary *item in DPLocalReadState()[@"items"])
         if (item[@"id"]) saved[item[@"id"]] = item;
     NSMutableArray<NSDictionary *> *items = [NSMutableArray new];
-    for (NSDictionary *item in DPLocalScan()) {
-        [items addObject:saved[item[@"id"]] ?: @{
-            @"id" : item[@"id"],
-            @"kind" : item[@"kind"],
-            @"path" : item[@"path"],
-            @"status" : @"ready",
-            @"patches" : @[],
-        }];
-    }
+    for (NSDictionary *item in DPLocalScan())
+        [items addObject:saved[item[@"id"]] ?: @{ @"id" : item[@"id"], @"kind" : item[@"kind"], @"path" : item[@"path"], @"status" : @"ready", @"patches" : @[] }];
     return items;
 }
 
@@ -467,26 +515,91 @@ static NSString *DPLocalDescribe(NSDictionary *record) {
     return text;
 }
 
-BOOL DPLocalBuildAll(NSArray<NSString *> *names, NSString **report) {
+static void DPLocalPruneIn(NSString *folder, BOOL (^stale)(NSString *path)) {
+    NSFileManager *files = NSFileManager.defaultManager;
+    for (NSString *name in [files contentsOfDirectoryAtPath:folder error:NULL]) {
+        NSString *path = [folder stringByAppendingPathComponent:name];
+        if (![name hasSuffix:@".tmp"] && stale(path)) [files removeItemAtPath:path error:NULL];
+    }
+}
+
+static void DPLocalPrune(NSArray<NSDictionary *> *items, NSArray<NSDictionary *> *state) {
+    NSString *cache = DPLocalCacheFolder();
+    NSMutableSet<NSString *> *keep = [NSMutableSet setWithObject:[cache stringByAppendingPathComponent:[@"headers" stringByAppendingPathComponent:DPDylibUUID()]]];
+    for (NSArray<NSDictionary *> *records in @[ DPLocalSaved[@"items"] ?: @[], state ])
+        for (NSDictionary *record in records)
+            if ([record[@"dylib"] isKindOfClass:NSString.class]) [keep addObject:record[@"dylib"]];
+    NSMutableArray<NSString *> *folders = [@[ @"headers", @"bin", @"dylibs", @"extracted" ] mutableCopy];
+    for (NSDictionary *item in items) {
+        if ([item[@"kind"] isEqual:@"source"] || [item[@"kind"] isEqual:@"dylib"]) continue;
+        NSString *extracted = DPLocalExtracted(item);
+        [keep addObjectsFromArray:@[ extracted, extracted.stringByDeletingLastPathComponent ]];
+        [folders addObject:[@"extracted" stringByAppendingPathComponent:item[@"id"]]];
+    }
+    for (NSString *folder in folders)
+        DPLocalPruneIn([cache stringByAppendingPathComponent:folder], ^BOOL(NSString *path) { return ![keep containsObject:path]; });
+    DPLocalPruneIn([cache stringByAppendingPathComponent:@"staging"], ^BOOL(NSString *path) {
+        return [[NSFileManager.defaultManager attributesOfItemAtPath:path error:NULL].fileModificationDate timeIntervalSinceNow] < -600;
+    });
+}
+
+BOOL DPLocalBuildAllForced(NSArray<NSString *> *names, BOOL force, NSString **report) {
+    NSString *unreadable = DPLocalUnreadable();
+    if (unreadable) {
+        if (report) *report = unreadable;
+        return NO;
+    }
     DPLocalSaved = DPLocalReadState();
+    NSArray<NSDictionary *> *items = DPLocalScan();
+    NSMutableSet<NSString *> *taken = [DPLocalOfficialKeySet() mutableCopy];
+    NSUInteger total = 0;
+    NSMutableArray<NSDictionary *> *targets = [NSMutableArray new];
+    for (NSDictionary *item in items) {
+        if (!names.count || [names containsObject:item[@"id"]]) {
+            [targets addObject:item];
+            continue;
+        }
+        NSArray<NSDictionary *> *patches = DPLocalSavedItem(item[@"id"])[@"patches"];
+        for (NSDictionary *patch in patches) if (patch[@"key"]) [taken addObject:patch[@"key"]];
+        total += patches.count;
+    }
+    NSEnumerator<NSMutableDictionary *> *jobs = DPLocalJobs(targets, force).objectEnumerator;
     NSMutableArray<NSDictionary *> *state = [NSMutableArray new];
     NSMutableArray<NSString *> *lines = [NSMutableArray new];
     BOOL ok = YES;
-    for (NSDictionary *item in DPLocalScan()) {
+    for (NSDictionary *item in items) {
         if (names.count && ![names containsObject:item[@"id"]]) {
             NSDictionary *saved = DPLocalSavedItem(item[@"id"]);
             if (saved) [state addObject:saved];
             continue;
         }
-        NSDictionary *record = DPLocalProcessItem(item, NO);
+        NSDictionary *record = DPLocalAccept(jobs.nextObject, taken, &total, NO, force);
         [state addObject:record];
-        if (![record[@"status"] isEqual:@"ready"]) ok = NO;
+        ok &= [record[@"status"] isEqual:@"loaded"] || [record[@"status"] isEqual:@"ready"];
         [lines addObject:DPLocalDescribe(record)];
     }
-    DPLocalWriteState(state);
+    if (!names.count) DPLocalPrune(items, state);
+    DPLocalSaved = DPLocalUpdateState(state, DPLocalSaved);
+    if (![DPLocalSaved[@"items"] isEqual:state])
+        [lines addObject:[NSString stringWithFormat:@"Couldn’t save the build results to %@; check that folder’s permissions and ownership.", DPLocalStatePath()]];
     if (report) *report = lines.count ? [lines componentsJoinedByString:@"\n"] : @"There are no local tweaks to build.";
     return ok;
 }
+
+BOOL DPLocalBuildAll(NSArray<NSString *> *names, NSString **report) { return DPLocalBuildAllForced(names, NO, report); }
+
+BOOL DPLocalBuildNames(NSArray<NSString *> *names, BOOL force, NSString **report) {
+    NSString *tool = [DPAppSupport(@"DiaPatches") stringByAppendingPathComponent:@"bin/diapatch"];
+    if (getenv("DIAPATCH_LOCAL_BUILD") || ![NSFileManager.defaultManager isExecutableFileAtPath:tool]) return DPLocalBuildAllForced(names, force, report);
+    NSMutableArray<NSString *> *command = [@[ tool, @"local", @"build" ] mutableCopy];
+    if (force) [command addObject:@"--force"];
+    [command addObjectsFromArray:names ?: @[]];
+    BOOL ok = DPLocalExec(command, report) == 0;
+    if (!(*report).length && !ok) *report = @"diapatch couldn’t build your local tweaks.";
+    return ok;
+}
+
+BOOL DPLocalBuild(BOOL force, NSString **report) { return DPLocalBuildNames(nil, force, report); }
 
 static BOOL DPLocalDoctor(void) {
     BOOL ok = YES;
@@ -501,10 +614,12 @@ static BOOL DPLocalDoctor(void) {
     NSString *headers = DPLocalHeaders(&error);
     printf("headers    %s\n", headers ? headers.UTF8String : error.UTF8String);
     if (!headers) ok = NO;
-    NSString *folder = DPLocalFolder();
-    BOOL writable = [[NSFileManager defaultManager] isWritableFileAtPath:folder] || ![[NSFileManager defaultManager] fileExistsAtPath:folder];
-    printf("local      %s (%s)\n", folder.UTF8String, writable ? "writable" : "not writable");
-    if (!writable) ok = NO;
+    else if (toolchain) DPLocalEnsurePCH(YES);
+    for (NSArray<NSString *> *row in @[ @[ @"support", DPAppSupport(@"DiaPatches") ], @[ @"local", DPLocalFolder() ] ]) {
+        BOOL writable = DPLocalWritable(row[1]);
+        printf("%-11s%s (%s)\n", row[0].UTF8String, row[1].UTF8String, writable ? "writable" : "not writable; check its permissions and ownership");
+        ok &= writable;
+    }
     NSString *report = nil;
     if (!DPLocalBuildAll(nil, &report)) ok = NO;
     printf("%s\n", report.UTF8String);
@@ -517,6 +632,68 @@ int DPLocalBuildCommand(int argc, const char *const *argv) {
     return DPLocalBuildMain(arguments) ? 0 : 1;
 }
 
+static NSDictionary *DPLocalMatchCatalog(NSArray<NSDictionary *> *catalog, NSString *query) {
+    for (NSDictionary *entry in catalog) {
+        NSMutableArray<NSString *> *names = [NSMutableArray arrayWithObject:entry[@"id"]];
+        for (NSDictionary *patch in entry[@"patches"]) [names addObjectsFromArray:@[ patch[@"key"], patch[@"title"] ]];
+        for (NSString *name in names)
+            if ([name caseInsensitiveCompare:query] == NSOrderedSame) return entry;
+    }
+    return nil;
+}
+
+static BOOL DPLocalPrintAvailable(void) {
+    NSString *error = nil;
+    NSArray<NSDictionary *> *catalog = DPLocalFetchCatalog(&error) ?: DPLocalCachedCatalog();
+    if (!catalog) {
+        fprintf(stderr, "%s\n", error.UTF8String);
+        return NO;
+    }
+    NSArray<NSDictionary *> *items = DPLocalItems(), *available = DPLocalAvailableCatalogForItems(catalog, items);
+    if (!available.count) {
+        printf("No optional tweaks are available yet.\n");
+        return YES;
+    }
+    for (NSDictionary *entry in available) {
+        NSDictionary *primary = DPLocalPrimaryPatch(entry);
+        printf("%s  %s%s\n    %s\n", [entry[@"id"] UTF8String], [primary[@"title"] UTF8String],
+               DPLocalIsCatalogItemInstalled(entry, items) ? "  (installed)" : "", [primary[@"detail"] UTF8String] ?: "");
+    }
+    return YES;
+}
+
+static BOOL DPLocalInstallNamed(NSArray<NSString *> *queries) {
+    if (!queries.count) {
+        fprintf(stderr, "usage: diapatch local install <name>...\n");
+        return NO;
+    }
+    NSString *error = nil;
+    NSArray<NSDictionary *> *catalog = DPLocalFetchCatalog(&error);
+    if (!catalog) {
+        fprintf(stderr, "%s\n", error.UTF8String);
+        return NO;
+    }
+    NSMutableArray<NSDictionary *> *entries = [NSMutableArray new];
+    for (NSString *query in queries) {
+        NSDictionary *entry = DPLocalMatchCatalog(catalog, query);
+        if (!entry) {
+            fprintf(stderr, "No optional tweak matching “%s”. Run 'diatweaks local available' to see the list.\n", query.UTF8String);
+            return NO;
+        }
+        if (DPLocalIsBuiltIn(entry)) {
+            fprintf(stderr, "%s is already built into this DiaTweaks.\n", [DPLocalPrimaryPatch(entry)[@"title"] UTF8String]);
+            return NO;
+        }
+        [entries addObject:entry];
+    }
+    if (!DPLocalInstallCatalogItems(entries, &error)) {
+        fprintf(stderr, "%s\n", error.UTF8String);
+        return NO;
+    }
+    for (NSDictionary *entry in entries) printf("Installed %s — relaunch Dia to load it.\n", [DPLocalPrimaryPatch(entry)[@"title"] UTF8String]);
+    return YES;
+}
+
 BOOL DPLocalBuildMain(NSArray<NSString *> *arguments) {
     NSMutableArray<NSString *> *rest = [arguments mutableCopy];
     while (rest.count && ![rest[0] isEqual:@"local"]) [rest removeObjectAtIndex:0];
@@ -524,12 +701,21 @@ BOOL DPLocalBuildMain(NSArray<NSString *> *arguments) {
     NSString *action = rest.count && ![rest[0] hasPrefix:@"-"] ? rest[0] : @"list";
     if (rest.count && ![rest[0] hasPrefix:@"-"]) [rest removeObjectAtIndex:0];
     if ([action isEqual:@"build"]) {
+        BOOL force = [rest containsObject:@"--force"];
+        [rest removeObject:@"--force"];
         NSString *report = nil;
-        BOOL ok = DPLocalBuildAll(rest, &report);
+        BOOL ok = DPLocalBuildAllForced(rest, force, &report);
         printf("%s\n", report.UTF8String);
         return ok;
     }
     if ([action isEqual:@"doctor"]) return DPLocalDoctor();
+    if ([action isEqual:@"available"] || [action isEqual:@"catalog"]) return DPLocalPrintAvailable();
+    if ([action isEqual:@"install"]) return DPLocalInstallNamed(rest);
+    NSString *unreadable = DPLocalUnreadable();
+    if (unreadable) {
+        fprintf(stderr, "%s\n", unreadable.UTF8String);
+        return NO;
+    }
     for (NSDictionary *item in DPLocalItems()) printf("%s\n", DPLocalDescribe(item).UTF8String);
     return YES;
 }
@@ -547,13 +733,9 @@ NSString *DPLocalAdd(NSString *path, NSString **error) {
     }
     DPLocalWriteReadme();
     NSString *name = path.lastPathComponent, *destination = [folder stringByAppendingPathComponent:name];
-    if ([files fileExistsAtPath:destination]) {
-        NSString *base = name.stringByDeletingPathExtension, *extension = name.pathExtension;
-        for (int i = 2; i < 1000; i++) {
-            NSString *candidate = extension.length ? [NSString stringWithFormat:@"%@ %d.%@", base, i, extension] : [NSString stringWithFormat:@"%@ %d", base, i];
-            destination = [folder stringByAppendingPathComponent:candidate];
-            if (![files fileExistsAtPath:destination]) break;
-        }
+    for (int i = 2; i < 1000 && [files fileExistsAtPath:destination]; i++) {
+        NSString *numbered = [NSString stringWithFormat:@"%@ %d", name.stringByDeletingPathExtension, i];
+        destination = [folder stringByAppendingPathComponent:name.pathExtension.length ? [numbered stringByAppendingPathExtension:name.pathExtension] : numbered];
     }
     if (![files copyItemAtPath:path toPath:destination error:NULL]) {
         *error = @"Couldn’t copy it into the local folder.";
@@ -580,9 +762,7 @@ static NSString *const DPLocalReadme =
     @"`diatweaks local` does the same from a terminal.\n";
 
 void DPLocalWriteReadme(void) {
-    NSString *folder = DPLocalFolder();
-    [NSFileManager.defaultManager createDirectoryAtPath:folder withIntermediateDirectories:YES attributes:nil error:NULL];
-    NSString *readme = [folder stringByAppendingPathComponent:@"README.md"];
-    if ([NSFileManager.defaultManager fileExistsAtPath:readme]) return;
-    [DPLocalReadme writeToFile:readme atomically:YES encoding:NSUTF8StringEncoding error:NULL];
+    NSString *readme = [DPLocalFolder() stringByAppendingPathComponent:@"README.md"];
+    [NSFileManager.defaultManager createDirectoryAtPath:DPLocalFolder() withIntermediateDirectories:YES attributes:nil error:NULL];
+    if (![NSFileManager.defaultManager fileExistsAtPath:readme]) [DPLocalReadme writeToFile:readme atomically:YES encoding:NSUTF8StringEncoding error:NULL];
 }

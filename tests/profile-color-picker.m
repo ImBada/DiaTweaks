@@ -959,6 +959,7 @@ static void TestWheelIsAngular(void) {
 
 int main(void) {
     @autoreleasepool {
+        unsetenv("DIATWEAKS_DOMAIN");
         Method orig = class_getInstanceMethod(NSUserDefaults.class, @selector(initWithSuiteName:));
         Method swiz = class_getInstanceMethod(NSUserDefaults.class, @selector(dp_testInitWithSuiteName:));
         method_exchangeImplementations(orig, swiz);

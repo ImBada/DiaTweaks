@@ -12,9 +12,9 @@
 #import <sys/wait.h>
 #import "LaunchServices.h"
 #import "PasswordsParts.h"
+#import "Disclaim.h"
 
 extern char **environ;
-int responsibility_spawnattrs_setdisclaim(posix_spawnattr_t *attrs, int disclaim);  // private: macOS asks about the copy, not Dia
 
 NSString *const DPCopyFolder = @"/Applications/.DiaTweaks";
 const char *const DPHandoffVariable = "DIAPATCH_PASSWORDS_HANDOFF";
@@ -129,35 +129,13 @@ static pid_t launchOriginal(NSString *app, NSString *folder, NSString *socket) {
     NSString *subprocess = [@"--browser-subprocess-path=" stringByAppendingString:NSBundle.mainBundle.executablePath];
     const char *argv[] = { dia.fileSystemRepresentation, profile.UTF8String, subprocess.UTF8String, "--headless=new", "--no-first-run",
                            "--no-default-browser-check", "--use-mock-keychain", "--mute-audio", NULL };
-    NSString *fixedHome = [@"CFFIXED_USER_HOME=" stringByAppendingString:folder];
-    NSString *handoff = [NSString stringWithFormat:@"%s=%@", DPHandoffVariable, socket];
-    size_t envCount = 0;
-    while (environ[envCount]) envCount++;
-    const char **envp = calloc(envCount + 3, sizeof *envp);
-    if (!envp) return 0;
-    size_t out = 0;
-    envp[out++] = fixedHome.UTF8String;
-    const char *handoffEntry = handoff.UTF8String;
-    envp[out++] = handoffEntry;
-    size_t handoffPrefixLen = strlen(DPHandoffVariable) + 1;
-    for (size_t i = 0; i < envCount; i++) {
-        if (!strncmp(environ[i], "CFFIXED_USER_HOME=", 18) || !strncmp(environ[i], handoffEntry, handoffPrefixLen)) continue;
-        envp[out++] = environ[i];
-    }
-
+    NSArray<NSString *> *overrides = @[ [@"CFFIXED_USER_HOME=" stringByAppendingString:folder], [NSString stringWithFormat:@"%s=%@", DPHandoffVariable, socket] ];
     posix_spawn_file_actions_t files;
     posix_spawn_file_actions_init(&files);
     for (int fd = 0; fd < 3; fd++) posix_spawn_file_actions_addopen(&files, fd, "/dev/null", fd ? O_WRONLY : O_RDONLY, 0);
-    posix_spawnattr_t attrs;
-    posix_spawnattr_init(&attrs);
-    posix_spawnattr_setflags(&attrs, POSIX_SPAWN_CLOEXEC_DEFAULT);
-    responsibility_spawnattrs_setdisclaim(&attrs, 1);
-    pid_t pid = 0;
-    int status = posix_spawn(&pid, argv[0], &files, &attrs, (char *const *)argv, (char *const *)envp);
+    pid_t pid = DPSpawnDisclaimed(argv, overrides, &files);
     posix_spawn_file_actions_destroy(&files);
-    posix_spawnattr_destroy(&attrs);
-    free(envp);
-    return status == 0 ? pid : 0;
+    return pid;
 }
 
 static int acceptSubprocess(int listener, pid_t *dia, pid_t *peer) {
@@ -346,7 +324,6 @@ static NSString *applicationsCopyIn(NSString *copyFolder, NSString *pristine) {
     int lock = lockFolder(copyFolder);
     if (lock < 0) return nil;
 
-    // Sweep staging bundles left by killed copies.
     for (NSString *entry in [files contentsOfDirectoryAtPath:copyFolder error:nil])
         if ([entry hasPrefix:@"Dia.app."]) [files removeItemAtPath:[copyFolder stringByAppendingPathComponent:entry] error:nil];
 

@@ -92,6 +92,21 @@ static BOOL DPPeekCanReveal(DPPeekBarZone *zone) { return DPHideToolbar.on && DP
     if (_patches) [NSNotificationCenter.defaultCenter removeObserver:_patches];
 }
 
+// With Hide Toolbar off the bar is always pinned, so there is nothing to poll until a setting changes.
+- (void)watchIfNeeded {
+    BOOL wanted = self.window && DPHideToolbar.on;
+    if (wanted == (self.watch != nil)) return;
+    [self.watch invalidate];
+    self.watch = nil;
+    if (!wanted) return;
+    __weak DPPeekBarZone *weak = self;
+    self.watch = [NSTimer scheduledTimerWithTimeInterval:0.1 repeats:YES block:^(NSTimer *timer) {
+        DPPeekBarZone *zone = weak;
+        if (!zone) return [timer invalidate];
+        [zone check];
+    }];
+}
+
 - (void)viewDidMoveToWindow {
     [super viewDidMoveToWindow];
     [self.watch invalidate];
@@ -102,14 +117,13 @@ static BOOL DPPeekCanReveal(DPPeekBarZone *zone) { return DPHideToolbar.on && DP
     self.patches = nil;
     if (!self.window) return;
     __weak DPPeekBarZone *weak = self;
-    self.watch = [NSTimer scheduledTimerWithTimeInterval:0.1 repeats:YES block:^(NSTimer *timer) {
-        DPPeekBarZone *zone = weak;
-        if (!zone) return [timer invalidate];
-        [zone check];
-    }];
+    [self watchIfNeeded];
     self.patches = [NSNotificationCenter.defaultCenter addObserverForName:DPPatchesDidChangeNotification object:nil
                                                                     queue:NSOperationQueue.mainQueue
-                                                               usingBlock:^(NSNotification *note) { [weak check]; }];
+                                                               usingBlock:^(NSNotification *note) {
+        [weak check];
+        [weak watchIfNeeded];
+    }];
 }
 @end
 

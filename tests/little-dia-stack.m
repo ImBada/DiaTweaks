@@ -1,7 +1,9 @@
 #import "Patches/LittleDia/Stack.m"
 
-DPPatch DPLittleDia;
+DPPatch DPLittleDia, DPLittleDiaFollowRules;
+static BOOL gReady = YES;
 BOOL DPIsLittleDiaWindow(NSWindow *window) { return NO; }
+BOOL DPLittleDiaReady(void) { return gReady; }
 
 static int failures;
 
@@ -62,6 +64,53 @@ static void closes(NSString *before) {
     for (NSWindow *window in windows.allValues) [window orderOut:nil];
 }
 
+#define EXPECT(condition, what) do { if (!(condition)) printf("FAIL %s\n", what), failures++; } while (0)
+
+static void unhide(void) { [NSNotificationCenter.defaultCenter postNotificationName:NSApplicationWillUnhideNotification object:NSApp]; }
+
+static void pump(NSTimeInterval seconds) {
+    NSDate *until = [NSDate dateWithTimeIntervalSinceNow:seconds];
+    while (until.timeIntervalSinceNow > 0) [NSRunLoop.mainRunLoop runMode:NSDefaultRunLoopMode beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
+}
+
+static void veils(void) {
+    DPInstallLittleDiaStack();
+    NSWindow *window = invisibleWindow();
+    window.releasedWhenClosed = NO;
+    window.alphaValue = 0.6;
+    [window orderFront:nil];
+
+    unhide();
+    EXPECT(window.alphaValue == 0.6, "off: an unhide leaves Dia's windows alone");
+    DPLittleDia.on = YES;
+    DPLittleDiaFollowRules.on = YES;
+    unhide();
+    EXPECT(window.alphaValue == 0.6, "Follow Link Rules: links open as tabs, so nothing is veiled");
+    DPLittleDiaFollowRules.on = NO;
+    gReady = NO;
+    unhide();
+    EXPECT(window.alphaValue == 0.6, "no ready extension: nothing is veiled");
+    gReady = YES;
+
+    unhide();
+    EXPECT(window.alphaValue == 0, "an unhide veils Dia's windows until the link arrives");
+    unhide();
+    pump(0.4);
+    EXPECT(fabs(window.alphaValue - 0.6) < 0.001, "with no link, the veil lifts on its own and keeps the window's alpha");
+
+    unhide();
+    DPRestoreLittleDiaStack();
+    EXPECT(fabs(window.alphaValue - 0.6) < 0.001, "turning Little Dia off lifts the veil at once");
+
+    unhide();
+    DPLinkArrived();
+    EXPECT(!window.visible && fabs(window.alphaValue - 0.6) < 0.001, "a link puts the veiled window away and lifts the veil");
+    EXPECT([DPPutAwayWindows() containsObject:window], "the put-away window is remembered");
+    [window close];
+    EXPECT(![DPPutAwayWindows() containsObject:window], "a put-away window that closes is let go, never brought back");
+    DPLittleDia.on = NO;
+}
+
 int main(void) {
     @autoreleasepool {
         [NSApplication sharedApplication];
@@ -76,6 +125,7 @@ int main(void) {
         closes(@"D0 A1 D1");
         closes(@"D0 A1 A2 D1 D2");
         closes(@"D0 A1 A2 D1 A3 D2");
+        veils();
         printf(failures ? "%d stack scenarios failed\n" : "all stack scenarios pass\n", failures);
         return failures != 0;
     }

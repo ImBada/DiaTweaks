@@ -4,6 +4,7 @@ extern DPPatch DPDragWindowFromPage;
 static const CGFloat DPDragBand = 56, DPDragSlop = 3, DPDragScroller = 16;
 static const NSEventModifierFlags DPDragKeys = NSEventModifierFlagCommand | NSEventModifierFlagOption | NSEventModifierFlagControl | NSEventModifierFlagShift;
 static NSEvent *DPPressed;
+static id DPMouseMonitor;
 
 static NSView *DPPageTopUnder(NSEvent *event) {
     NSWindow *window = event.window;
@@ -52,12 +53,11 @@ static NSEvent *DPDragMouse(NSEvent *event) {
 
 static void DPApplyDragWindowFromPage(DPPatch *patch) {
     if (!patch->on) DPPressed = nil;
+    DPSyncMonitor(&DPMouseMonitor, patch->on, NSEventMaskLeftMouseDown | NSEventMaskLeftMouseDragged | NSEventMaskLeftMouseUp,
+                  ^NSEvent *(NSEvent *event) { return DPDragMouse(event); });
 }
 
-static void DPInstallDragWindowFromPage(void) {
-    [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskLeftMouseDown | NSEventMaskLeftMouseDragged | NSEventMaskLeftMouseUp
-                                          handler:^NSEvent *(NSEvent *event) { return DPDragMouse(event); }];
-}
+static void DPInstallDragWindowFromPage(void) { DPApplyDragWindowFromPage(&DPDragWindowFromPage); }
 
 DP_PATCH(DPDragWindowFromPage) {
     .key = @"dragWindowFromPage",

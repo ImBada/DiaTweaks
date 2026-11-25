@@ -8,8 +8,10 @@ static BOOL DPPeekIsChatControl(NSView *view) {
     return DPIsChatButton(view) || DPIsKind(view, DPDiaPinnedExtension);
 }
 
-static NSView *DPPeekVisibleToolbar(NSView *pane) {
-    NSView *bar = DPSubview(pane, DPDiaToolbar) ?: DPFindView(pane, ^BOOL(NSView *view) { return DPIsKind(view, DPDiaToolbar); });
+static NSView *DPPeekVisibleToolbar(DPPeekCard *peek) {
+    NSView *pane = peek.pane, *bar = peek.paneToolbar;
+    if (!bar || ![bar isDescendantOf:pane])
+        peek.paneToolbar = bar = DPSubview(pane, DPDiaToolbar) ?: DPFindView(pane, ^BOOL(NSView *view) { return DPIsKind(view, DPDiaToolbar); });
     return bar && !bar.isHiddenOrHasHiddenAncestor && bar.alphaValue > 0.05 ? bar : nil;
 }
 
@@ -21,11 +23,29 @@ NSView *DPPeekChatHolder(NSWindow *window, NSView *pane) {
     return nil;
 }
 
-static id DPPeekObserveFrame(DPPeekCard *peek, NSView *view) {
+@interface DPPeekFrameWatch : NSObject
+@property (nonatomic, strong) id token;
+@property (nonatomic, weak) NSView *view;
+@end
+@implementation DPPeekFrameWatch
+@end
+
+// Views whose frame notifications we turned on, with how many watches still need them.
+static NSMapTable<NSView *, NSNumber *> *DPPeekPosting;
+
+static DPPeekFrameWatch *DPPeekObserveFrame(DPPeekCard *peek, NSView *view) {
     __weak DPPeekCard *weak = peek;
-    view.postsFrameChangedNotifications = YES;
-    return [NSNotificationCenter.defaultCenter addObserverForName:NSViewFrameDidChangeNotification object:view queue:nil
-                                                       usingBlock:^(NSNotification *note) { [weak followPane]; }];
+    if (!DPPeekPosting) DPPeekPosting = [NSMapTable weakToStrongObjectsMapTable];
+    NSInteger watches = [[DPPeekPosting objectForKey:view] integerValue];
+    if (watches || !view.postsFrameChangedNotifications) {
+        [DPPeekPosting setObject:@(watches + 1) forKey:view];
+        view.postsFrameChangedNotifications = YES;
+    }
+    DPPeekFrameWatch *watch = [DPPeekFrameWatch new];
+    watch.view = view;
+    watch.token = [NSNotificationCenter.defaultCenter addObserverForName:NSViewFrameDidChangeNotification object:view queue:nil
+                                                              usingBlock:^(NSNotification *note) { [weak followPane]; }];
+    return watch;
 }
 
 NSArray *DPPeekWatchPaneAncestors(DPPeekCard *peek, NSView *pane, NSView *holder) {
@@ -40,14 +60,21 @@ NSArray *DPPeekWatchPaneAncestors(DPPeekCard *peek, NSView *pane, NSView *holder
 }
 
 void DPPeekUnwatchPane(id observer) {
-    if ([observer isKindOfClass:NSArray.class])
-        for (id token in (NSArray *)observer) [NSNotificationCenter.defaultCenter removeObserver:token];
-    else if (observer) [NSNotificationCenter.defaultCenter removeObserver:observer];
+    if (![observer isKindOfClass:NSArray.class]) return;
+    for (DPPeekFrameWatch *watch in (NSArray *)observer) {
+        [NSNotificationCenter.defaultCenter removeObserver:watch.token];
+        NSView *view = watch.view;
+        NSInteger watches = view ? [[DPPeekPosting objectForKey:view] integerValue] : 0;
+        if (watches > 1) [DPPeekPosting setObject:@(watches - 1) forKey:view];
+        if (watches != 1) continue;
+        [DPPeekPosting removeObjectForKey:view];
+        view.postsFrameChangedNotifications = NO;
+    }
 }
 
 BOOL DPPeekAllowsPaneClick(DPPeekCard *peek, NSPoint pointInSuperview) {
     if (!DPPeek.on || !peek || peek.closing || !peek.pane || !peek.superview) return NO;
-    NSView *bar = DPPeekVisibleToolbar(peek.pane);
+    NSView *bar = DPPeekVisibleToolbar(peek);
     if (!bar || !bar.superview) return NO;
     NSPoint inBarSuper = [bar.superview convertPoint:pointInSuperview fromView:peek.superview];
     for (NSView *view = [bar hitTest:inBarSuper]; view && view != peek.pane; view = view.superview)
@@ -57,7 +84,7 @@ BOOL DPPeekAllowsPaneClick(DPPeekCard *peek, NSPoint pointInSuperview) {
 
 NSRect DPPeekControlsFrame(DPPeekCard *peek, NSRect controlsFrame) {
     if (!DPPeek.on || !peek || !peek.pane) return controlsFrame;
-    NSView *bar = DPPeekVisibleToolbar(peek.pane);
+    NSView *bar = DPPeekVisibleToolbar(peek);
     if (!bar) return controlsFrame;
     NSView *chat = DPFindView(bar, ^BOOL(NSView *view) {
         return !view.isHiddenOrHasHiddenAncestor && view.alphaValue > 0.05 && DPPeekIsChatControl(view) &&
@@ -114,7 +141,7 @@ static NSMenuItem *DPPeekMenuItem(NSMenu *menu, NSEvent *event, BOOL inExtension
 }
 
 static BOOL DPPeekPressChatButton(DPPeekCard *peek) {
-    NSView *bar = DPPeekVisibleToolbar(peek.pane);
+    NSView *bar = DPPeekVisibleToolbar(peek);
     NSView *button = bar ? DPFindView(bar, ^BOOL(NSView *view) {
         return !view.isHiddenOrHasHiddenAncestor && view.alphaValue > 0.05 && DPIsChatButton(view);
     }) : nil;

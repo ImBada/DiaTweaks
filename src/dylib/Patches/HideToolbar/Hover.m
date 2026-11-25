@@ -15,7 +15,7 @@ static NSTimer *DPEase(CGFloat from, CGFloat to, void (^step)(CGFloat value, BOO
 }
 
 @implementation DPToolbarHover {
-    __unsafe_unretained id _lastResponder;
+    __weak id _lastResponder;
     __weak NSWindow *_observedWindow;
 }
 
@@ -99,11 +99,10 @@ static NSTimer *DPEase(CGFloat from, CGFloat to, void (^step)(CGFloat value, BOO
     if (!window.isKeyWindow || !NSApp.isActive || self.pane.hiddenOrHasHiddenAncestor) return NO;
     NSPoint mouse = NSEvent.mouseLocation;
     NSRect pane = [window convertRectToScreen:[self.pane convertRect:self.pane.bounds toView:nil]];
-    if (mouse.x < NSMinX(pane) || mouse.x > NSMaxX(pane)) return NO;
+    CGFloat top = NSMaxY(window.frame), atTop = top - 12, aboveCurrent = NSMaxY(pane) - 1;
+    if (mouse.x < NSMinX(pane) || mouse.x > NSMaxX(pane) || mouse.y > top + 24 || mouse.y < MIN(atTop, aboveCurrent)) return NO;
     // With tabs at the top the tab bar sits above the page, so only the window's top edge counts as overshoot.
-    CGFloat lower = DPTabsAtTop(window) && !self.inPlace ? NSMaxY(window.frame) - 12 : NSMaxY(pane) - 1;
-    if (mouse.y < lower) return NO;
-    return mouse.y <= NSMaxY(window.frame) + 24;
+    return mouse.y >= (DPTabsAtTop(window) && !self.inPlace ? atTop : aboveCurrent);
 }
 
 - (BOOL)toolbarHasFocus {

@@ -26,6 +26,17 @@ Add one with **Add Tweak…** in Settings, by dropping the file into the folder 
 diatweaks local add ~/Downloads/MyTweak.m
 ```
 
+## Optional tweaks
+
+**Settings → Patches → Local Tweaks → Available** lists tweaks DiaTweaks keeps in [`tweaks/`](../tweaks/) instead of building them in. **Install** downloads one into your local folder, builds it and switches it on for the next launch. A tweak you had on before it moved out of the built-in list comes first, marked *Previously on*.
+
+```sh
+diatweaks local available
+diatweaks local install mouseBackForward
+```
+
+`install` takes a tweak's name, key or title, and needs the network once; after that it's an ordinary local tweak. Nothing is listed when there are no optional tweaks yet, and a tweak your DiaTweaks already has built in is never offered.
+
 ## Writing one
 
 A local tweak is the same file a pull request would contain:
@@ -65,7 +76,7 @@ A pull request that **changes an existing tweak** can't run this way, because th
 
 ## When something goes wrong
 
-A broken local tweak never stops Dia from opening. Its row in Settings says what went wrong, in the same place a normal tweak's note appears:
+A broken local tweak never stops Dia from opening. Its row under **Installed** in Settings says what went wrong, in red under its name:
 
 - A compile error shows the compiler's message, with the file and line.
 - A `.dylib` with a missing symbol, the wrong architecture, or an old ABI is skipped with the reason.
@@ -79,6 +90,8 @@ If Dia crashes at launch while local tweaks are loaded, the next launch turns **
 | Command | Does |
 |---|---|
 | `diatweaks local` | Lists the local tweaks and whether each built |
+| `diatweaks local available` | Lists the optional tweaks you can download |
+| `diatweaks local install <name…>` | Downloads, builds and switches on an optional tweak |
 | `diatweaks local add <path>` | Copies a `.m`, folder, `.patch`, `.zip` or `.dylib` into the folder and builds it |
 | `diatweaks local build [name…]` | Compiles the local tweaks now |
 | `diatweaks local remove <name>` | Moves a local tweak to the Trash |

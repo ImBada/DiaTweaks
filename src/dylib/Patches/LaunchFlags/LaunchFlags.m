@@ -6,29 +6,30 @@ static NSString *const DPArgsKey = @"launchFlagsArgs";
 static NSString *const DPAppliedKey = @"launchFlagsApplied";
 static NSArray<NSString *> *gLaunchedFlags;
 
-static NSUserDefaults *DPSettings(void) {
-    static NSUserDefaults *settings;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{ settings = [[NSUserDefaults alloc] initWithSuiteName:@"com.diapatches"]; });
-    return settings;
-}
-
 NSString *DPLaunchFlagsSavedText(void) {
-    id raw = [DPSettings() objectForKey:DPArgsKey];
+    id raw = [DPSettingsDefaults() objectForKey:DPArgsKey];
     if ([raw isKindOfClass:NSString.class]) return raw;
     if ([raw isKindOfClass:NSArray.class]) return DPFormatLaunchFlagsArray(raw);
     return @"";
 }
 
 void DPLaunchFlagsSaveText(NSString *text) {
-    if (text.length) [DPSettings() setObject:text forKey:DPArgsKey];
-    else [DPSettings() removeObjectForKey:DPArgsKey];
+    if (text.length) [DPSettingsDefaults() setObject:text forKey:DPArgsKey];
+    else [DPSettingsDefaults() removeObjectForKey:DPArgsKey];
 }
 
 NSArray<NSString *> *DPLaunchFlagsLaunched(void) { return gLaunchedFlags ?: @[]; }
 
+static NSString *DPLaunchFlagsProblem(NSString *text) {
+    NSArray<NSString *> *ignored = nil;
+    BOOL unclosed = NO;
+    DPParseLaunchFlags(text, &ignored, &unclosed);
+    if (unclosed) return @"has a quote that never closes";
+    return ignored.count ? [NSString stringWithFormat:@"has “%@”, which isn’t a flag starting with --", ignored.firstObject] : nil;
+}
+
 static NSArray<NSString *> *DPPreviouslyApplied(void) {
-    NSArray *saved = [DPSettings() arrayForKey:DPAppliedKey];
+    NSArray *saved = [DPSettingsDefaults() arrayForKey:DPAppliedKey];
     if (!saved.count) return @[];
     NSMutableArray<NSString *> *flags = [NSMutableArray arrayWithCapacity:saved.count];
     for (id item in saved)
@@ -40,7 +41,7 @@ void DPDropStaleLaunchFlags(void) {
     NSArray<NSString *> *previous = DPPreviouslyApplied();
     if (!previous.count) return;
     for (NSString *flag in previous) DPDropLaunchFlag(flag);
-    [DPSettings() removeObjectForKey:DPAppliedKey];
+    [DPSettingsDefaults() removeObjectForKey:DPAppliedKey];
 }
 
 static void DPInstallLaunchFlags(void) {
@@ -54,8 +55,8 @@ static void DPInstallLaunchFlags(void) {
     for (NSString *flag in previous) DPDropLaunchFlag(flag);
     for (NSString *flag in flags) DPAddLaunchFlag(flag);
     gLaunchedFlags = flags;
-    if (flags.count) [DPSettings() setObject:flags forKey:DPAppliedKey];
-    else if (previous.count) [DPSettings() removeObjectForKey:DPAppliedKey];
+    if (flags.count) [DPSettingsDefaults() setObject:flags forKey:DPAppliedKey];
+    else if (previous.count) [DPSettingsDefaults() removeObjectForKey:DPAppliedKey];
 }
 
 static void DPApplyLaunchFlags(DPPatch *patch) {
@@ -79,6 +80,7 @@ DP_PATCH(DPLaunchFlags) {
     .section = @"App",
     .classes = DPClasses(DPDiaAppConfiguration),
     .relaunch = YES,
+    .settings = DPSettingList({DPSettingString, @"launchFlagsArgs", .problem = DPLaunchFlagsProblem}),
     .rows = DPLaunchFlagsRows,
     .install = DPInstallLaunchFlags,
     .apply = DPApplyLaunchFlags,

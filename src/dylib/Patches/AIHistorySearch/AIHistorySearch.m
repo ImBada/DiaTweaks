@@ -124,7 +124,6 @@ static BOOL DPWrite(uint32_t *site, uint32_t expected, uint32_t value) {
     return NO;
 }
 
-// Turn Off AI covers this tweak, so it has to reach the same instructions while its own switch is off.
 static BOOL DPWanted(void) {
     return DPExcludeSitesFromAIHistory.on || DPTurnOffAI.on;
 }

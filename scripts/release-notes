@@ -10,13 +10,13 @@ if [ "$(git cat-file -t "$tag")" = tag ]; then
     printf '## 📣 Announcement\n\n%s\n\n' "$(git cat-file tag "$tag" | sed '1,/^$/d; /^-----BEGIN/,$d')"
 fi
 
-keys() { [ -z "$1" ] || git grep -h -o '\.key = @"[^"]*"' "$1" -- src/dylib/Patches src/dylib/Local | sed 's/.*@"//; s/"$//'; }
+keys() { [ -z "$1" ] || git grep -h -o '\.key = @"[^"]*"' "$1" -- src/dylib/Patches src/dylib/Local tweaks | sed 's/.*@"//; s/"$//'; }
 old=$(keys "$previous")
 
 tweaks='' skip=''
 for key in $(keys "$tag"); do
     printf '%s\n' "$old" | grep -qx "$key" && continue
-    file=$(git grep -l "\.key = @\"$key\"" "$tag" -- src/dylib/Patches src/dylib/Local | head -1)
+    file=$(git grep -l "\.key = @\"$key\"" "$tag" -- src/dylib/Patches src/dylib/Local tweaks | head -1)
     meta=$(git show "$file" | python3 -c '
 import re, sys
 key, src = sys.argv[1], sys.stdin.read()

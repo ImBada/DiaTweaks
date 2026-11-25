@@ -10,11 +10,17 @@ NSString *DPPeekLinkKey(NSString *address) {
         delims = [NSCharacterSet characterSetWithCharactersInString:@"/?#"];
         barePercent = [NSRegularExpression regularExpressionWithPattern:@"%(?![0-9A-Fa-f]{2})" options:0 error:nil];
     });
-    if ([address hasPrefix:@"https://"]) address = [address substringFromIndex:8];
-    if ([address hasPrefix:@"http://"]) address = [address substringFromIndex:7];
+    for (NSString *scheme in @[ @"https://", @"http://" ])
+        if ([address rangeOfString:scheme options:NSAnchoredSearch | NSCaseInsensitiveSearch].length) {
+            address = [address substringFromIndex:scheme.length];
+            break;
+        }
     NSUInteger end = [address rangeOfCharacterFromSet:delims].location;
     if (end == NSNotFound) end = address.length;
     NSString *host = [address substringToIndex:end], *rest = [address substringFromIndex:end];
+    NSUInteger name = NSMaxRange([host rangeOfString:@"@" options:NSBackwardsSearch]);
+    if (name == NSNotFound) name = 0;
+    host = [[host substringToIndex:name] stringByAppendingString:[host substringFromIndex:name].lowercaseString];
     if (![host canBeConvertedToEncoding:NSASCIIStringEncoding])
         host = [[NSURL URLWithString:[@"http://" stringByAppendingString:host]].absoluteString substringFromIndex:7] ?: host;
     if ([rest containsString:@"%"])

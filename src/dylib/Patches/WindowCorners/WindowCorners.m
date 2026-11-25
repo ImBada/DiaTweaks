@@ -8,25 +8,24 @@ static char DPRadiusKey, DPPathKey, DPMaskPathKey, DPShadowPathKey, DPBarTouched
 static const char *const DPCornerBars[] = {DPDiaTabStrip, DPDiaSidebarHeader, DPDiaSidebarFooter};
 #define DPCornerBarCount (sizeof DPCornerBars / sizeof *DPCornerBars)
 
-static CGFloat DPCornerRadius(NSWindow *window) { return ((CGFloat (*)(id, SEL))objc_msgSend)(window, @selector(_cornerRadius)); }
-static CGFloat DPDiaRadius(id object, CGFloat current) { return [DPDiaValue(object, &DPRadiusKey, @(current)) doubleValue]; }
-
-static NSUserDefaults *DPSettings(void) {
-    static NSUserDefaults *settings;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{ settings = [[NSUserDefaults alloc] initWithSuiteName:@"com.diapatches"]; });
-    return settings;
+static BOOL DPCanRound(NSWindow *window) {
+    return [window respondsToSelector:@selector(_cornerRadius)] && [window respondsToSelector:@selector(_setCornerRadius:)];
 }
 
+static CGFloat DPCornerRadius(NSWindow *window) {
+    return DPCanRound(window) ? ((CGFloat (*)(id, SEL))objc_msgSend)(window, @selector(_cornerRadius)) : 0;
+}
+static CGFloat DPDiaRadius(id object, CGFloat current) { return [DPDiaValue(object, &DPRadiusKey, @(current)) doubleValue]; }
+
 static CGFloat DPRadius(void) {
-    id saved = [DPSettings() objectForKey:DPRadiusSetting];
+    id saved = [DPSettingsDefaults() objectForKey:DPRadiusSetting];
     return saved ? MIN(MAX([saved doubleValue], 0), DPMaxRadius) : DPMaxRadius;
 }
 
 static BOOL DPInFullScreen(NSWindow *window) { return (window.styleMask & NSWindowStyleMaskFullScreen) != 0; }
 
 CGFloat DPWindowCornerGrowth(NSWindow *window) {
-    if (!DPWindowCorners.on || !DPIsKind(window, DPDiaWindow) || DPInFullScreen(window)) return 0;
+    if (!DPWindowCorners.on || !DPIsKind(window, DPDiaWindow) || DPInFullScreen(window) || !DPCanRound(window)) return 0;
     return DPRadius() - DPDiaRadius(window, DPCornerRadius(window));
 }
 
@@ -34,6 +33,7 @@ CGFloat DPWindowCornerGrowth(NSWindow *window) {
 static CGFloat DPWindowTarget(NSWindow *window, CGFloat dia) { return DPWindowCorners.on && !DPInFullScreen(window) ? MAX(1, DPRadius()) : dia; }
 
 static void DPRoundWindow(NSWindow *window) {
+    if (!DPCanRound(window)) return;
     CGFloat current = DPCornerRadius(window), dia = DPDiaRadius(window, current);
     CGFloat target = DPWindowTarget(window, dia);
     if (DPWindowCorners.on && !DPInFullScreen(window)) DPOverride(window, &DPRadiusKey, @(dia), @(target));
@@ -213,7 +213,18 @@ static void DPWindow_becomeKey(NSWindow *self, SEL _cmd) {
     if (DPWindowCorners.on || DPGet(self, &DPRadiusKey)) DPRoundWindow(self);
 }
 
+// Every layer in Dia pays for these hooks, so they wait until the tweak is first on.
+static void DPHookLayers(void) {
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        DPHookClass(CALayer.class, @selector(addAnimation:forKey:), (IMP)DPLayer_addAnimation);
+        DPHookClass(CALayer.class, @selector(setShadowPath:), (IMP)DPLayer_setShadowPath);
+        DPHookClass(CAShapeLayer.class, @selector(setPath:), (IMP)DPShapeLayer_setPath);
+    });
+}
+
 static void DPApplyWindowCorners(DPPatch *patch) {
+    if (patch->on) DPHookLayers();
     Class floatingCls = objc_getClass(DPDiaFloatingSidebar), bgCls = objc_getClass(DPDiaWindowBackground);
     for (NSWindow *window in NSApp.windows) {
         if (DPIsKind(window, DPDiaWindow)) DPRoundWindow(window);
@@ -236,7 +247,7 @@ static void DPApplyWindowCorners(DPPatch *patch) {
 
 static NSString *DPVerifyWindowCorners(DPPatch *patch) {
     for (NSWindow *window in NSApp.windows) {
-        if (!DPIsKind(window, DPDiaWindow) || !window.isVisible) continue;
+        if (!DPIsKind(window, DPDiaWindow) || !window.isVisible || !DPCanRound(window)) continue;
         CGFloat radius = DPCornerRadius(window);
         if (radius != DPWindowTarget(window, DPDiaRadius(window, radius)))
             return patch->on ? @"window corners aren't the chosen radius" : @"window corners keep the chosen radius";
@@ -261,7 +272,7 @@ static double DPArrowStep(SEL command) {
 - (void)tune:(NSControl *)control {
     double radius = round(MIN(MAX(control.doubleValue, 0), DPMaxRadius));
     self.slider.doubleValue = self.field.doubleValue = radius;
-    [DPSettings() setDouble:radius forKey:DPRadiusSetting];
+    [DPSettingsDefaults() setDouble:radius forKey:DPRadiusSetting];
     if (DPWindowCorners.on) DPApplyWindowCorners(&DPWindowCorners);
 }
 
@@ -304,9 +315,7 @@ static void DPInstallWindowCorners(void) {
     DPHook(DPDiaFloatingSidebar, @selector(layout), (IMP)DPFloatingSidebar_layout);
     DPHook(DPDiaWindowBackgroundTile, @selector(setFrame:), (IMP)DPBackgroundTile_setFrame);
     DPHook(DPDiaToolbar, @selector(layout), (IMP)DPNavigationBar_layout);
-    DPHookClass(CALayer.class, @selector(addAnimation:forKey:), (IMP)DPLayer_addAnimation);
-    DPHookClass(CALayer.class, @selector(setShadowPath:), (IMP)DPLayer_setShadowPath);
-    DPHookClass(CAShapeLayer.class, @selector(setPath:), (IMP)DPShapeLayer_setPath);
+    if (DPWindowCorners.on) DPHookLayers();
     for (size_t i = 0; i < DPCornerBarCount; i++) DPHook(DPCornerBars[i], @selector(layout), (IMP)DPBar_layout);
     // AppKit flips the style mask just after each will, and a screen-sized window doesn't lay out.
     NSArray<NSNotificationName> *names = @[NSWindowWillEnterFullScreenNotification, NSWindowDidEnterFullScreenNotification,
@@ -327,6 +336,7 @@ DP_PATCH(DPWindowCorners) {
     .tint = @"systemBrownColor",
     .section = @"Window",
     .classes = DPClasses(DPDiaWindow, DPDiaToolbar, DPDiaFloatingSidebar, DPDiaWindowBackgroundTile, DPDiaWindowBackground, DPDiaTabStrip, DPDiaSidebarHeader, DPDiaSidebarFooter),
+    .settings = DPSettingList({DPSettingNumber, @"windowCornerRadius", .defaultNumber = 26, .min = 0, .max = 26}),
     .rows = DPWindowCornersRows,
     .install = DPInstallWindowCorners,
     .apply = DPApplyWindowCorners,

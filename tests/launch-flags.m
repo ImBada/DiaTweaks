@@ -168,6 +168,15 @@ static void testParsing(void) {
     parsed = DPParseLaunchFlags(@"   \n# just comments\n\t", &ignored, &unclosed);
     NSCAssert(parsed.count == 0 && !ignored.count && !unclosed, @"empty/comments only");
 
+    parsed = DPParseLaunchFlags((NSString *)(id)@42, &ignored, &unclosed);
+    NSCAssert(parsed.count == 0 && ignored && !ignored.count && !unclosed, @"a non-string parses as nothing");
+    parsed = DPParseLaunchFlags(@"", NULL, NULL);
+    NSCAssert(parsed.count == 0, @"empty text parses as nothing");
+    NSString *edges = @"--emoji=\"😀 ok\" --keep=a\\b --single='a\\\"b' --dq=\"a\\qb\\\\c\" --nul=a\0b --dup --dup --tail=x\\";
+    parsed = DPParseLaunchFlags(edges, &ignored, &unclosed);
+    NSArray *edged = @[ @"--emoji=😀 ok", @"--keep=a\\b", @"--single=a\\\"b", @"--dq=a\\qb\\c", @"--nul=ab", @"--dup", @"--tail=x\\" ];
+    NSCAssert([parsed isEqual:edged] && !ignored.count && !unclosed, @"escapes, surrogate pairs, NULs and duplicates, got %@ ignored=%@", parsed, ignored);
+
     NSString *formatted = DPFormatLaunchFlagsArray(@[ @"--disable-gpu", @"--js-flags=--expose-gc --max-old-space-size=4096", @"--regex=a\\\\b" ]);
     parsed = DPParseLaunchFlags(formatted, &ignored, &unclosed);
     NSCAssert([parsed isEqual:(@[ @"--disable-gpu", @"--js-flags=--expose-gc --max-old-space-size=4096", @"--regex=a\\\\b" ])], @"array round-trip, got %@", parsed);
@@ -279,7 +288,11 @@ static void testSettingsRow(void) {
 
     row.textView.string = @"--force-renderer-accessibility=complete\n--disable-gpu";
     [row textDidChange:[NSNotification notificationWithName:NSTextDidChangeNotification object:row.textView]];
-    NSCAssert([DPLaunchFlagsSavedText() isEqual:@"--force-renderer-accessibility=complete\n--disable-gpu"], @"editing persists text");
+    NSCAssert([DPLaunchFlagsSavedText() isEqual:@"--force-renderer-accessibility=complete"], @"typing doesn't write defaults on every key");
+    [NSNotificationCenter.defaultCenter postNotificationName:DPPatchesDidChangeNotification object:nil];
+    NSCAssert([row.textView.string isEqual:@"--force-renderer-accessibility=complete\n--disable-gpu"], @"a settings change doesn't wipe unsaved typing");
+    [row textDidEndEditing:[NSNotification notificationWithName:NSTextDidEndEditingNotification object:row.textView]];
+    NSCAssert([DPLaunchFlagsSavedText() isEqual:@"--force-renderer-accessibility=complete\n--disable-gpu"], @"finishing editing persists text");
     NSCAssert(!row.relaunch.hidden && row.relaunch.enabled, @"editing shows enabled Relaunch button");
     lastHandOff = nil;
     [row.relaunch performClick:nil];
@@ -301,7 +314,9 @@ static void testSettingsRow(void) {
 
     row.textView.string = @"";
     [row textDidChange:[NSNotification notificationWithName:NSTextDidChangeNotification object:row.textView]];
-    NSCAssert(!row.placeholder.hidden && !DPLaunchFlagsSavedText().length, @"clearing restores placeholder and removes default");
+    NSCAssert(!row.placeholder.hidden, @"clearing restores placeholder");
+    [NSNotificationCenter.defaultCenter postNotificationName:NSApplicationWillTerminateNotification object:NSApp];
+    NSCAssert(!DPLaunchFlagsSavedText().length, @"quitting saves the cleared text, removing the default");
 
     DPLaunchFlagsSaveText(@"--enable-logging=stderr");
     [NSNotificationCenter.defaultCenter postNotificationName:DPPatchesDidChangeNotification object:nil];
@@ -327,6 +342,12 @@ static void testSettingsRow(void) {
     NSCAssert([DPLaunchFlagsSavedText() isEqual:@"--disable-gpu-vsync"], @"viewWillMoveToWindow:nil flushes uncommitted text");
 
     [hostWin.contentView addSubview:row];
+    row.textView.string = @"--closing-window";
+    [row textDidChange:[NSNotification notificationWithName:NSTextDidChangeNotification object:row.textView]];
+    [NSNotificationCenter.defaultCenter postNotificationName:NSWindowWillCloseNotification object:[NSWindow new]];
+    NSCAssert([DPLaunchFlagsSavedText() isEqual:@"--disable-gpu-vsync"], @"another window closing doesn't save");
+    [NSNotificationCenter.defaultCenter postNotificationName:NSWindowWillCloseNotification object:hostWin];
+    NSCAssert([DPLaunchFlagsSavedText() isEqual:@"--closing-window"], @"closing Settings saves unsaved typing");
     row.textView.string = @"--enable-features=FlushOnRelaunch";
     lastHandOff = nil;
     [row.relaunch performClick:nil];
@@ -350,6 +371,7 @@ static void testSettingsRow(void) {
 
 int main(void) {
     @autoreleasepool {
+        unsetenv("DIATWEAKS_DOMAIN");
         method_exchangeImplementations(class_getInstanceMethod(NSUserDefaults.class, @selector(initWithSuiteName:)),
                                        class_getInstanceMethod(NSUserDefaults.class, @selector(dp_launchFlagsInitWithSuiteName:)));
         [NSUserDefaults.standardUserDefaults removePersistentDomainForName:DPTestDomain()];

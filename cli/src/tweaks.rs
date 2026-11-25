@@ -1,19 +1,19 @@
 use std::fmt::Write;
 
-use anyhow::Result;
+use anyhow::{bail, Result};
 
 use crate::{
     dia::{self, SafeMode},
     env::Env,
     lock,
-    manifest::Manifest,
+    manifest::{Manifest, Patch},
     prefs::Prefs,
     signals::Cancelled,
     ui::{self, Ui},
 };
 
 pub fn list(env: &Env) -> Result<()> {
-    let manifest = Manifest::load_with_local(&env.manifest(), &env.local_state())?;
+    let manifest = Manifest::load_with_local(env)?;
     let state = manifest.state(&Prefs::new(&env.domain));
     if dia::is_paused(&env.support) {
         ui::say("Tweaks are paused: every one is off until `diatweaks resume`. The settings below are kept.");
@@ -35,26 +35,33 @@ pub fn list(env: &Env) -> Result<()> {
     Ok(())
 }
 
-pub fn set(env: &Env, ui: &Ui, names: &[String], on: bool) -> Result<()> {
-    let manifest = Manifest::load_with_local(&env.manifest(), &env.local_state())?;
-    let targets = manifest.resolve(names)?;
-    let current = manifest.state(&Prefs::new(&env.domain));
-    if let Some(note) = pause_note(dia::is_paused(&env.support)) {
-        ui.warn(note);
+pub fn set(env: &Env, ui: &Ui, names: &[String], on: Option<bool>) -> Result<()> {
+    if names.is_empty() {
+        if ui.interactive {
+            return menu(env, ui);
+        }
+        let verb = on.map_or("toggle", on_off);
+        bail!(
+            "Name the tweaks to change, like `diatweaks {verb} hideToolbar`.\nRun `diatweaks list` to see all tweaks."
+        );
     }
+    let manifest = Manifest::load_with_local(env)?;
+    let targets = manifest.resolve(names, |name, patch| ui.ask(did_you_mean(name, patch)))?;
+    let current = manifest.state(&Prefs::new(&env.domain));
     let mut wanted = current.clone();
     for &index in &targets {
-        if current[index] == on {
+        let want = on.unwrap_or(!current[index]);
+        if on.is_some() && current[index] == want {
             ui.info(format_args!(
                 "{} is already {}.",
                 manifest.title(index),
-                on_off(on)
+                on_off(want)
             ));
         }
-        wanted[index] = on;
+        wanted[index] = want;
     }
     add_requirements(ui, &manifest, &current, &mut wanted)?;
-    let changes = save(env, &manifest, &current, &wanted)?;
+    let changes = save(env, ui, &manifest, &current, &wanted)?;
     if changes.is_empty() {
         ui.done("Nothing to change.");
         return Ok(());
@@ -73,10 +80,10 @@ pub fn set(env: &Env, ui: &Ui, names: &[String], on: bool) -> Result<()> {
     Ok(())
 }
 
-/// Settings greys every tweak out while paused, so the CLI says the same before saving.
-fn pause_note(paused: bool) -> Option<&'static str> {
-    paused.then_some(
-        "Tweaks are paused, so nothing changes until you run `diatweaks resume`. The settings are still saved.",
+fn did_you_mean(name: &str, patch: &Patch) -> String {
+    format!(
+        "There's no tweak called \"{name}\". Did you mean {} ({})?",
+        patch.key, patch.title
     )
 }
 
@@ -97,7 +104,7 @@ fn needs_relaunch(
         || (patch.key == "briefLanguage" && wanted_on != brief_patched)
 }
 
-fn finish_changes(
+pub fn finish_changes(
     env: &Env,
     ui: &Ui,
     manifest: &Manifest,
@@ -166,16 +173,18 @@ fn changed_key(manifest: &Manifest, changes: &[usize], key: &str) -> Option<usiz
         .find(|&index| manifest.patches[index].key == key)
 }
 
+const PAUSED: &str =
+    "DiaTweaks is paused right now — run `diatweaks resume` so your changes take effect.";
+
 fn where_it_applies(env: &Env) -> String {
     if dia::is_paused(&env.support) {
-        "Tweaks are paused, so nothing changes until you run `diatweaks resume`.".into()
-    } else {
-        where_it_shows(env)
+        return PAUSED.into();
     }
+    where_it_shows(env)
 }
 
 pub fn menu(env: &Env, ui: &Ui) -> Result<()> {
-    let manifest = Manifest::load_with_local(&env.manifest(), &env.local_state())?;
+    let manifest = Manifest::load_with_local(env)?;
     let current = manifest.state(&Prefs::new(&env.domain));
     let mut prompt = cliclack::multiselect("Turn tweaks on or off (space toggles, enter saves)")
         .required(false)
@@ -212,7 +221,7 @@ pub fn menu(env: &Env, ui: &Ui) -> Result<()> {
     if !ui.choose("Save these changes?", true)? {
         return Err(Cancelled::nothing_changed().into());
     }
-    let changes = save(env, &manifest, &current, &wanted)?;
+    let changes = save(env, ui, &manifest, &current, &wanted)?;
     finish_changes(env, ui, &manifest, &changes, &wanted, true);
     Ok(())
 }
@@ -298,14 +307,20 @@ fn notes(manifest: &Manifest, current: &[bool], wanted: &[bool]) -> Vec<String> 
 }
 
 // Write only changed keys so concurrent edits to other tweaks survive.
-fn save(env: &Env, manifest: &Manifest, current: &[bool], wanted: &[bool]) -> Result<Vec<usize>> {
+fn save(
+    env: &Env,
+    ui: &Ui,
+    manifest: &Manifest,
+    current: &[bool],
+    wanted: &[bool],
+) -> Result<Vec<usize>> {
     let changes: Vec<usize> = (0..wanted.len())
         .filter(|&index| current[index] != wanted[index])
         .collect();
     if changes.is_empty() {
         return Ok(changes);
     }
-    let _lock = lock::acquire(&env.support)?;
+    let _lock = lock::acquire(env, ui)?;
     let prefs = Prefs::new(&env.domain);
     for &index in &changes {
         prefs.set(&manifest.patches[index].key, wanted[index]);
@@ -362,11 +377,11 @@ mod tests {
         let current = [false, false, false];
 
         let mut wanted = [false, false, true];
-        add_requirements(&Ui::new(true), &manifest, &current, &mut wanted).unwrap();
+        add_requirements(&Ui::headless(true), &manifest, &current, &mut wanted).unwrap();
         assert_eq!(wanted, [true, true, true]);
 
         let mut wanted = [false, false, true];
-        add_requirements(&Ui::new(false), &manifest, &current, &mut wanted).unwrap();
+        add_requirements(&Ui::headless(false), &manifest, &current, &mut wanted).unwrap();
         assert_eq!(wanted, [false, false, true]);
     }
 
@@ -390,11 +405,12 @@ mod tests {
     }
 
     #[test]
-    fn pause_note_only_warns_while_paused() {
-        assert!(pause_note(false).is_none());
-        let note = pause_note(true).expect("paused tweaks warn");
-        assert!(note.contains("diatweaks resume"));
-        assert!(note.contains("still saved"));
+    fn paused_changes_point_at_resume() {
+        let dir = tempfile::tempdir().unwrap();
+        let env = Env::at(dir.path());
+        assert!(!where_it_applies(&env).contains("resume"));
+        std::fs::write(dir.path().join("paused"), "").unwrap();
+        assert_eq!(where_it_applies(&env), PAUSED);
     }
 
     #[test]

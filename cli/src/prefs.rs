@@ -2,7 +2,7 @@ use std::ffi::{c_char, CString};
 
 use anyhow::{bail, Result};
 use core_foundation::{
-    base::{CFType, TCFType},
+    base::{CFType, CFTypeRef, TCFType},
     boolean::CFBoolean,
     number::CFNumber,
     string::CFString,
@@ -32,33 +32,36 @@ impl Prefs {
         }
     }
 
-    pub fn get(&self, key: &str) -> Option<bool> {
+    pub fn raw(&self, key: &str) -> Option<CFType> {
         let key = CFString::new(key);
         let value = unsafe {
             CFPreferencesCopyAppValue(key.as_concrete_TypeRef(), self.domain.as_concrete_TypeRef())
         };
-        if value.is_null() {
-            return None;
-        }
-        let value = unsafe { CFType::wrap_under_create_rule(value) };
-        if let Some(flag) = value.downcast::<CFBoolean>() {
-            return Some(flag.into());
-        }
-        if let Some(number) = value.downcast::<CFNumber>() {
-            return number.to_f64().map(|number| number != 0.0);
-        }
-        value
-            .downcast::<CFString>()
-            .map(|text| is_true_string(&text.to_string()))
+        (!value.is_null()).then(|| unsafe { CFType::wrap_under_create_rule(value) })
+    }
+
+    pub fn get(&self, key: &str) -> Option<bool> {
+        as_bool(&self.raw(key)?)
     }
 
     pub fn set(&self, key: &str, on: bool) {
+        self.set_value(key, &CFBoolean::from(on).as_CFType());
+    }
+
+    pub fn set_value(&self, key: &str, value: &CFType) {
+        self.write(key, value.as_CFTypeRef());
+    }
+
+    pub fn clear(&self, key: &str) {
+        self.write(key, std::ptr::null());
+    }
+
+    fn write(&self, key: &str, value: CFTypeRef) {
         let key = CFString::new(key);
-        let value = CFBoolean::from(on);
         unsafe {
             CFPreferencesSetAppValue(
                 key.as_concrete_TypeRef(),
-                value.as_CFTypeRef(),
+                value,
                 self.domain.as_concrete_TypeRef(),
             );
         }
@@ -81,6 +84,18 @@ pub fn notify(domain: &str) -> Result<()> {
     Ok(())
 }
 
+pub fn as_bool(value: &CFType) -> Option<bool> {
+    if let Some(flag) = value.downcast::<CFBoolean>() {
+        return Some(flag.into());
+    }
+    if let Some(number) = value.downcast::<CFNumber>() {
+        return number.to_f64().map(|number| number != 0.0);
+    }
+    value
+        .downcast::<CFString>()
+        .map(|text| is_true_string(&text.to_string()))
+}
+
 // Matches NSString.boolValue.
 fn is_true_string(text: &str) -> bool {
     let trimmed = text.trim_start();
@@ -100,14 +115,7 @@ mod tests {
 
     fn clear(prefs: &Prefs, keys: &[&str]) {
         for key in keys {
-            let key = CFString::new(key);
-            unsafe {
-                CFPreferencesSetAppValue(
-                    key.as_concrete_TypeRef(),
-                    std::ptr::null(),
-                    prefs.domain.as_concrete_TypeRef(),
-                );
-            }
+            prefs.clear(key);
         }
         unsafe {
             CFPreferencesAppSynchronize(prefs.domain.as_concrete_TypeRef());

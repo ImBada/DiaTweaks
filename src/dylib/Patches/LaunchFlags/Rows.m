@@ -45,7 +45,7 @@ static NSTextView *DPLaunchFlagsEditor(NSFont *font, id<NSTextViewDelegate> dele
 }
 
 @interface DPLaunchFlagsRow : NSStackView <NSTextViewDelegate>
-@property (nonatomic) BOOL enabled;
+@property (nonatomic) BOOL enabled, edited;
 @property (nonatomic, strong) DPLaunchFlagsBox *box;
 @property (nonatomic, strong) NSTextView *textView;
 @property (nonatomic, strong) NSTextField *placeholder, *status;
@@ -107,7 +107,10 @@ static NSTextView *DPLaunchFlagsEditor(NSFont *font, id<NSTextViewDelegate> dele
     [self setViews:@[ label, _box, footer ] inGravity:NSStackViewGravityTop];
     [_box.widthAnchor constraintEqualToAnchor:self.widthAnchor].active = YES;
     [footer.widthAnchor constraintEqualToAnchor:self.widthAnchor].active = YES;
-    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(reloadFromDefaults) name:DPPatchesDidChangeNotification object:nil];
+    NSNotificationCenter *center = NSNotificationCenter.defaultCenter;
+    [center addObserver:self selector:@selector(reloadFromDefaults) name:DPPatchesDidChangeNotification object:nil];
+    [center addObserver:self selector:@selector(flushEdits) name:NSApplicationWillTerminateNotification object:nil];
+    [center addObserver:self selector:@selector(windowWillClose:) name:NSWindowWillCloseNotification object:nil];
     [self reloadFromDefaults];
     return self;
 }
@@ -128,7 +131,7 @@ static NSTextView *DPLaunchFlagsEditor(NSFont *font, id<NSTextViewDelegate> dele
 
 - (void)reloadFromDefaults {
     NSString *saved = DPLaunchFlagsSavedText();
-    if (![_textView.string isEqualToString:saved]) _textView.string = saved;
+    if (!_edited && ![_textView.string isEqualToString:saved]) _textView.string = saved;
     [self refreshStatus];
 }
 
@@ -162,9 +165,14 @@ static NSTextView *DPLaunchFlagsEditor(NSFont *font, id<NSTextViewDelegate> dele
 
 - (void)flushEdits {
     if (!_enabled) return;
+    _edited = NO;
     NSString *text = _textView.string ?: @"";
     if (![text isEqualToString:DPLaunchFlagsSavedText()]) DPLaunchFlagsSaveText(text);
     [self refreshStatus];
+}
+
+- (void)windowWillClose:(NSNotification *)note {
+    if (note.object == self.window) [self flushEdits];
 }
 
 - (void)viewWillMoveToWindow:(NSWindow *)newWindow {
@@ -173,7 +181,7 @@ static NSTextView *DPLaunchFlagsEditor(NSFont *font, id<NSTextViewDelegate> dele
 }
 
 - (void)textDidChange:(NSNotification *)notification {
-    DPLaunchFlagsSaveText(_textView.string ?: @"");
+    _edited = YES;
     [self refreshStatus];
 }
 

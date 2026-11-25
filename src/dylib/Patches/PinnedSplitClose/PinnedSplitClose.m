@@ -28,18 +28,20 @@ static id DPObjectIvar(id object, const char *name) {
 }
 
 // A Swift Dictionary or Array keeps its count at +16 of its storage and the empty singleton reports 0 there, so empty never reads as a split.
+// Spare high bits or misalignment mark bridged Cocoa storage, which has no count there.
 static NSUInteger DPStoredCount(id object, const char *name) {
     void **slot = DPIvar(object, name);
     uintptr_t storage = slot ? (uintptr_t)*slot : 0;
-    if (!storage) return 0;
+    if (!storage || (storage & 0xF000000000000007)) return 0;
     long count = *(long *)(storage + 16);
     return count > 0 && count < 1024 ? (NSUInteger)count : 0;
 }
 
 // A multi-payload enum with a 16-byte payload keeps the payload first and its tag last, so the first 16 bytes are the UUID in every case.
 static NSString *DPUUIDIvar(id object, const char *name) {
-    uint8_t *bytes = DPIvar(object, name);
-    if (!bytes) return nil;
+    Ivar ivar = object ? class_getInstanceVariable(object_getClass(object), name) : NULL;
+    if (!ivar || ivar_getOffset(ivar) + 16 > (ptrdiff_t)class_getInstanceSize(object_getClass(object))) return nil;
+    const uint8_t *bytes = (const uint8_t *)(__bridge void *)object + ivar_getOffset(ivar);
     return [NSString stringWithFormat:@"%02X%02X%02X%02X-%02X%02X-%02X%02X-%02X%02X-%02X%02X%02X%02X%02X%02X",
             bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
             bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15]];
@@ -109,14 +111,9 @@ static BOOL DPCloseItem(NSView *item) {
 
 static BOOL DPOverlayOnTop(NSWindow *window) {
     if (window.attachedSheet) return YES;
-    Class overlay = NSClassFromString(@"DPCommandBarOverlay");
-    if (overlay)
-        for (NSView *sub in window.contentView.subviews)
-            if ([sub isKindOfClass:overlay] && !sub.isHiddenOrHasHiddenAncestor) return YES;
-    Class card = NSClassFromString(@"DPPeekCard");
-    return card && DPFindView(window.contentView, ^BOOL(NSView *view) {
-        return [view isKindOfClass:card] && !view.isHiddenOrHasHiddenAncestor;
-    }) != nil;
+    for (NSView *sub in window.contentView.subviews)
+        if (DPIsKind(sub, "DPCommandBarOverlay") && !sub.isHiddenOrHasHiddenAncestor) return YES;
+    return DPFindView(window.contentView, ^BOOL(NSView *view) { return DPIsKind(view, "DPPeekCard") && !view.isHiddenOrHasHiddenAncestor; }) != nil;
 }
 
 static void DPWindowController_closeFocusedContent(id self, SEL _cmd, id sender) {

@@ -1,4 +1,5 @@
 #import "BriefLanguage.h"
+#import "TweakPrefs.h"
 
 // The dylib reads this heading back to see which language the installed Dia writes in: keep the two in step.
 static NSString *const DPBriefHeading = @"## Output language: ";
@@ -27,17 +28,8 @@ static BOOL DPKnownLanguage(NSString *name) {
 }
 
 static NSString *DPChosenLanguage(NSString *home) {
-    if (home) {
-        if ([NSFileManager.defaultManager fileExistsAtPath:[home stringByAppendingPathComponent:@"paused"]]) return nil;
-        NSDictionary *safeMode = [NSDictionary dictionaryWithContentsOfFile:[home stringByAppendingPathComponent:@"safe-mode.plist"]];
-        if ([safeMode[@"level"] integerValue] > 0) return nil;
-    }
-    const char *custom = getenv("DIATWEAKS_DOMAIN");
-    NS_VALID_UNTIL_END_OF_SCOPE NSString *name = custom && *custom ? @(custom) : @"com.diapatches";
-    CFStringRef domain = (__bridge CFStringRef)name;
-    CFPreferencesAppSynchronize(domain);
-    if (!CFPreferencesGetAppBooleanValue(CFSTR("briefLanguage"), domain, NULL)) return nil;
-    id language = CFBridgingRelease(CFPreferencesCopyAppValue(CFSTR("briefLanguageChoice"), domain));
+    if (!DPTweakOn(home, @"briefLanguage")) return nil;
+    id language = DPPref(@"briefLanguageChoice");
     if (!language) return DPSystemLanguage();
     return [language isKindOfClass:NSString.class] ? language : @"";
 }

@@ -6,3 +6,4 @@ void DPPlaceDraggedTab(void);
 void DPClearDraggedTab(void);
 CGFloat DPCompactRowHeight(void);
 CGFloat DPModalItemHeight(NSArray<NSCollectionViewLayoutAttributes *> *attributes, CGFloat minimum);
+NSArray *DPEveryView(const char *className);

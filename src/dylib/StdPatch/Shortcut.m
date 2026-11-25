@@ -4,13 +4,6 @@
 static const NSEventModifierFlags DPShortcutModifiers = NSEventModifierFlagControl | NSEventModifierFlagOption | NSEventModifierFlagShift | NSEventModifierFlagCommand;
 static NSHashTable<NSView *> *DPRecorders;
 
-static NSUserDefaults *DPShortcutDefaults(void) {
-    static NSUserDefaults *defaults;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{ defaults = [[NSUserDefaults alloc] initWithSuiteName:@"com.diapatches"]; });
-    return defaults;
-}
-
 static NSString *DPShortcutText(NSDictionary *shortcut) {
     NSString *key = shortcut[@"key"];
     if (![key isKindOfClass:NSString.class] || !key.length) return nil;
@@ -35,7 +28,7 @@ static NSString *DPKeyName(NSEvent *event) {
 }
 
 static NSDictionary *DPPatchShortcut(DPPatch *patch) {
-    id saved = [DPShortcutDefaults() objectForKey:patch->shortcut];
+    id saved = [DPSettingsDefaults() objectForKey:patch->shortcut];
     return [saved isKindOfClass:NSDictionary.class] ? saved : patch->defaultShortcut ? patch->defaultShortcut() : nil;
 }
 
@@ -156,13 +149,17 @@ static NSArray<NSString *> *DPShortcutClashes(DPPatch *patch) {
     [self refresh];
 }
 
+- (void)updateClear {
+    _clear.enabled = _enabled;
+    _clear.hidden = !_enabled || !_hovered || !DPShortcutText(DPPatchShortcut(_patch));
+}
+
 - (void)refresh {
     NSString *text = DPShortcutText(DPPatchShortcut(_patch));
     BOOL recording = _monitor != nil;
     _label.stringValue = recording ? @"Type shortcut…" : text ?: @"Add new…";
     _label.textColor = text && !recording ? NSColor.labelColor : NSColor.secondaryLabelColor;
-    _clear.enabled = _enabled;
-    _clear.hidden = !_enabled || !text || !_hovered;
+    [self updateClear];
     NSArray<NSString *> *clashes = DPShortcutClashes(_patch);
     if (clashes.count) {
         NSFont *font = [NSFont systemFontOfSize:11];
@@ -173,7 +170,8 @@ static NSArray<NSString *> *DPShortcutClashes(DPPatch *patch) {
         _clash.attributedStringValue = warning;
     }
     _clash.hidden = !clashes.count;
-    ((NSStackView *)_clash.superview).edgeInsets = NSEdgeInsetsMake(0, 0, clashes.count ? 8 : 0, 0);
+    NSView *column = _clash.superview;
+    if ([column isKindOfClass:NSStackView.class]) ((NSStackView *)column).edgeInsets = NSEdgeInsetsMake(0, 0, clashes.count ? 8 : 0, 0);
     self.needsDisplay = YES;
 }
 
@@ -185,8 +183,8 @@ static NSArray<NSString *> *DPShortcutClashes(DPPatch *patch) {
 - (void)mouseDown:(NSEvent *)event {
     if (_enabled && [self.window makeFirstResponder:self]) [self startRecording];
 }
-- (void)mouseEntered:(NSEvent *)event { _hovered = YES; [self refresh]; }
-- (void)mouseExited:(NSEvent *)event { _hovered = NO; [self refresh]; }
+- (void)mouseEntered:(NSEvent *)event { _hovered = YES; [self updateClear]; }
+- (void)mouseExited:(NSEvent *)event { _hovered = NO; [self updateClear]; }
 
 - (NSRect)focusRingMaskBounds { return self.bounds; }
 - (void)drawFocusRingMask { [[NSBezierPath bezierPathWithRoundedRect:self.bounds xRadius:6 yRadius:6] fill]; }
@@ -256,13 +254,13 @@ static NSArray<NSString *> *DPShortcutClashes(DPPatch *patch) {
     NSString *name = DPKeyName(event);
     BOOL functionKey = name.length > 1 && [name hasPrefix:@"F"];
     if (!name || (!(flags & ~NSEventModifierFlagShift) && !functionKey)) return NSBeep();
-    [DPShortcutDefaults() setObject:@{ @"keyCode" : @(event.keyCode), @"modifiers" : @(flags), @"key" : name } forKey:_patch->shortcut];
+    [DPSettingsDefaults() setObject:@{ @"keyCode" : @(event.keyCode), @"modifiers" : @(flags), @"key" : name } forKey:_patch->shortcut];
     [self.window makeFirstResponder:nil];
     [NSNotificationCenter.defaultCenter postNotificationName:DPPatchesDidChangeNotification object:nil];
 }
 
 - (void)clearShortcut {
-    [DPShortcutDefaults() setObject:@{} forKey:_patch->shortcut];
+    [DPSettingsDefaults() setObject:@{} forKey:_patch->shortcut];
     [NSNotificationCenter.defaultCenter postNotificationName:DPPatchesDidChangeNotification object:nil];
 }
 @end

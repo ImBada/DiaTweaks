@@ -97,7 +97,12 @@ static NSMutableDictionary<NSString *, NSTextView *> *gBarTexts;
 static NSMutableArray<NSNumber *> *gDismissedHiddenStates;
 static NSMutableDictionary<NSString *, NSMutableSet<NSString *> *> *gBlanks, *gSplits;
 
-NSUserDefaults *DPSettings(void) { return (NSUserDefaults *)gDefaults; }
+static NSString *gSuiteAsked;
+static id DPDefaults_initWithSuite(id self, SEL _cmd, NSString *suite) {
+    if (![suite isEqualToString:@"com.diapatches.spare-domain"]) return DPCallOriginal(DPDefaults_initWithSuite, self, suite);
+    gSuiteAsked = suite;
+    return gDefaults;
+}
 NSTextView *DPBarText(DPCommandBarOverlay *overlay) { return overlay.openedTab ? gBarTexts[DPTabID(overlay.openedTab)] : nil; }
 void DPFocusBar(DPCommandBarOverlay *overlay) {}
 void DPShowShade(DPCommandBarOverlay *overlay) {}
@@ -147,13 +152,17 @@ void DPHoldStrips(NSWindow *window) {}
 void DPReleaseStrips(void) {}
 NSString *DPStripTabID(NSView *tabView) { return nil; }
 BOOL DPSelectionLayoutKnown(void) { return YES; }
-uintptr_t *DPSelectionStyle(NSView *background) { return NULL; }
-uint8_t *DPTabShape(NSView *background) { return NULL; }
+static uintptr_t gStyle;
+static uint8_t gShape;
+static NSView *gStyled;
+static NSArray *gLook;
+uintptr_t *DPSelectionStyle(NSView *background) { return background && background == gStyled ? &gStyle : NULL; }
+uint8_t *DPTabShape(NSView *background) { return background && background == gStyled ? &gShape : NULL; }
 NSView *DPTabShapeView(NSView *background) { return nil; }
-BOOL DPStyleSelected(uintptr_t style) { return NO; }
+BOOL DPStyleSelected(uintptr_t style) { return style == 0 || style >= DPFirstFill; }
 BOOL DPDrawnSelected(NSView *background) { return NO; }
 void DPNoteLook(NSView *background) {}
-NSArray *DPSelectedLook(NSView *button) { return nil; }
+NSArray *DPSelectedLook(NSView *button) { return gLook; }
 BOOL DPSwitchingTo(NSView *background) { return NO; }
 void DPEndSwitch(NSWindow *window) {}
 void DPUnselectFrontTab(NSView *background, BOOL standingIn) {}
@@ -208,6 +217,8 @@ int main(void) {
     @autoreleasepool {
         [NSApplication sharedApplication];
         gDefaults = [DPFakeDefaults new];
+        setenv("DIATWEAKS_DOMAIN", "com.diapatches.spare-domain", 1);
+        DPHookClass(NSUserDefaults.class, @selector(initWithSuiteName:), (IMP)DPDefaults_initWithSuite);
         gDelegate = [DPFakeAppDelegate new];
         gDelegate.appleScriptWindows = [NSMutableArray array];
         gBarTexts = [NSMutableDictionary dictionary];
@@ -259,15 +270,29 @@ int main(void) {
         swB.appleScriptProfiles = [NSMutableArray arrayWithObject:profB];
         [gDelegate.appleScriptWindows addObjectsFromArray:@[ swA, swB ]];
 
-        DPExpectNewTab(winA);
+        DPExpectNewTab(winB);
         DPFakeTab *lateB = DPMakeTab(@"late-B", @"");
         [profB.appleScriptTabs addObject:lateB];
-        DPHideTabRow(@"late-B", winB);
         CHECK(DPHidesTab(@"late-B"), "expected tab still matches DPHidesTab during the 1 s window");
-        CHECK(!DPHiddenTab(@"late-B"), "unhidden tab in second window is not DPHiddenTab");
+        CHECK(!DPHiddenTab(@"late-B"), "a tab no bar has hidden yet is not DPHiddenTab");
         DPCommandBarOverlay *overlayB = DPMakeOverlay(winB, lateB, pageB);
         CHECK(!DPParkSpare(overlayB) && !DPSpareIn(winB), "DPParkSpare refuses to park an unhidden expected tab");
         DPStopExpecting();
+
+        DPExpectNewTab(winA);
+        DPExpectNewTab(winB);
+        CHECK(DPHidingATab(winA) && DPHidingATab(winB), "⌘T in a second window keeps the first window's expectation");
+        DPHideTabRow(@"new-A", winA);
+        CHECK(DPHiddenTab(@"new-A") && DPHidingATab(winA), "the first window's new tab still hides after ⌘T in another window");
+        CHECK(DPHidingATab(winB) && DPHidesTab(@"new-B"), "hiding a tab resolves only its own window's expectation");
+        DPForgetWindow(winB);
+        CHECK(!DPHidingATab(winB) && DPHiddenTab(@"new-A"), "closing a window forgets only its own expectation and tabs");
+        DPShowTabRow(@"new-A", NO);
+        DPStopExpecting();
+        DPHideTabRow(@"unannounced-B", winB);
+        CHECK(DPHiddenTab(@"unannounced-B") && DPHidingATab(winB) && !DPHidingATab(winA),
+              "with no ⌘T pending, the bar's tab still hides, in its own window only (#606)");
+        DPShowTabRow(@"unannounced-B", NO);
 
         DPFakeTab *spareA = DPAddHiddenTab(winA, profA, @"spare-A");
         CHECK(DPHiddenTab(@"spare-A"), "hidden tab in expected window is DPHiddenTab");
@@ -313,15 +338,15 @@ int main(void) {
         gSendActionCalls = 0;
         gSendActionResult = NO;
         DPWanted = YES;
-        DPSpareUntil = 0;
+        [DPSpareAttempts removeAllObjects];
         DPMakeSpare();
-        CHECK(gSendActionCalls == 1 && DPWanted && DPSpareUntil == 0, "failed sendAction re-arms DPWanted and clears DPSpareUntil");
+        CHECK(gSendActionCalls == 1 && DPWanted && !DPMakingSpareIn(winA), "failed sendAction re-arms DPWanted and drops the attempt");
 
         gSendActionResult = YES;
         DPMakeSpare();
-        CHECK(gSendActionCalls == 2 && !DPWanted && DPSpareUntil > CACurrentMediaTime(), "successful sendAction starts spare wait");
+        CHECK(gSendActionCalls == 2 && !DPWanted && DPMakingSpareIn(winA) && !DPMakingSpareIn(winB), "successful sendAction starts the spare wait in its own window");
         DPStopExpecting();
-        DPSpareUntil = CACurrentMediaTime() - 1;
+        [DPSpareAttempts setObject:@(CACurrentMediaTime() - 1) forKey:winA];
         DPMakeSpare();
         CHECK(gSendActionCalls == 3, "lapsed attempt with no spare re-arms DPWanted on next tick");
         DPStopExpecting();
@@ -329,7 +354,7 @@ int main(void) {
         DPFakeTab *spareKeep = DPAddHiddenTab(winA, profA, @"spare-keep");
         CHECK(DPParkSpare(DPMakeOverlay(winA, spareKeep, pageA)), "parks spareKeep in winA");
         DPWanted = NO;
-        DPSpareUntil = 0;
+        [DPSpareAttempts removeAllObjects];
         RenderWidgetHostViewCocoa *webB = [[RenderWidgetHostViewCocoa alloc] initWithFrame:NSMakeRect(0, 0, 100, 100)];
         [winB.contentView addSubview:webB];
         winB.fakeResponder = webB;
@@ -395,6 +420,7 @@ int main(void) {
         DPFakeTab *closingSpare = DPAddHiddenTab(winA, profA, @"closing-spare");
         DPSet(winA, &DPSpareKey, DPMakeOverlay(winA, closingSpare, pageA));
         DPNoteSpare(@"closing-spare", YES);
+        CHECK([gSuiteAsked isEqual:@"com.diapatches.spare-domain"], "the tabs the bar leaves behind are noted in DIATWEAKS_DOMAIN's domain, not the real one");
         DPForgetSpare(winA);
         CHECK(!closingSpare.closed && !DPSpareIn(winA) && ![gDefaults.store[DPSparesKey] containsObject:@"closing-spare"],
               "DPForgetSpare clears spare and persisted ID without closing tab");
@@ -429,7 +455,7 @@ int main(void) {
         gIdleSeconds = 10;
         gSendActionCalls = 0;
         DPWanted = YES;
-        DPSpareUntil = 0;
+        [DPSpareAttempts removeAllObjects];
         DPMakeSpare();
         CHECK(gSendActionCalls == 0, "DPMakeSpare does not create a background spare while a visible Peek card is open");
 
@@ -444,7 +470,7 @@ int main(void) {
         peekCard.hidden = YES;
         winA.fakeResponder = webA;
         DPWanted = YES;
-        DPSpareUntil = 0;
+        [DPSpareAttempts removeAllObjects];
         gSendActionCalls = 0;
         DPMakeSpare();
         CHECK(gSendActionCalls == 1, "DPMakeSpare resumes once Peek card is parked/hidden");
@@ -514,6 +540,52 @@ int main(void) {
         DPCloseLeftBarTabs();
         CHECK(!onlyOpen.closed, "launch cleanup keeps a space's only tab");
         CHECK(![gDefaults.store[DPOpenTabsKey] containsObject:@"only-open"], "launch cleanup forgets a tab it can't close");
+
+        DPCommandBarSpare.on = YES;
+        DPCommandBarHideTab.on = YES;
+        DPDropSpare(winA);
+        DPDropSpare(winB);
+        DPStopExpecting();
+        [profA.appleScriptTabs removeAllObjects];
+        [profA.appleScriptTabs addObject:pageA];
+        swA.activeTab = pageA;
+        swB.activeTab = pageB;
+        winA.fakeResponder = webA;
+        winB.fakeResponder = webB;
+        gIdleSeconds = 10;
+        gSendActionCalls = 0;
+        DPWanted = YES;
+        gKeyWindow = winA;
+        DPMakeSpare();
+        DPWanted = YES;
+        gKeyWindow = winB;
+        DPMakeSpare();
+        CHECK(gSendActionCalls == 2, "each window starts its own spare");
+        DPCommandBarOverlay *spareBarA = DPMakeOverlay(winA, DPMakeTab(@"made-A", @""), pageA);
+        DPParkIfSpare(spareBarA);
+        CHECK(spareBarA.hidden, "a spare made in one window still parks after another window starts one");
+        DPStopExpecting();
+        gKeyWindow = winA;
+
+        NSObject *fill = [NSObject new];
+        NSView *button = [NSView new], *background = [NSView new];
+        [button addSubview:background];
+        gLook = @[ fill, @3 ];
+        gStyled = background;
+        gStyle = 2;
+        gShape = 1;
+        CFIndex resting = CFGetRetainCount((__bridge CFTypeRef)fill);
+        @autoreleasepool { DPSelectButton(background, YES); }
+        CHECK(gStyle == (uintptr_t)(__bridge void *)fill && gShape == 3, "the New Tab button takes the selected look");
+        @autoreleasepool { DPSelectButton(background, NO); }
+        CHECK(gStyle == 2 && gShape == 1 && CFGetRetainCount((__bridge CFTypeRef)fill) == resting, "putting Dia's look back releases the colour once");
+        @autoreleasepool { DPSelectButton(background, YES); }
+        CFRelease((CFTypeRef)(void *)gStyle);
+        gStyle = 2;
+        @autoreleasepool { DPSelectButton(background, NO); }
+        CHECK(gStyle == 2 && CFGetRetainCount((__bridge CFTypeRef)fill) == resting, "a colour Dia already released when writing over the style isn't released again");
+        gStyled = nil;
+        gLook = nil;
 
         if (failures) return 1;
         puts("PASS: command bar spare guards, launch cleanup, and timer lifecycle");

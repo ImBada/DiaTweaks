@@ -50,6 +50,8 @@ int main(void) {
         objc_registerClassPair(objc_allocateClassPair(NSView.class, DPDiaContentPane, 0));
         objc_registerClassPair(objc_allocateClassPair(NSView.class, DPDiaToolbar, 0));
         objc_registerClassPair(objc_allocateClassPair(NSView.class, DPDiaBookmarksBar, 0));
+        NSString *home = [NSTemporaryDirectory() stringByAppendingPathComponent:[NSString stringWithFormat:@"hide-toolbar-settle-home-%d", getpid()]];
+        setenv("DIAPATCH_HOME", home.fileSystemRepresentation, 1);
         DPLoadPatches();
         for (NSUInteger i = 0; i < DPPatchCount; i++) DPPatches[i]->on = NO, DPPatches[i]->progress = 0;
         DPHideToolbar.install();
@@ -73,6 +75,7 @@ int main(void) {
             [NSRunLoop.mainRunLoop runMode:NSDefaultRunLoopMode beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.1]];
         NSData *data = [NSData dataWithContentsOfFile:path];
         [NSFileManager.defaultManager removeItemAtPath:path error:nil];
+        [NSFileManager.defaultManager removeItemAtPath:home error:nil];
         if (!data) return puts("FAIL: no report"), 1;
 
         int failures = !gStalledAtTheEnd || !gStalledFading;

@@ -1,6 +1,6 @@
 #import "Patches/CommandBar/HideTab.h"
 
-static char DPParkedRowsKey;
+static char DPParkedRowsKey, DPClosedKey;
 
 BOOL DPIsLeftOutRow(NSCollectionView *list, NSIndexPath *path) { return DPHidesTab(DPTabIn(DPRowName(list, path))); }
 
@@ -18,7 +18,7 @@ CGFloat DPClosedUp(NSCollectionViewLayout *layout, NSRect frame) {
 CGFloat DPParkedHeight(NSCollectionViewLayout *layout) { return DPClosedUp(layout, NSMakeRect(0, CGFLOAT_MAX, 0, 0)); }
 
 NSCollectionViewLayoutAttributes *DPClosedAttributes(NSCollectionViewLayout *layout, NSCollectionViewLayoutAttributes *attributes) {
-    if (!attributes || !DPGet(layout, &DPParkedRowsKey)) return attributes;
+    if (!attributes || DPGet(attributes, &DPClosedKey) || !DPGet(layout, &DPParkedRowsKey)) return attributes;
     if (!DPHiding()) {
         DPSet(layout, &DPParkedRowsKey, nil);
         return attributes;
@@ -32,6 +32,7 @@ NSCollectionViewLayoutAttributes *DPClosedAttributes(NSCollectionViewLayout *lay
     } else {
         attributes.frame = NSOffsetRect(frame, 0, -DPClosedUp(layout, frame));
     }
+    DPSet(attributes, &DPClosedKey, @YES);
     return attributes;
 }
 

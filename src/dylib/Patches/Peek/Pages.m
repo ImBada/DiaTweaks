@@ -3,12 +3,23 @@
 #import "Patches/CommandBar/Tabs.h"
 #import <objc/message.h>
 
+@interface DPPeekWarmSlot : NSObject
+@property (nonatomic, strong) id page;
+@property (nonatomic, strong) NSView *view;
+@property (nonatomic, copy) NSURL *url;
+@end
+
+@implementation DPPeekWarmSlot
+@end
+
 static NSMapTable *DPPeekFactories;
 static __weak id DPPeekLastFactory;
-static id DPPeekWarmPage;
-static NSView *DPPeekWarmView;
-static NSURL *DPPeekWarmURL;
+static NSMapTable<NSWindow *, DPPeekWarmSlot *> *DPPeekWarmSlots;
 static char DPPeekWindowClosedKey;
+
+static void DPPeekSend(id object, SEL sel) {
+    if ([object respondsToSelector:sel]) ((void (*)(id, SEL))objc_msgSend)(object, sel);
+}
 
 static void DPPeekMarkNonTab(id page, BOOL nonTab) {
     if (page) objc_setAssociatedObject(page, NSSelectorFromString(@"dp_nonTabWebContents"), nonTab ? @YES : nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
@@ -63,7 +74,7 @@ NSURL *DPPeekSearchURL(id page, NSString *text) {
     id factory = DPPeekFactoryFor(page, NSApp.keyWindow);
     id context = [factory respondsToSelector:@selector(preferences)] ? factory : DPValueForKey(factory, @"context");
     id preferences = DPValueForKey(context, @"preferences");
-    id engine = [preferences respondsToSelector:@selector(getDefaultSearchEngine)] ? [preferences performSelector:@selector(getDefaultSearchEngine)] : nil;
+    id engine = [preferences respondsToSelector:@selector(getDefaultSearchEngine)] ? ((id (*)(id, SEL))objc_msgSend)(preferences, @selector(getDefaultSearchEngine)) : nil;
     NSString *query = [text stringByAddingPercentEncodingWithAllowedCharacters:NSCharacterSet.URLQueryAllowedCharacterSet];
     query = [query stringByReplacingOccurrencesOfString:@"&" withString:@"%26"];
     query = [query stringByReplacingOccurrencesOfString:@"+" withString:@"%2B"];
@@ -71,7 +82,9 @@ NSURL *DPPeekSearchURL(id page, NSString *text) {
     if (![template isKindOfClass:NSString.class] || ![template containsString:@"{searchTerms}"] || [template containsString:@"{google:"])
         template = @"https://www.google.com/search?q={searchTerms}";
     template = [template stringByReplacingOccurrencesOfString:@"{searchTerms}" withString:query];
-    NSRegularExpression *rest = [NSRegularExpression regularExpressionWithPattern:@"\\{[^}]*\\}" options:0 error:nil];
+    static NSRegularExpression *rest;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ rest = [NSRegularExpression regularExpressionWithPattern:@"\\{[^}]*\\}" options:0 error:nil]; });
     return [NSURL URLWithString:[rest stringByReplacingMatchesInString:template options:0 range:NSMakeRange(0, template.length) withTemplate:@""]];
 }
 
@@ -102,7 +115,7 @@ static void DPPeekCloseWhenBlank(id page, int checks) {
     NSString *urlString = [rawURL isKindOfClass:NSURL.class] ? [rawURL absoluteString] : nil;
     if (checks && ![urlString isEqual:@"about:blank"])
         return (void)dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 50 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{ DPPeekCloseWhenBlank(page, checks - 1); });
-    if ([page respondsToSelector:@selector(close)]) [page performSelector:@selector(close)];
+    DPPeekSend(page, @selector(close));
 }
 
 static void DPPeekDiscard(id page, NSView *host) {
@@ -156,41 +169,43 @@ static id DPPeekMakePage(NSWindow *window, id source, void (^attach)(id page)) {
     id page = ((id (*)(id, SEL, id))objc_msgSend)(factory, @selector(createWebContents:), [configuration new]);
     if (!page) return nil;
     DPPeekMarkNonTab(page, YES);
-    if ([page respondsToSelector:@selector(bootstrapRendering)]) [page performSelector:@selector(bootstrapRendering)];
+    DPPeekSend(page, @selector(bootstrapRendering));
     attach(page);
-    if ([page respondsToSelector:@selector(bootstrapRenderingComplete)]) [page performSelector:@selector(bootstrapRenderingComplete)];
+    DPPeekSend(page, @selector(bootstrapRenderingComplete));
     return page;
 }
 
 void DPPeekWarm(NSWindow *window, id source, NSURL *url) {
     if (!window || [DPGet(window, &DPPeekWindowClosedKey) boolValue]) return;
     if (DPPeekHasCards()) DPPeekSyncTabs(window);
-    if ([url isEqual:DPPeekWarmURL] || DPPeekCardIn(window)) return;
-    DPPeekCool();
+    if ([url isEqual:[DPPeekWarmSlots objectForKey:window].url] || DPPeekCardIn(window)) return;
+    DPPeekCoolIn(window);
     __block NSView *host = nil;
     id page = DPPeekMakePage(window, source, ^(id page) { host = DPPeekWarmHost(window, page); });
     if (!page) return;
     if (!host) return DPPeekDiscard(page, nil);
     DPPeekLoad(page, url);
-    DPPeekWarmPage = page;
-    DPPeekWarmView = host;
-    DPPeekWarmURL = url;
+    DPPeekWarmSlot *slot = [DPPeekWarmSlot new];
+    slot.page = page;
+    slot.view = host;
+    slot.url = url;
+    if (!DPPeekWarmSlots) DPPeekWarmSlots = [NSMapTable weakToStrongObjectsMapTable];
+    [DPPeekWarmSlots setObject:slot forKey:window];
 }
 
-static void DPPeekForgetWarm(void) {
-    DPPeekWarmPage = nil;
-    DPPeekWarmView = nil;
-    DPPeekWarmURL = nil;
-}
-
-void DPPeekCool(void) {
-    if (!DPPeekWarmPage) return;
-    DPPeekDiscard(DPPeekWarmPage, DPPeekWarmView);
-    DPPeekForgetWarm();
+static DPPeekWarmSlot *DPPeekTakeWarm(NSWindow *window) {
+    DPPeekWarmSlot *slot = window ? [DPPeekWarmSlots objectForKey:window] : nil;
+    if (slot) [DPPeekWarmSlots removeObjectForKey:window];
+    return slot;
 }
 
 void DPPeekCoolIn(NSWindow *window) {
-    if (window && DPPeekWarmView.window == window) DPPeekCool();
+    DPPeekWarmSlot *slot = DPPeekTakeWarm(window);
+    if (slot) DPPeekDiscard(slot.page, slot.view);
+}
+
+void DPPeekCool(void) {
+    for (NSWindow *window in DPPeekWarmSlots.keyEnumerator.allObjects) DPPeekCoolIn(window);
 }
 
 static void DPPeekOpenFrom(NSWindow *window, NSString *originTabID, NSURL *url, NSRect link, id delegate, id source, id warmPage, NSView *warmHost) {
@@ -221,11 +236,11 @@ static void DPPeekOpenFrom(NSWindow *window, NSString *originTabID, NSURL *url, 
 
 void DPPeekOpen(NSWindow *window, NSString *originTabID, NSURL *url, NSPoint origin, id delegate, id source) {
     // Taken now, before releasing Shift can cool it.
-    BOOL warm = DPPeekWarmPage && [url isEqual:DPPeekWarmURL] && DPPeekWarmView.window == window;
-    id warmPage = warm ? DPPeekWarmPage : nil;
-    NSView *warmHost = warm ? DPPeekWarmView : nil;
-    if (warm) DPPeekForgetWarm();
-    DPPeekCool();
+    DPPeekWarmSlot *slot = DPPeekTakeWarm(window);
+    BOOL warm = slot && [url isEqual:slot.url] && slot.view.window == window;
+    id warmPage = warm ? slot.page : nil;
+    NSView *warmHost = warm ? slot.view : nil;
+    if (slot && !warm) DPPeekDiscard(slot.page, slot.view);
     DPPeekFindLink(window, source, origin, warmHost, ^(NSRect link) { DPPeekOpenFrom(window, originTabID, url, link, delegate, source, warmPage, warmHost); });
 }
 
@@ -286,7 +301,7 @@ void DPPeekInstallPages(void) {
     DPHook(DPDiaWebContents, @selector(attachToPaneHostView:), (IMP)DPPage_attach);
     [NSNotificationCenter.defaultCenter addObserverForName:NSWindowWillCloseNotification object:nil queue:nil usingBlock:^(NSNotification *note) {
         if (note.object) DPSet(note.object, &DPPeekWindowClosedKey, @YES);
-        if (DPPeekWarmView.window == note.object) DPPeekCool();
+        DPPeekCoolIn(note.object);
         DPPeekHandoffSelectionChanged(note.object, nil);
         for (DPPeekCard *peek in DPPeekAllCards(note.object)) {
             id page = peek.page;

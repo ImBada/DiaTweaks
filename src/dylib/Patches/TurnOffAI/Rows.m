@@ -123,29 +123,38 @@ static BOOL DPInput_command(NSView *self, SEL _cmd, NSTextView *text, SEL comman
     return DPCallOriginal(DPInput_command, self, text, command);
 }
 
+// Table shifts hiddenRowIndexes as rows change, so unhide those rather than cached indexes.
+static void DPUnhideAIRows(NSTableView *table, BOOL ours) {
+    if (ours && table.hiddenRowIndexes.count) [table unhideRowsAtIndexes:table.hiddenRowIndexes withAnimation:NSTableViewAnimationEffectNone];
+}
+
 // Asking a table for a row view during an update throws, and hidden rows have none: unhide, look, hide.
 static void DPFindAIRows(NSTableView *table) {
     static BOOL finding;
     if (finding) return;
     finding = YES;
-    // Table shifts hiddenRowIndexes as rows change, so unhide those rather than cached indexes.
-    if ([DPGet(table, &DPAIRowsKey) count] && table.hiddenRowIndexes.count)
-        [table unhideRowsAtIndexes:table.hiddenRowIndexes withAnimation:NSTableViewAnimationEffectNone];
     NSMutableIndexSet *rows = [NSMutableIndexSet indexSet];
-    for (NSInteger row = 0; DPTurnOffAI.on && row < table.numberOfRows; row++) {
-        NSView *view = [table rowViewAtRow:row makeIfNecessary:YES];
-        if (view && DPIsAIRowView(table, view)) [rows addIndex:row];
+    BOOL hidden = [DPGet(table, &DPAIRowsKey) count] > 0;
+    @try {
+        DPUnhideAIRows(table, hidden);
+        hidden = NO;
+        for (NSInteger row = 0; DPTurnOffAI.on && row < table.numberOfRows; row++) {
+            NSView *view = [table rowViewAtRow:row makeIfNecessary:YES];
+            if (view && DPIsAIRowView(table, view)) [rows addIndex:row];
+        }
+        hidden = rows.count > 0;
+        if (hidden) [table hideRowsAtIndexes:rows withAnimation:NSTableViewAnimationEffectNone];
+    } @catch (NSException *exception) {
+        @try { DPUnhideAIRows(table, hidden); hidden = NO; } @catch (NSException *again) {}
+        rows = hidden ? [table.hiddenRowIndexes mutableCopy] : [NSMutableIndexSet indexSet];
+    } @finally {
+        finding = NO;
     }
     BOOL changed = ![rows isEqualToIndexSet:DPGet(table, &DPAIRowsKey) ?: [NSIndexSet indexSet]];
     DPSet(table, &DPAIRowsKey, rows);
-    if (rows.count) {
-        if (!DPAITables) DPAITables = [NSHashTable weakObjectsHashTable];
-        [DPAITables addObject:table];
-        [table hideRowsAtIndexes:rows withAnimation:NSTableViewAnimationEffectNone];
-    } else {
-        [DPAITables removeObject:table];
-    }
-    finding = NO;
+    if (!DPAITables) DPAITables = [NSHashTable weakObjectsHashTable];
+    if (rows.count) [DPAITables addObject:table];
+    else [DPAITables removeObject:table];
     if (!DPIsKind(table.delegate, DPDiaCommandBarSuggestions)) return;
     if (!DPTurnOffAI.on) DPSet(table, &DPPickKey, nil);
     else if (DPGet(table, &DPPickKey) || (!DPArrowJustPressed() && [rows containsIndex:table.selectedRow])) DPPickedHiddenRow(table);
@@ -156,8 +165,10 @@ CGFloat DPHiddenSuggestionsHeight(NSView *suggestions) {
     if (!DPTurnOffAI.on) return 0;
     NSTableView *table = DPFirstOfClass(suggestions, NSTableView.class);
     __block CGFloat height = 0;
+    id<NSTableViewDelegate> delegate = table.delegate;
+    BOOL asks = [delegate respondsToSelector:@selector(tableView:heightOfRow:)];
     [DPGet(table, &DPAIRowsKey) enumerateIndexesUsingBlock:^(NSUInteger row, BOOL *stop) {
-        height += [(id<NSTableViewDelegate>)table.delegate tableView:table heightOfRow:row];
+        height += asks ? [delegate tableView:table heightOfRow:row] : table.rowHeight;
     }];
     return height;
 }

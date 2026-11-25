@@ -19,7 +19,10 @@ static NSView *DPSidebarOf(NSView *list) {
     return list;
 }
 
-@implementation DPTidyHover
+@implementation DPTidyHover {
+    NSInteger _tabsBelowLine;
+    CFTimeInterval _countedAt;
+}
 
 + (DPTidyHover *)forList:(NSView *)list { return DPGet(list, &DPHoverKey); }
 
@@ -70,7 +73,13 @@ static NSView *DPSidebarOf(NSView *list) {
     NSWindow *window = list.window;
     if (!window.isKeyWindow || !NSApp.isActive || list.hiddenOrHasHiddenAncestor) return NO;
     NSPoint point = [window convertPointFromScreen:NSEvent.mouseLocation];
-    return NSPointInRect(point, DPTidyHoverZone(list)) && DPTidyTabsBelowLine(list) >= DPTidyMinimumTabs;
+    if (!NSPointInRect(point, DPTidyHoverZone(list))) return NO;
+    CFTimeInterval now = CACurrentMediaTime();
+    if (now - _countedAt > 0.25) {
+        _tabsBelowLine = DPTidyTabsBelowLine(list);
+        _countedAt = now;
+    }
+    return _tabsBelowLine >= DPTidyMinimumTabs;
 }
 
 - (void)setRevealed:(BOOL)revealed {

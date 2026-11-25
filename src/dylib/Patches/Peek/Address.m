@@ -3,6 +3,7 @@
 @interface DPPeekAddress : NSView <NSTextFieldDelegate>
 @property (nonatomic, weak) id page;
 @property (nonatomic) NSTextField *label, *field;
+@property (nonatomic, copy) NSString *shownHost, *shownRest;
 @property (nonatomic) BOOL hovered, beginning, ending;
 @end
 
@@ -61,13 +62,18 @@
     } else if ([title isKindOfClass:NSString.class] && title.length && ![title isEqual:url.absoluteString] && ![title isEqual:host]) {
         rest = [@" / " stringByAppendingString:title];
     }
-    NSFont *font = [NSFont systemFontOfSize:13 weight:NSFontWeightMedium];
-    NSMutableAttributedString *text = [[NSMutableAttributedString alloc] initWithString:host
-        attributes:@{NSFontAttributeName : font, NSForegroundColorAttributeName : NSColor.labelColor}];
-    [text appendAttributedString:[[NSAttributedString alloc] initWithString:rest
-        attributes:@{NSFontAttributeName : font, NSForegroundColorAttributeName : NSColor.secondaryLabelColor}]];
-    if (![self.label.attributedStringValue isEqual:text]) self.label.attributedStringValue = text;
-    self.label.toolTip = url.absoluteString;
+    if (![host isEqualToString:self.shownHost] || ![rest isEqualToString:self.shownRest]) {
+        self.shownHost = host;
+        self.shownRest = rest;
+        NSFont *font = [NSFont systemFontOfSize:13 weight:NSFontWeightMedium];
+        NSMutableAttributedString *text = [[NSMutableAttributedString alloc] initWithString:host
+            attributes:@{NSFontAttributeName : font, NSForegroundColorAttributeName : NSColor.labelColor}];
+        [text appendAttributedString:[[NSAttributedString alloc] initWithString:rest
+            attributes:@{NSFontAttributeName : font, NSForegroundColorAttributeName : NSColor.secondaryLabelColor}]];
+        self.label.attributedStringValue = text;
+    }
+    NSString *tip = url.absoluteString;
+    if (self.label.toolTip != tip && ![self.label.toolTip isEqualToString:tip]) self.label.toolTip = tip;
     CGFloat height = ceil(self.label.intrinsicContentSize.height);
     NSRect frame = NSMakeRect(10, round((NSHeight(self.bounds) - height) / 2), MAX(0, NSWidth(self.bounds) - 20), height);
     if (!NSEqualRects(self.label.frame, frame)) self.label.frame = frame;

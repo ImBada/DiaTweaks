@@ -2,15 +2,7 @@
 
 static BOOL DPIsLinkAddress(NSView *view) { return DPIsKind(view, DPDiaStatusText); }
 
-static void DPStatusText_layout(NSView *self, SEL _cmd) {
-    [DPHideHosts addObject:self];
-    DPEnforceHides(self);
-    DPCallOriginal(DPStatusText_layout, self);
-}
-
-static void DPInstallHideLinkAddress(void) {
-    DPHook(DPDiaStatusText, @selector(layout), (IMP)DPStatusText_layout);
-}
+static void DPInstallHideLinkAddress(void) { DPHostHides(DPDiaStatusText); }
 
 DP_PATCH(DPHideLinkAddress) {
     .key = @"hideLinkAddress",

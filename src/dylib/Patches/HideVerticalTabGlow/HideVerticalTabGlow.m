@@ -32,22 +32,9 @@ static void DPTabShape_restyle(NSView *self, SEL _cmd) {
     if (DPHideVerticalTabGlow.on || DPGet(self, &DPTabStyledKey)) DPStyleTab(self);
 }
 
-static void DPCollectAllShapes(NSView *view, Class cls, NSMutableArray<NSView *> *out) {
-    if ([view isKindOfClass:cls]) [out addObject:view];
-    for (NSView *sub in view.subviews) DPCollectAllShapes(sub, cls, out);
-}
-
 static void DPApplyHideVerticalTabGlow(DPPatch *patch) {
     for (NSView *shape in DPFindViews(DPDiaTabShape)) DPStyleTab(shape);
-    if (!patch->on) {
-        for (NSView *shape in DPStyledShapes.allObjects) DPStyleTab(shape);
-        return;
-    }
-    Class cls = objc_getClass(DPDiaTabShape);
-    if (!cls) return;
-    NSMutableArray<NSView *> *all = [NSMutableArray new];
-    for (NSWindow *window in NSApp.windows) DPCollectAllShapes(window.contentView, cls, all);
-    for (NSView *shape in all) DPStyleTab(shape);
+    for (NSView *shape in patch->on ? DPFindAllViews(DPDiaTabShape) : DPStyledShapes.allObjects) DPStyleTab(shape);
 }
 
 static NSString *DPVerifyHideVerticalTabGlow(DPPatch *patch) {

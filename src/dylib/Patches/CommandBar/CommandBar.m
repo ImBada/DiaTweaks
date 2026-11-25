@@ -8,7 +8,8 @@
 
 extern DPPatch DPCommandBar, DPCommandBarBlur, DPCommandBarDarken, DPCommandBarShadow, DPCommandBarInteractive, DPCommandBarKeepText;
 char DPOverlayKey;
-static char DPLayoutKey, DPHomeKey, DPRecentKey, DPBlankKey, DPSplitKey, DPOwnBarKey, DPLeftTextKey, DPClosedAtKey, DPSeenKey;
+static char DPLayoutKey, DPHomeKey, DPRecentKey, DPBlankKey, DPSplitKey, DPOwnBarKey, DPLeftTextKey, DPClosedAtKey, DPNewGroupAtKey, DPSeenKey, DPSeenSetKey, DPKeptSetKey;
+static CGFloat DPAnchorHeight;
 
 static NSString *const DPHeightKey = @"commandBarHeight", *const DPDarknessKey = @"commandBarDarkness",
                 *const DPBlurRadiusKey = @"commandBarBlurRadius", *const DPBlurWindowKey = @"commandBarBlurWindow",
@@ -18,13 +19,6 @@ static NSString *const DPHeightKey = @"commandBarHeight", *const DPDarknessKey =
 + (id)filterWithType:(NSString *)type;
 @end
 
-NSUserDefaults *DPSettings(void) {
-    static NSUserDefaults *settings;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{ settings = [[NSUserDefaults alloc] initWithSuiteName:@"com.diapatches"]; });
-    return settings;
-}
-
 static double DPTuned(NSString *key) {
     static NSDictionary *defaults;
     static dispatch_once_t once;
@@ -32,7 +26,7 @@ static double DPTuned(NSString *key) {
         defaults = @{ DPHeightKey : @0.3, DPDarknessKey : @0.24, DPBlurRadiusKey : @4, DPBlurWindowKey : @NO,
                       DPShadowIntensityKey : @0.3 };
     });
-    return [([DPSettings() objectForKey:key] ?: defaults[key]) doubleValue];
+    return [([DPSettingsDefaults() objectForKey:key] ?: defaults[key]) doubleValue];
 }
 
 NSMenuItem *DPMenuItemTitled(NSMenu *menu, NSString *title) {
@@ -51,25 +45,65 @@ static BOOL DPMatchesShortcut(NSEvent *event, NSMenuItem *item) {
         && [event.charactersIgnoringModifiers caseInsensitiveCompare:item.keyEquivalent] == NSOrderedSame;
 }
 
-static BOOL DPIsShortcut(NSEvent *event, NSString *menuTitle) {
-    if (event.type != NSEventTypeKeyDown && event.type != NSEventTypeKeyUp) return NO;
-    return DPMatchesShortcut(event, DPMenuItemTitled(NSApp.mainMenu, menuTitle));
+static NSMenuItem *DPMainMenuItem(NSString *title) {
+    static NSMapTable<NSString *, NSMenuItem *> *found;
+    if (!found) found = [NSMapTable strongToWeakObjectsMapTable];
+    NSMenuItem *item = [found objectForKey:title];
+    NSMenu *root = item.menu;
+    while (root.supermenu) root = root.supermenu;
+    if (item && root == NSApp.mainMenu && [item.title isEqualToString:title]) return item;
+    item = DPMenuItemTitled(NSApp.mainMenu, title);
+    [found setObject:item forKey:title];
+    return item;
 }
 
-// Tabs already seen or kept on Dia's own page; a closed last tab's replacement is neither.
-static NSMutableSet<NSString *> *DPSeenTabs, *DPKeptTabs;
+static BOOL DPIsShortcut(NSEvent *event, NSString *menuTitle) {
+    if (event.type != NSEventTypeKeyDown && event.type != NSEventTypeKeyUp) return NO;
+    return DPMatchesShortcut(event, DPMainMenuItem(menuTitle));
+}
+
+static BOOL DPHasURL(id tab) { return [[DPValueForKey(tab, @"URL") description] length] > 0; }
+
+static BOOL DPTakeStamp(NSWindow *window, const void *key) {
+    NSNumber *at = DPGet(window, key);
+    DPSet(window, key, nil);
+    return at && NSProcessInfo.processInfo.systemUptime - at.doubleValue < 1;
+}
+
+static NSMutableSet<NSString *> *DPWindowSet(NSWindow *window, const void *key);
+
+// Tabs already seen or kept on Dia's own page; a closed last tab's replacement is neither, even when its pane arrives first.
+static NSMutableSet<NSString *> *DPSeenTabs(NSWindow *window) { return DPWindowSet(window, &DPSeenSetKey); }
+static NSMutableSet<NSString *> *DPKeptTabs(NSWindow *window) { return DPWindowSet(window, &DPKeptSetKey); }
+
+static void DPNoteTabs(NSMutableSet<NSString *> *tabs, id scriptWindow) {
+    for (id tab in DPScriptTabs(scriptWindow)) if (DPTabID(tab)) [tabs addObject:DPTabID(tab)];
+}
+
+static void DPForgetClosedTabs(NSWindow *window, id scriptWindow, NSString *active) {
+    id profiles = DPValueForKey(scriptWindow, @"appleScriptProfiles");
+    if (![profiles isKindOfClass:NSArray.class]) return;
+    NSMutableSet *live = [NSMutableSet set];
+    for (id profile in profiles) DPNoteTabs(live, profile);
+    if (!live.count) return;
+    if (active) [live addObject:active];
+    [DPSeenTabs(window) intersectSet:live];
+    [DPKeptTabs(window) intersectSet:live];
+}
 
 static NSString *DPNoteActiveTab(NSWindow *window, id scriptWindow, BOOL *seen) {
-    NSString *active = DPActiveTabIDIn(scriptWindow);
-    DPSeenTabs = DPSeenTabs ?: [NSMutableSet set];
+    id activeTab = DPValueForKey(scriptWindow, @"activeTab");
+    NSString *active = DPTabID(activeTab);
+    NSMutableSet *seenTabs = DPSeenTabs(window);
     if (scriptWindow && !DPGet(window, &DPSeenKey)) {
         DPSet(window, &DPSeenKey, @YES);
-        for (id tab in DPScriptTabs(scriptWindow)) [DPSeenTabs addObject:DPTabID(tab) ?: @""];
+        DPNoteTabs(seenTabs, scriptWindow);
     }
-    if (seen) *seen = active && [DPSeenTabs containsObject:active];
-    if (active) [DPSeenTabs addObject:active];
+    if (seen) *seen = active && [seenTabs containsObject:active];
+    if (active && (seen || DPHasURL(activeTab))) [seenTabs addObject:active];
     NSArray *recent = DPGet(window, &DPRecentKey);
     if (active && ![recent.lastObject isEqual:active]) DPSet(window, &DPRecentKey, recent.count ? @[ recent.lastObject, active ] : @[ active ]);
+    DPForgetClosedTabs(window, scriptWindow, active);
     return active;
 }
 
@@ -93,8 +127,6 @@ static BOOL DPInSplit(NSView *view) {
     for (NSView *other in pane.superview.subviews) if (other != pane && DPIsKind(other, DPDiaSplitPane)) return YES;
     return NO;
 }
-
-#pragma mark Overlay
 
 NSTextView *DPBarText(DPCommandBarOverlay *overlay) {
     return (NSTextView *)DPFindView(overlay.panel, ^BOOL(NSView *view) { return [view isKindOfClass:NSTextView.class]; });
@@ -139,8 +171,6 @@ static NSRect DPBarFrame(NSView *view, NSSize size, CGFloat collapsedHeight) {
     CGFloat y = MAX(MIN(origin.y, NSMaxY(inside) - size.height), NSMinY(inside));
     return NSMakeRect(round(x), round(y), size.width, size.height);
 }
-
-#pragma mark Shade
 
 // CABackdropLayer is the only blur that reaches GPU-composited web content.
 static CALayer *DPBlurLayer(void) {
@@ -208,16 +238,11 @@ static NSView *DPAddShade(NSWindow *window, BOOL blur) {
 }
 
 static void DPUpdatePanelShadow(NSView *panel) {
-    if (!panel) return;
-    if (DPCommandBarShadow.on) {
-        NSShadow *shadow = [NSShadow new];
-        shadow.shadowColor = [NSColor colorWithWhite:0 alpha:MIN(MAX(DPTuned(DPShadowIntensityKey), 0), 0.8)];
-        shadow.shadowBlurRadius = 32;
-        shadow.shadowOffset = NSMakeSize(0, 0);
-        panel.shadow = shadow;
-    } else {
-        panel.shadow = nil;
-    }
+    if (!panel || !DPCommandBarShadow.on) return (void)(panel.shadow = nil);
+    NSShadow *shadow = [NSShadow new];
+    shadow.shadowColor = [NSColor colorWithWhite:0 alpha:MIN(MAX(DPTuned(DPShadowIntensityKey), 0), 0.8)];
+    shadow.shadowBlurRadius = 32;
+    panel.shadow = shadow;
 }
 
 void DPShowShade(DPCommandBarOverlay *overlay) {
@@ -229,31 +254,37 @@ void DPShowShade(DPCommandBarOverlay *overlay) {
     overlay.shade = DPAddShade(overlay.host, !overlay.windowBlur);
 }
 
+static void DPFitText(DPCommandBarOverlay *overlay, NSTextView *text);
+
 @implementation DPCommandBarOverlay
 
 - (void)dealloc {
     [_watch invalidate];
     if (_keyMonitor) [NSEvent removeMonitor:_keyMonitor];
+    DPStopWatchingText(self);
 }
 
 - (BOOL)isFlipped { return YES; }
 
+// ⌘L's popover reports another collapsed height than the new tab bar, so both place their top from the new tab bar's one-line height.
 - (NSRect)frameForPanelSize:(NSSize)size {
-    if (!DPIsKind(self.page, DPDiaPopover)) {
-        // Measure the bar directly because tweaks may clip the panel and launch restore lays it out narrow first.
-        NSView *bar = DPFindView(self.panel, ^BOOL(NSView *view) { return DPIsKind(view, DPDiaCommandBar); });
-        if (!self.collapsedHeight || NSWidth(bar.frame) != self.collapsedWidth) {
-            self.collapsedWidth = NSWidth(bar.frame);
-            self.collapsedHeight = NSHeight(bar.frame) - DPSuggestionsHeight(self.panel);
-        }
-        return DPBarFrame(self, size, self.collapsedHeight);
+    if (DPIsKind(self.page, DPDiaPopover)) {
+        size.width = MIN(652, NSWidth((DPCardIn(self.host) ?: self).bounds) - 28);
+        return DPBarFrame(self, size, DPAnchorHeight ?: size.height - DPSuggestionsHeight(self.panel));
     }
-    size.width = MIN(652, NSWidth((DPCardIn(self.host) ?: self).bounds) - 28);
-    return DPBarFrame(self, size, size.height - DPSuggestionsHeight(self.panel));
+    // Measure the bar directly because tweaks may clip the panel and launch restore lays it out narrow first.
+    NSView *bar = DPFindView(self.panel, ^BOOL(NSView *view) { return DPIsKind(view, DPDiaCommandBar); });
+    if (!self.collapsedHeight || NSWidth(bar.frame) != self.collapsedWidth) {
+        self.collapsedWidth = NSWidth(bar.frame);
+        self.collapsedHeight = NSHeight(bar.frame) - DPSuggestionsHeight(self.panel) - self.extraHeight;
+    }
+    DPAnchorHeight = self.collapsedHeight;
+    return DPBarFrame(self, size, self.collapsedHeight);
 }
 
 - (void)layout {
     [super layout];
+    DPFitText(self, DPBarText(self));
     if (self.panel) {
         NSRect target = [self frameForPanelSize:self.panel.frame.size];
         if (!NSEqualRects(self.panel.frame, target)) self.panel.frame = target;
@@ -289,7 +320,36 @@ void DPShowShade(DPCommandBarOverlay *overlay) {
 
 @end
 
-#pragma mark Presenting
+static void DPFitPanel(DPCommandBarOverlay *overlay, NSView *suggestions) {
+    NSView *panel = overlay.panel;
+    CGFloat want = overlay.collapsedHeight + overlay.extraHeight + DPSuggestionsHeight(panel);
+    if (!panel || NSHeight(panel.frame) == want) return;
+    panel.frame = [overlay frameForPanelSize:NSMakeSize(NSWidth(panel.frame), want)];
+    for (NSView *view = suggestions.superview; view && view != panel; view = view.superview) {
+        view.frame = NSMakeRect(0, 0, NSWidth(view.frame), NSHeight(panel.frame));
+        view.needsLayout = YES;
+    }
+    [panel layoutSubtreeIfNeeded];
+}
+
+static CGFloat DPTextHeight(NSTextView *text) {
+    NSTextLayoutManager *modern = text.textLayoutManager;
+    if (!modern) return NSHeight([text.layoutManager usedRectForTextContainer:text.textContainer]);
+    [modern ensureLayoutForRange:modern.documentRange];
+    return NSHeight(modern.usageBoundsForTextContainer);
+}
+
+// The lifted bar has no constraints to grow it, so give it a second line once its text wraps, as Dia's own bar does.
+static void DPFitText(DPCommandBarOverlay *overlay, NSTextView *text) {
+    NSClipView *clip = text.enclosingScrollView.contentView;
+    NSFont *font = text.font;
+    if (!clip || !font || DPIsKind(overlay.page, DPDiaPopover)) return;
+    BOOL wraps = DPTextHeight(text) > 1.5 * (font.ascender - font.descender + font.leading);
+    CGFloat extra = wraps ? overlay.extraHeight ?: NSHeight(clip.bounds) : 0;
+    if (extra == overlay.extraHeight) return;
+    overlay.extraHeight = extra;
+    DPFitPanel(overlay, DPFindView(overlay.panel, ^BOOL(NSView *view) { return DPIsKind(view, DPDiaCommandBarSuggestions); }));
+}
 
 static void DPHideBars(NSView *page, BOOL hidden) {
     NSView *pane = page.superview;
@@ -322,8 +382,6 @@ static void DPHidePage(NSView *page, BOOL hidden) {
 BOOL DPHasStrip(NSWindow *window) {
     return DPFindView(window.contentView, ^BOOL(NSView *view) { return DPIsKind(view, DPDiaTabStripTabs) && !view.isHiddenOrHasHiddenAncestor; }) != nil;
 }
-
-static BOOL DPHasURL(id tab);
 
 void DPMakeBlank(NSView *page, NSString *tab, NSString *closing) {
     if (!tab || DPInSplit(page)) return;
@@ -410,8 +468,6 @@ static BOOL DPSwipeSettling(DPCommandBarOverlay *overlay, id scriptWindow) {
     return now - overlay.listlessSince < 3;
 }
 
-// Another space came forward, leaving the bar's tab in the old one. Close it unless a result is opening in it,
-// it was opened over a blank tab, or it's its space's only tab.
 static void DPLeaveSpace(DPCommandBarOverlay *overlay, id scriptWindow) {
     NSString *openedID = DPTabID(overlay.openedTab);
     id space = DPScriptProfileHolding(scriptWindow, openedID), left = DPScriptTabIn(space, openedID);
@@ -470,6 +526,12 @@ static BOOL DPClickSubmits(DPCommandBarOverlay *overlay, NSEvent *event) {
 
 id DPWatchKeys(DPCommandBarOverlay *overlay) {
     __weak DPCommandBarOverlay *weak = overlay;
+    NSTextView *text = DPBarText(overlay);
+    DPStopWatchingText(overlay);
+    if (text)
+        overlay.textWatch = @[ [NSNotificationCenter.defaultCenter addObserverForName:NSTextDidChangeNotification object:text queue:nil usingBlock:^(NSNotification *note) {
+            DPFitText(weak, note.object);
+        }] ];
     NSEventMask mask = NSEventMaskKeyDown | NSEventMaskLeftMouseUp | NSEventMaskLeftMouseDown | NSEventMaskRightMouseDown;
     return [NSEvent addLocalMonitorForEventsMatchingMask:mask handler:^NSEvent *(NSEvent *event) {
         DPCommandBarOverlay *overlay = weak;
@@ -485,7 +547,7 @@ id DPWatchKeys(DPCommandBarOverlay *overlay) {
         }
         BOOL escape = event.keyCode == 53, close = NO;
         if (!escape && (event.modifierFlags & DPTriggerMods)) {
-            NSMenuItem *closeItem = DPMenuItemTitled(NSApp.mainMenu, @"Close Tab");
+            NSMenuItem *closeItem = DPMainMenuItem(@"Close Tab");
             close = closeItem ? DPMatchesShortcut(event, closeItem)
                               : (event.modifierFlags & DPShortcutMods) == NSEventModifierFlagCommand && event.keyCode == 13;
         }
@@ -551,6 +613,15 @@ static CGFloat DPStyleAsNewTab(NSView *panel) {
     return grown;
 }
 
+// Dia moves its bar from the centre to its place with animations of its own, and opens it inside any animation group; the bar stays put from its first frame.
+static void DPStopMoving(NSView *panel) {
+    CALayer *layer = panel.layer;
+    for (NSString *key in layer.animationKeys) {
+        NSString *path = [(CAPropertyAnimation *)[layer animationForKey:key] keyPath];
+        if ([path hasPrefix:@"position"] || [path hasPrefix:@"bounds"] || [path isEqualToString:@"frame"]) [layer removeAnimationForKey:key];
+    }
+}
+
 static DPCommandBarOverlay *DPLiftBar(NSView *page, id tabBehind) {
     NSWindow *window = page.window;
     NSView *content = window.contentView, *panel = DPFindView(page, ^BOOL(NSView *view) { return DPIsKind(view, DPDiaAssistantPanel); });
@@ -581,11 +652,54 @@ static DPCommandBarOverlay *DPLiftBar(NSView *page, id tabBehind) {
     return overlay;
 }
 
-static BOOL DPHasURL(id tab) { return [[DPValueForKey(tab, @"URL") description] length] > 0; }
-
 static void DPCaughtUpSoon(NSWindow *window) {
     __weak NSWindow *weak = window;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 150 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{ DPDiaCaughtUp(weak); });
+}
+
+static void DPHoldBarTab(DPCommandBarOverlay *overlay) {
+    NSWindow *window = overlay.host;
+    NSString *openedID = DPTabID(overlay.openedTab);
+    BOOL overBlank = overlay.overBlank;
+    if (overlay.returnTab) {
+        DPHideTabRow(openedID, window);
+        DPStandInFor(window, openedID);
+        DPNoteSpare(openedID, YES);
+        DPNoteOpenTab(openedID, YES);
+    } else if (overBlank && DPParksTab(openedID)) {
+        DPFreezeLists(window);
+        DPParkTab(openedID, NO);
+        DPStandInFor(window, openedID);
+    } else if (!overBlank && DPHiding() && !DPHasStrip(window)) {
+        DPHideTabRow(openedID, window);
+        DPStandInFor(window, openedID);
+        DPNoteOpenTab(openedID, YES);
+    } else DPStopExpecting();
+}
+
+// A new tab can open before Dia has named it, and its row can't be hidden by a name it hasn't got.
+static void DPHoldBarTabOnceNamed(DPCommandBarOverlay *overlay, int checks) {
+    if (!checks) return;
+    __weak DPCommandBarOverlay *weak = overlay;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 50 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
+        if (!weak.host) return;
+        if (DPTabID(weak.openedTab)) DPHoldBarTab(weak);
+        else DPHoldBarTabOnceNamed(weak, checks - 1);
+    });
+}
+
+static void DPPresentCommandBar(NSView *page, BOOL overBlank);
+
+// Dia can mount the new tab page a moment before the bar's panel arrives in it.
+static void DPPresentWhenBuilt(NSView *page, BOOL overBlank, int checks) {
+    if (!checks) return;
+    __weak NSView *weak = page;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 50 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
+        NSView *page = weak;
+        if (!DPCommandBar.on || !page.window || DPGet(page, &DPOverlayKey) || DPGet(page, &DPOwnBarKey) || DPGet(page, &DPBlankKey)) return;
+        if (DPFindView(page, ^BOOL(NSView *view) { return DPIsKind(view, DPDiaAssistantPanel); })) DPPresentCommandBar(page, overBlank);
+        else DPPresentWhenBuilt(page, overBlank, checks - 1);
+    });
 }
 
 static void DPPresentCommandBar(NSView *page, BOOL overBlank) {
@@ -597,17 +711,20 @@ static void DPPresentCommandBar(NSView *page, BOOL overBlank) {
     NSArray *recent = DPGet(window, &DPRecentKey);
     if (![recent.lastObject isEqual:openedID]) returnID = recent.lastObject;
     id returnTab = overBlank || !returnID ? nil : DPScriptTabIn(scriptWindow, returnID);
-    DPKeptTabs = DPKeptTabs ?: [NSMutableSet set];
-    BOOL hasPage = openedID && !overBlank && (DPHasURL(openedTab) || [DPKeptTabs containsObject:openedID]);
-    BOOL returnsToPage = returnTab && [DPKeptTabs containsObject:returnID] && !DPHasURL(returnTab);
+    NSMutableSet *kept = DPKeptTabs(window);
+    BOOL hasPage = openedID && !overBlank && (DPHasURL(openedTab) || [kept containsObject:openedID]);
+    BOOL returnsToPage = returnTab && [kept containsObject:returnID] && !DPHasURL(returnTab);
     // Keep Dia's own page for tabs with history or splits, since returning mid-switch to a split crashes Dia.
     if (hasPage || returnsToPage || DPInSplit(page) || (!overBlank && [(NSSet *)DPGet(window, &DPSplitKey) containsObject:returnID])) {
-        if (openedID) [DPKeptTabs addObject:openedID];
+        if (openedID) [kept addObject:openedID];
         DPStopExpecting();
         return (void)DPSet(page, &DPOwnBarKey, @YES);
     }
     DPCommandBarOverlay *overlay = openedTab ? DPLiftBar(page, returnTab) : nil;
-    if (!overlay) return DPStopExpecting();
+    if (!overlay) {
+        DPStopExpecting();
+        return DPPresentWhenBuilt(page, overBlank, 8);
+    }
     if (overBlank) {
         [DPBlanks(window) removeObject:openedID];
         DPSet(page, &DPBlankKey, nil);
@@ -621,17 +738,8 @@ static void DPPresentCommandBar(NSView *page, BOOL overBlank) {
     overlay.openedTab = openedTab;
     overlay.startURL = DPValueForKey(openedTab, @"URL");
     DPSet(overlay, &DPLayoutKey, @(DPHasStrip(window)));
-    if (overlay.returnTab) {
-        DPHideTabRow(openedID, window);
-        DPStandInFor(window, openedID);
-        DPNoteSpare(openedID, YES);
-        DPNoteOpenTab(openedID, YES);
-    } else if (overBlank && DPParksTab(openedID)) {
-        DPFreezeLists(window);
-        DPParkTab(openedID, NO);
-        DPStandInFor(window, openedID);
-    } else DPStopExpecting();
-
+    DPHoldBarTab(overlay);
+    if (!openedID) DPHoldBarTabOnceNamed(overlay, 10);
     DPWatch(overlay);
     if (!overlay.returnTab) return DPParkIfSpare(overlay);
     __weak DPCommandBarOverlay *weak = overlay;
@@ -671,18 +779,20 @@ static void DPCloseLeftBlank(NSWindow *window) {
     if (!DPHasURL(blank)) DPCloseTab(blank);
 }
 
-#pragma mark Hooks
-
 static void DPPanel_setFrame(NSView *self, SEL _cmd, NSRect frame) {
-    if ([self.superview isKindOfClass:DPCommandBarOverlay.class]) {
-        DPCommandBarOverlay *overlay = (DPCommandBarOverlay *)self.superview;
-        if (DPIsKind(overlay.page, DPDiaPopover)) {
-            frame.size.height += DPStyleAsNewTab(self);
-            overlay.sizedAt = CACurrentMediaTime();
-        }
-        frame = [overlay frameForPanelSize:frame.size];
+    if (![self.superview isKindOfClass:DPCommandBarOverlay.class]) return DPCallOriginal(DPPanel_setFrame, self, frame);
+    DPCommandBarOverlay *overlay = (DPCommandBarOverlay *)self.superview;
+    if (DPIsKind(overlay.page, DPDiaPopover)) {
+        frame.size.height += DPStyleAsNewTab(self);
+        overlay.sizedAt = CACurrentMediaTime();
     }
-    DPCallOriginal(DPPanel_setFrame, self, frame);
+    frame = [overlay frameForPanelSize:frame.size];
+    [NSAnimationContext beginGrouping];
+    NSAnimationContext.currentContext.duration = 0;
+    NSAnimationContext.currentContext.allowsImplicitAnimation = NO;
+    DPWithoutAnimation(^{ DPCallOriginal(DPPanel_setFrame, self, frame); });
+    [NSAnimationContext endGrouping];
+    DPStopMoving(self);
 }
 
 static DPCommandBarOverlay *DPOverlayAbove(NSView *view) {
@@ -697,15 +807,7 @@ static void DPSuggestions_invalidateIntrinsicContentSize(NSView *self, SEL _cmd)
     if (!overlay || DPIsKind(overlay.page, DPDiaPopover)) return;
     __weak NSView *suggestions = self;
     dispatch_async(dispatch_get_main_queue(), ^{
-        NSView *panel = overlay.panel;
-        CGFloat want = overlay.collapsedHeight + DPSuggestionsHeight(panel);
-        if (!panel || suggestions.intrinsicContentSize.height < 0 || NSHeight(panel.frame) == want) return;
-        panel.frame = [overlay frameForPanelSize:NSMakeSize(NSWidth(panel.frame), want)];
-        for (NSView *view = suggestions.superview; view && view != panel; view = view.superview) {
-            view.frame = NSMakeRect(0, 0, NSWidth(view.frame), NSHeight(panel.frame));
-            view.needsLayout = YES;
-        }
-        [panel layoutSubtreeIfNeeded];
+        if (suggestions.intrinsicContentSize.height >= 0) DPFitPanel(overlay, suggestions);
     });
 }
 
@@ -736,14 +838,18 @@ static BOOL DPCloseStoodIn(NSWindow *window) {
     return YES;
 }
 
+// A click the bar takes never reaches AutoPip's hooks underneath, so it holds PiP itself.
 static BOOL DPClickedNewTab(NSWindow *window) {
     if (!DPCommandBar.on) return NO;
-    if (DPCloseStoodIn(window)) return YES;
-    DPSet(window, &DPClosedAtKey, nil);
-    DPNotMakingSpare();
-    if (DPShowSpare(window) || DPOpenOverBlank(window)) return YES;
-    DPExpectNewTab(window);
-    return NO;
+    BOOL taken = DPCloseStoodIn(window);
+    if (!taken) {
+        DPSet(window, &DPClosedAtKey, nil);
+        DPNotMakingSpare();
+        taken = DPShowSpare(window) || DPOpenOverBlank(window);
+    }
+    if (taken) DPHoldAutoPip();
+    else DPExpectNewTab(window);
+    return taken;
 }
 
 static void DPNewTabButton_mouseDown(NSView *self, SEL _cmd, NSEvent *event) {
@@ -773,7 +879,6 @@ static BOOL DPResponderInSidePanel(id responder) {
     return NO;
 }
 
-// Typing belongs to another field when text outside the blank tab, or a Side Chat or Peek page, has the keyboard.
 static BOOL DPTypingElsewhere(NSWindow *window) {
     NSResponder *responder = window.firstResponder;
     if (![responder isKindOfClass:NSView.class]) return NO;
@@ -798,7 +903,7 @@ static NSEvent *DPCommandBarKey(NSEvent *event) {
     if (!DPCommandBar.on || !DPIsKind(window, DPDiaWindow) || window.attachedSheet) return event;
     NSEventModifierFlags mods = event.modifierFlags;
     BOOL hasShortcutMod = (mods & DPTriggerMods) != 0;
-    if (hasShortcutMod && DPIsShortcut(event, @"Close Tab")) DPSet(window, &DPClosedAtKey, @(event.timestamp));
+    if (hasShortcutMod && DPIsShortcut(event, @"Close Tab")) DPSet(window, &DPClosedAtKey, @(NSProcessInfo.processInfo.systemUptime));
     NSSet *blanks = DPGet(window, &DPBlankKey);
     if (blanks.count && DPHiding() && !(mods & (NSEventModifierFlagCommand | NSEventModifierFlagControl))
         && !DPGet(window, &DPOverlayKey) && event.characters.length) {
@@ -911,6 +1016,7 @@ static void DPScheduleLayoutCheck(NSWindow *window) {
 static void DPTabList_viewDidMoveToWindow(NSView *self, SEL _cmd) {
     DPCallOriginal(DPTabList_viewDidMoveToWindow, self);
     DPScheduleLayoutCheck(self.window);
+    if (self.window && (DPHidingATab(self.window) || DPParkingAny())) DPRelayoutLists();
 }
 
 static void DPStrip_viewDidMoveToWindow(NSView *self, SEL _cmd) {
@@ -933,21 +1039,25 @@ static void DPNewTabPage_viewDidMoveToWindow(NSView *self, SEL _cmd) {
         if (overlay.returnTab) dispatch_async(dispatch_get_main_queue(), ^{ if (overlay.host) DPFocusTab(overlay.returnTab); });
         return;
     }
+    if (overlay.returnTab && [active isEqual:DPTabID(overlay.returnTab)] && ![blanks containsObject:active]) return (void)DPSet(self, &DPOwnBarKey, @YES);
     // Dia opens a closing last tab's replacement before removing it; returning to a closing tab crashes Dia.
-    NSNumber *closedAt = DPGet(window, &DPClosedAtKey);
-    DPSet(window, &DPClosedAtKey, nil);
-    BOOL justClosed = closedAt && NSProcessInfo.processInfo.systemUptime - closedAt.doubleValue < 1;
-    BOOL closing = justClosed || DPIsShortcut(NSApp.currentEvent, @"Close Tab") || (previous && !DPScriptTabIn(scriptWindow, previous));
+    // A tab Dia still reports active after it left every space was closed under it, however it was closed.
+    BOOL gone = seen && DPTabListing(scriptWindow, active) == 0;
+    BOOL closing = gone || DPTakeStamp(window, &DPClosedAtKey) || DPIsShortcut(NSApp.currentEvent, @"Close Tab") || (previous && !DPScriptTabIn(scriptWindow, previous));
     BOOL wasBlank = [blanks containsObject:active];
     if (active && (wasBlank || closing)) {
-        if (!wasBlank && (seen || DPInSplit(self))) {
-            [DPKeptTabs addObject:active];
+        if (!wasBlank && (seen || gone || DPInSplit(self))) {
+            [DPKeptTabs(window) addObject:active];
             DPSet(self, &DPOwnBarKey, @YES);
         } else DPMakeBlank(self, active, previous);
         if (overlay.returnTab && !DPScriptTabIn(scriptWindow, DPTabID(overlay.returnTab))) DPCancelCommandBar(overlay);
         return;
     }
     if (overlay) DPCancelCommandBar(overlay);
+    if (DPTakeStamp(window, &DPNewGroupAtKey)) {
+        DPStopExpecting();
+        return (void)DPSet(self, &DPOwnBarKey, @YES);
+    }
     id blank = [blanks containsObject:previous] ? DPScriptTabIn(scriptWindow, previous) : nil;
     if (blank) {
         [blanks removeObject:previous];
@@ -961,8 +1071,21 @@ static void DPNewTabPage_viewDidMoveToWindow(NSView *self, SEL _cmd) {
     DPPresentCommandBar(self, blank != nil);
 }
 
+static id DPKeyMonitor;
+
+static void DPWatchCommandBarKeys(BOOL on) {
+    if (on == (DPKeyMonitor != nil)) return;
+    if (!on) {
+        [NSEvent removeMonitor:DPKeyMonitor];
+        DPKeyMonitor = nil;
+        return;
+    }
+    DPKeyMonitor = [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskKeyDown handler:^NSEvent *(NSEvent *event) { return DPCommandBarKey(event); }];
+}
+
 static void DPApplyCommandBar(DPPatch *patch) {
     BOOL on = DPCommandBar.on;
+    DPWatchCommandBarKeys(on);
     for (NSWindow *window in NSApp.windows) {
         if (!on) {
             for (NSString *blank in (NSSet *)DPGet(window, &DPBlankKey)) DPHideBlank(blank, NO, window);
@@ -983,6 +1106,7 @@ static void DPApplyCommandBar(DPPatch *patch) {
         if (tab && !nowhereToGo) DPCloseTab(tab);
     }
     if (!on) {
+        DPAnchorHeight = 0;
         DPCleanHideTab();
         DPUpdateSpareTimer();
         Class pageCls = objc_getClass(DPDiaNewTabPage);
@@ -1027,8 +1151,23 @@ static NSString *DPVerifyCommandBar(DPPatch *patch) {
     return nil;
 }
 
+static void DPTabContent_closeButtonClicked(NSView *self, SEL _cmd) {
+    if (DPCommandBar.on && self.window) DPSet(self.window, &DPClosedAtKey, @(NSProcessInfo.processInfo.systemUptime));
+    DPCallOriginal(DPTabContent_closeButtonClicked, self);
+}
+
+static void DPNoteMenuAction(NSNotification *note) {
+    NSString *title = [note.userInfo[@"MenuItem"] title];
+    NSWindow *window = DPIsKind(NSApp.keyWindow, DPDiaWindow) ? NSApp.keyWindow : NSApp.mainWindow;
+    if (!DPCommandBar.on || !window) return;
+    BOOL closes = [title hasPrefix:@"Close Tab"] || [title hasPrefix:@"Close Other Tabs"];
+    const void *key = closes ? &DPClosedAtKey : [title hasPrefix:@"New Group"] ? &DPNewGroupAtKey : NULL;
+    if (key) DPSet(window, key, @(NSProcessInfo.processInfo.systemUptime));
+}
+
 static void DPInstallCommandBar(void) {
-    [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskKeyDown handler:^NSEvent *(NSEvent *event) { return DPCommandBarKey(event); }];
+    DPWatchCommandBarKeys(DPCommandBar.on);
+    [NSNotificationCenter.defaultCenter addObserverForName:NSMenuWillSendActionNotification object:nil queue:nil usingBlock:^(NSNotification *note) { DPNoteMenuAction(note); }];
     [NSNotificationCenter.defaultCenter addObserverForName:NSWindowWillCloseNotification object:nil queue:nil usingBlock:^(NSNotification *note) {
         NSWindow *window = note.object;
         DPForgetSpare(window);
@@ -1053,9 +1192,8 @@ static void DPInstallCommandBar(void) {
     DPHook(DPDiaAssistantPanel, @selector(setFrame:), (IMP)DPPanel_setFrame);
     DPHook(DPDiaCommandBarSuggestions, @selector(invalidateIntrinsicContentSize), (IMP)DPSuggestions_invalidateIntrinsicContentSize);
     DPHook(DPDiaCapabilityButton, @selector(mouseDown:), (IMP)DPCapability_mouseDown);
+    DPHook(DPDiaTabContentView, NSSelectorFromString(@"closeButtonClicked"), (IMP)DPTabContent_closeButtonClicked);
 }
-
-#pragma mark Settings rows
 
 @interface DPCommandBarTuneRow : NSStackView <NSTextFieldDelegate>
 @property(copy) NSString *key;
@@ -1071,10 +1209,11 @@ static void DPInstallCommandBar(void) {
                                                           : round(MIN(MAX(control.doubleValue, 0), self.slider.maxValue));
     self.slider.doubleValue = shown;
     self.field.doubleValue = shown;
-    [DPSettings() setDouble:shown / self.scale forKey:self.key];
+    [DPSettingsDefaults() setDouble:shown / self.scale forKey:self.key];
     for (NSWindow *window in NSApp.windows) {
         DPCommandBarOverlay *overlay = DPGet(window, &DPOverlayKey);
-        if (overlay) DPShowShade(overlay);
+        if (!overlay) continue;
+        DPShowShade(overlay);
         overlay.needsLayout = YES;
     }
 }
@@ -1176,6 +1315,7 @@ DP_PATCH(DPCommandBar) {
     .choice = @"commandBarPosition",
     .defaultChoice = @"macos",
     .choices = DPCommandBarPositions,
+    .settings = DPSettingList({DPSettingNumber, @"commandBarHeight", .defaultNumber = 0.3, .min = 0, .max = 0.5}),
     .rows = DPCommandBarRows,
     .install = DPInstallCommandBar,
     .apply = DPApplyCommandBar,
@@ -1192,6 +1332,8 @@ DP_PATCH(DPCommandBarBlur) {
     .tint = @"systemOrangeColor",
     .requires = @"commandBar",
     .section = @"Appearance",
+    .settings = DPSettingList({DPSettingNumber, @"commandBarBlurRadius", .defaultNumber = 4, .min = 0, .max = 60},
+                              {DPSettingBool, @"commandBarBlurWindow", .defaultBool = NO}),
     .rows = DPCommandBarBlurRows,
     .apply = DPApplyCommandBar,
 };
@@ -1206,6 +1348,7 @@ DP_PATCH(DPCommandBarDarken) {
     .tint = @"systemOrangeColor",
     .requires = @"commandBar",
     .section = @"Appearance",
+    .settings = DPSettingList({DPSettingNumber, @"commandBarDarkness", .defaultNumber = 0.24, .min = 0, .max = 0.8}),
     .rows = DPCommandBarDarkenRows,
     .apply = DPApplyCommandBar,
 };
@@ -1220,6 +1363,7 @@ DP_PATCH(DPCommandBarShadow) {
     .tint = @"systemOrangeColor",
     .requires = @"commandBar",
     .section = @"Appearance",
+    .settings = DPSettingList({DPSettingNumber, @"commandBarShadowIntensity", .defaultNumber = 0.3, .min = 0, .max = 0.8}),
     .rows = DPCommandBarShadowRows,
     .apply = DPApplyCommandBar,
 };

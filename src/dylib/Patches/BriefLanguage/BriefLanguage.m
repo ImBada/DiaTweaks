@@ -7,13 +7,12 @@ extern DPPatch DPBriefLanguage;
 static NSString *const DPBriefHeading = @"## Output language: ";
 static BOOL DPBuilding, DPStale, DPBuilt;
 
-static NSString *DPBriefPrompt(void) {
-    NSString *path = [NSBundle.mainBundle.resourcePath stringByAppendingPathComponent:@"agent-server-resources/dist/prompts/skills/morning-brief/SKILL.md"];
-    return [NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:NULL];
+static NSString *DPBriefPromptPath(void) {
+    return [NSBundle.mainBundle.resourcePath stringByAppendingPathComponent:@"agent-server-resources/dist/prompts/skills/morning-brief/SKILL.md"];
 }
 
 static NSString *DPInstalledLanguage(void) {
-    NSString *prompt = DPBriefPrompt();
+    NSString *prompt = [NSString stringWithContentsOfFile:DPBriefPromptPath() encoding:NSUTF8StringEncoding error:NULL];
     NSRange heading = [prompt rangeOfString:DPBriefHeading options:NSBackwardsSearch];
     if (!heading.length) return nil;
     NSString *rest = [prompt substringFromIndex:NSMaxRange(heading)];
@@ -42,7 +41,7 @@ static void DPAlert(NSString *message, NSString *detail) {
 static void DPRebuild(void) {
     if (DPBuilding) return (void)(DPStale = YES);
     DPBuilding = YES;
-    CFPreferencesAppSynchronize(CFSTR("com.diapatches"));
+    CFPreferencesAppSynchronize((__bridge CFStringRef)DPSettingsDomain());
     DPRunCLI(@[ @"build" ], ^(NSString *output) {
         DPBuilding = NO;
         DPBuilt = YES;
@@ -60,17 +59,17 @@ static void DPRebuild(void) {
     });
 }
 
+static BOOL DPHasBriefPrompt(void) { return [NSFileManager.defaultManager fileExistsAtPath:DPBriefPromptPath()]; }
+
 static void DPApplyBriefLanguage(DPPatch *patch) {
-    if (DPTesting || !DPBriefPrompt()) return;
     // Pause turns patches off without saving: keep the language Dia was built with.
-    if (patch->on != DPSavedOn(patch)) return;
+    if (DPTesting || patch->on != DPSavedOn(patch) || !DPHasBriefPrompt()) return;
     // diapatch reads only saved settings, so persist the macOS-derived default before building.
-    NSUserDefaults *defaults = [[NSUserDefaults alloc] initWithSuiteName:@"com.diapatches"];
-    if (patch->on && ![defaults stringForKey:patch->choice]) [defaults setObject:DPChoice(patch) forKey:patch->choice];
+    if (patch->on && ![DPSettingsDefaults() stringForKey:patch->choice]) [DPSettingsDefaults() setObject:DPChoice(patch) forKey:patch->choice];
     if (DPBuilt || DPBuilding || !DPSame(DPWantedLanguage(), DPInstalledLanguage())) DPRebuild();
 }
 
-static NSString *DPVerifyBriefLanguage(DPPatch *patch) { return DPBriefPrompt() ? nil : @"Dia’s Morning Brief prompt isn’t in its bundle"; }
+static NSString *DPVerifyBriefLanguage(DPPatch *patch) { return DPHasBriefPrompt() ? nil : @"Dia’s Morning Brief prompt isn’t in its bundle"; }
 
 static NSArray<NSArray<NSString *> *> *DPLanguages(void) {
     return @[
@@ -99,10 +98,11 @@ static NSMenu *DPBriefLanguageChoices(void) {
 
 DP_PATCH(DPBriefLanguage) {
     .key = @"briefLanguage",
+    .experimental = YES,
     .order = 117,
     .title = @"Morning Brief Language",
     .detail = @"Choose the language Dia writes your Morning Brief in, whatever language your messages and documents are in. "
-              @"Dia is rebuilt with that language added to its Morning Brief prompt, then relaunches. The next brief uses it. Experimental.",
+              @"Dia is rebuilt with that language added to its Morning Brief prompt, then relaunches. The next brief uses it.",
     .symbol = @"character.bubble.fill character.bubble",
     .tint = @"systemPurpleColor",
     .section = @"AI",

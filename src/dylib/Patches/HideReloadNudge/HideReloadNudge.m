@@ -1,15 +1,13 @@
 #import "StdPatch/StdPatch.h"
 
 extern DPPatch DPHideReloadNudge;
-static Class DPReloadNudge;
 
 static void DPPopover_show(NSPopover *self, SEL _cmd, NSRect rect, NSView *anchor, NSRectEdge edge) {
-    if (DPHideReloadNudge.on && [self.contentViewController isKindOfClass:DPReloadNudge]) return;
+    if (DPHideReloadNudge.on && DPIsKind(self.contentViewController, DPDiaReloadNudge)) return;
     DPCallOriginal(DPPopover_show, self, rect, anchor, edge);
 }
 
 static void DPInstallHideReloadNudge(void) {
-    DPReloadNudge = objc_getClass(DPDiaReloadNudge);
     DPHookClass(NSPopover.class, @selector(showRelativeToRect:ofView:preferredEdge:), (IMP)DPPopover_show);
 }
 

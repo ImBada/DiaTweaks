@@ -85,6 +85,40 @@ static DPSendResult DPSendScripted(int fd, NSData *data, bool checkSecondary, in
     return result;
 }
 
+static BOOL gStuck;
+
+static DPSendResult DPStallingSend(int fd, const void *buffer, size_t length, int flags, const struct sockaddr *address,
+                                   socklen_t addressLength) {
+    int call = gCalls++;
+    if (call > 0 && (gStuck || call == 1)) return errno = EAGAIN, (DPSendResult){ -1, 0 };
+    return (DPSendResult){ send(fd, buffer, call ? length : MIN(length, 100), flags), 0 };
+}
+
+// BoringSSL retries a -1/EAGAIN write from its first byte, so once part of the split is out nothing may report EAGAIN.
+static void DPCheckNonBlockingPartial(NSData *hello) {
+    NSMutableData *expected = [NSMutableData dataWithLength:hello.length + 5];
+    DPSplitHello(hello.bytes, hello.length, expected.mutableBytes, 7);
+    for (int stuck = 0; stuck < 2; stuck++) {
+        int pair[2];
+        NSCAssert(socketpair(AF_UNIX, SOCK_STREAM, 0, pair) == 0 && fcntl(pair[0], F_SETFL, O_NONBLOCK) == 0, @"non-blocking pair");
+        gStuck = stuck, gCalls = 0;
+        DPSendResult result = { 0, 0 };
+        NSCAssert(DPSendSplit(pair[0], hello.bytes, hello.length, 0, 7, DPStallingSend, true, &result), @"splits on a non-blocking pair");
+        int error = errno;
+        fcntl(pair[1], F_SETFL, O_NONBLOCK);
+        NSMutableData *wire = [NSMutableData dataWithLength:expected.length + 64];
+        ssize_t got = recv(pair[1], wire.mutableBytes, wire.length, 0);
+        if (stuck) {
+            NSCAssert(result.sent == -1 && error == ETIMEDOUT, @"a split stuck after its first chunk fails the connection instead of returning EAGAIN");
+            NSCAssert(got == 100 && !memcmp(wire.bytes, expected.bytes, 100), @"and sends nothing past what went out");
+        } else {
+            NSCAssert(result.sent == (ssize_t)hello.length && gCalls == 3, @"EAGAIN on the second chunk waits, then reports the whole ClientHello");
+            NSCAssert(got == (ssize_t)expected.length && !memcmp(wire.bytes, expected.bytes, expected.length), @"the peer gets each split byte exactly once");
+        }
+        close(pair[0]), close(pair[1]);
+    }
+}
+
 static void DPCheckSend(NSData *hello) {
     int pair[2], datagrams[2];
     NSCAssert(socketpair(AF_UNIX, SOCK_STREAM, 0, pair) == 0 && socketpair(AF_UNIX, SOCK_DGRAM, 0, datagrams) == 0, @"socket pairs");
@@ -187,6 +221,7 @@ int main(void) {
             free(exact);
         }
         DPCheckSend(hello);
+        DPCheckNonBlockingPartial(hello);
         puts("all Split TLS ClientHello checks passed");
     }
 }

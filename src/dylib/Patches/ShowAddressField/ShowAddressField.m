@@ -51,11 +51,20 @@ static void DPSetHover(NSView *field, BOOL hovered) {
 
 static Class DPAddressFieldClass;
 
+// Every tracker's mouseMoved: lands here, so the ivar lookup, which takes the runtime lock, runs once per class.
 static BOOL DPKeepsHover(id tracker) {
-    if (!DPShowAddressField.on) return NO;
-    void *slot = DPIvar(tracker, "view");
-    id view = slot ? objc_loadWeak((__autoreleasing id *)slot) : nil;
-    return DPAddressFieldClass && [view isKindOfClass:DPAddressFieldClass];
+    if (!DPShowAddressField.on || !DPAddressFieldClass || !tracker) return NO;
+    static Class known;
+    static ptrdiff_t offset = -1;
+    Class cls = object_getClass(tracker);
+    if (cls != known) {
+        Ivar ivar = class_getInstanceVariable(cls, "view");
+        offset = ivar ? ivar_getOffset(ivar) : -1;
+        known = cls;
+    }
+    if (offset < 0) return NO;
+    id view = objc_loadWeak((__autoreleasing id *)(void *)((uint8_t *)(__bridge void *)tracker + offset));
+    return [view isKindOfClass:DPAddressFieldClass];
 }
 
 static void DPTracker_mouseEntered(id self, SEL _cmd, NSEvent *event) {

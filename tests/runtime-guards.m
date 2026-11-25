@@ -8,7 +8,6 @@ void DPSetHint(NSView *view, NSString *text) {}
 NSString *DPHintOf(NSView *view) { return nil; }
 BOOL DPShortcutRecording(void) { return NO; }
 BOOL DPEventIsKey(NSEvent *event, NSString *key) { return [event.charactersIgnoringModifiers.lowercaseString isEqualToString:key]; }
-NSNotificationName const DPPatchesDidChangeNotification = @"DPPatchesDidChange";
 NSToolbarItemIdentifier const DPSearchItemIdentifier = @"DiaPatchesSearch";
 
 @implementation DPPaneView
@@ -40,9 +39,14 @@ void DPInstallGroupTabs(void) {}
 void DPInstallGroupTabsShortcut(void) {}
 NSDictionary *DPDefaultGroupTabsShortcut(void) { return nil; }
 DPPatch DPGroupTabsMergeSubdomains = { .key = @"groupTabsMergeSubdomains" };
-DPPatch *const *DPPatches;
-NSUInteger DPPatchCount;
+NSInteger DPSafeMode;
+BOOL DPPaused, DPPausedAtLaunch;
+BOOL DPPauseSaved(void) { return NO; }
+NSUInteger DPLocalLoad(void) { return 0; }
+DPPatch **DPLocalPatches(void) { return NULL; }
+void DPLocalRepairLinks(void) {}
 
+#import "StdPatch/Patch.m"
 #import "StdPatch/TypedURL.m"
 #import "StdPatch/Hide.m"
 #import "StdPatch/HideHosts.m"
@@ -84,6 +88,45 @@ static void expect(BOOL ok, NSString *what) {
 int main(void) {
     @autoreleasepool {
         [NSApplication sharedApplication];
+
+        const char *originalHome = getenv("DIAPATCH_HOME");
+        NSString *savedHome = originalHome ? @(originalHome) : nil;
+        unsetenv("DIAPATCH_HOME");
+        NSString *systemTool = DPAppSupport(@"DiaPatches/bin/diapatch");
+        expect([systemTool hasSuffix:@"/Library/Application Support/DiaPatches/bin/diapatch"], @"DPAppSupport defaults to the system Application Support folder");
+        setenv("DIAPATCH_HOME", "/tmp/dp-home-one", 1);
+        expect([DPAppSupport(@"DiaPatches") isEqualToString:@"/tmp/dp-home-one"] && [DPAppSupport(@"DiaPatches/bin/diapatch") isEqualToString:@"/tmp/dp-home-one/bin/diapatch"],
+               @"DPAppSupport follows DIAPATCH_HOME set after an earlier call");
+        expect([DPAppSupport(@"Google/Chrome") isEqualToString:@"/tmp/dp-home-one/Google/Chrome"], @"paths outside DiaPatches land under DIAPATCH_HOME");
+        setenv("DIAPATCH_HOME", "/tmp/dp-home-two", 1);
+        expect([DPAppSupport(@"DiaPatches/local") isEqualToString:@"/tmp/dp-home-two/local"], @"DPAppSupport follows each setenv immediately");
+        setenv("DIAPATCH_HOME", "", 1);
+        expect([DPAppSupport(@"DiaPatches/bin/diapatch") isEqualToString:systemTool], @"an empty DIAPATCH_HOME is ignored");
+        unsetenv("DIAPATCH_HOME");
+        expect([DPAppSupport(@"DiaPatches/bin/diapatch") isEqualToString:systemTool], @"unsetting DIAPATCH_HOME returns to the system folder");
+        if (savedHome) setenv("DIAPATCH_HOME", savedHome.UTF8String, 1);
+
+        const char *originalDomain = getenv("DIATWEAKS_DOMAIN");
+        NSString *savedDomain = originalDomain ? @(originalDomain) : nil;
+        NSString *domainFolder = [NSTemporaryDirectory() stringByAppendingPathComponent:[NSUUID UUID].UUIDString];
+        NSString *domainOne = [domainFolder stringByAppendingPathComponent:@"one"], *domainTwo = [domainFolder stringByAppendingPathComponent:@"two"];
+        [NSFileManager.defaultManager createDirectoryAtPath:domainFolder withIntermediateDirectories:YES attributes:nil error:nil];
+        unsetenv("DIATWEAKS_DOMAIN");
+        expect([DPSettingsDomain() isEqualToString:@"com.diapatches"], @"DPSettingsDomain defaults to com.diapatches");
+        setenv("DIATWEAKS_DOMAIN", "", 1);
+        expect([DPSettingsDomain() isEqualToString:@"com.diapatches"], @"an empty DIATWEAKS_DOMAIN is ignored");
+        setenv("DIATWEAKS_DOMAIN", domainOne.UTF8String, 1);
+        expect([DPSettingsDomain() isEqualToString:domainOne], @"DPSettingsDomain follows DIATWEAKS_DOMAIN");
+        [DPSettingsDefaults() setBool:YES forKey:@"domainProbe"];
+        setenv("DIATWEAKS_DOMAIN", domainTwo.UTF8String, 1);
+        expect(![DPSettingsDefaults() boolForKey:@"domainProbe"], @"DPSettingsDefaults moves to the new domain on the next call");
+        [DPSettingsDefaults() setBool:NO forKey:@"domainOther"];
+        setenv("DIATWEAKS_DOMAIN", domainOne.UTF8String, 1);
+        expect([DPSettingsDefaults() boolForKey:@"domainProbe"] && [DPSettingsDefaults() objectForKey:@"domainOther"] == nil,
+               @"switching back finds the first domain's switches and none of the second's");
+        NSUserDefaults *probe = [[NSUserDefaults alloc] initWithSuiteName:domainTwo];
+        expect([probe objectForKey:@"domainOther"] != nil && ![probe objectForKey:@"domainProbe"], @"each domain keeps its own switches");
+        setenv("DIATWEAKS_DOMAIN", domainTwo.UTF8String, 1);
 
         expect(DPFindViews(NULL).count == 0, @"DPFindViews(NULL) returns empty without crashing");
         expect(DPSubview([NSView new], NULL) == nil, @"DPSubview(..., NULL) returns nil");
@@ -224,6 +267,10 @@ int main(void) {
         expect(weakSettings == nil, @"DPSettings deallocates cleanly");
         [NSNotificationCenter.defaultCenter postNotificationName:NSViewBoundsDidChangeNotification object:tempClip];
         expect(YES, @"posting NSViewBoundsDidChangeNotification after DPSettings dealloc does not crash");
+
+        if (savedDomain) setenv("DIATWEAKS_DOMAIN", savedDomain.UTF8String, 1);
+        else unsetenv("DIATWEAKS_DOMAIN");
+        [NSFileManager.defaultManager removeItemAtPath:domainFolder error:nil];
     }
     if (!failures) printf("all runtime guard checks passed\n");
     return failures ? 1 : 0;

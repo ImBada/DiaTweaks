@@ -2,7 +2,7 @@
 #import "Patches/HideToolbar/HideToolbar.h"
 
 static const NSTimeInterval DPGlowCycle = 2;
-static const NSTimeInterval DPGlowFinish = 0.3, DPGlowHold = 0.1, DPGlowFade = 0.15;
+static const NSTimeInterval DPGlowFinish = 0.3, DPGlowHold = 0.1, DPGlowFade = 0.15, DPGlowIdle = 0.25;
 static const CGFloat DPGlowEase = 0.15;
 
 @interface DPPeekGlow : NSView
@@ -79,6 +79,21 @@ static const CGFloat DPGlowEase = 0.15;
     DPDrawProgressShader(self.shader, self.shown, fmod(CACurrentMediaTime(), DPGlowCycle) / DPGlowCycle, primary, secondary);
 }
 
+// Pages don't report loading here, so an idle glow looks four times a second and draws at 60 Hz only while it shows.
+- (void)watch {
+    BOOL wanted = self.window && !self.isHiddenOrHasHiddenAncestor;
+    NSTimeInterval interval = self.loading || self.finishing || self.fading ? 1.0 / 60 : DPGlowIdle;
+    if (wanted && self.frames.valid && self.frames.timeInterval == interval) return;
+    [self.frames invalidate];
+    self.frames = nil;
+    if (!wanted) return;
+    __weak DPPeekGlow *weak = self;
+    self.frames = [NSTimer timerWithTimeInterval:interval repeats:YES block:^(NSTimer *timer) {
+        if (weak) [weak step]; else [timer invalidate];
+    }];
+    [NSRunLoop.mainRunLoop addTimer:self.frames forMode:NSRunLoopCommonModes];
+}
+
 - (void)step {
     if (self.isHiddenOrHasHiddenAncestor || self.window.isMiniaturized) return;
     NSObject *page = self.page;
@@ -98,6 +113,7 @@ static const CGFloat DPGlowEase = 0.15;
         self.finishStart = CACurrentMediaTime();
     }
     self.loading = loading;
+    [self watch];
     if (loading) self.fraction = MAX(self.fraction, MAX(0.1, [DPValueForKey(page, @"loadProgress") doubleValue]));
     if (!loading && !self.finishing) return;
     CFTimeInterval since = CACurrentMediaTime() - self.finishStart;
@@ -124,14 +140,19 @@ static const CGFloat DPGlowEase = 0.15;
 
 - (void)viewDidMoveToWindow {
     [super viewDidMoveToWindow];
-    [self.frames invalidate];
-    self.frames = nil;
-    if (!self.window) return;
-    __weak DPPeekGlow *weak = self;
-    self.frames = [NSTimer timerWithTimeInterval:1.0 / 60 repeats:YES block:^(NSTimer *timer) {
-        if (weak) [weak step]; else [timer invalidate];
-    }];
-    [NSRunLoop.mainRunLoop addTimer:self.frames forMode:NSRunLoopCommonModes];
+    [self watch];
+    if (self.window) [self step];
+}
+
+- (void)viewDidHide {
+    [super viewDidHide];
+    [self watch];
+}
+
+- (void)viewDidUnhide {
+    [super viewDidUnhide];
+    [self watch];
+    if (self.window) [self step];
 }
 @end
 

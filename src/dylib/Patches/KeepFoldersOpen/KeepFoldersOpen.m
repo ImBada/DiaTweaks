@@ -3,7 +3,18 @@
 
 extern DPPatch DPKeepFoldersOpen;
 
-static char DPExpandedKey, DPClickedKey, DPReopenedKey, DPModelKey;
+@interface DPFolderState : NSObject {
+@public
+    uintptr_t model;
+    BOOL known, expanded;
+    CFTimeInterval clicked, reopened;
+}
+@end
+
+@implementation DPFolderState
+@end
+
+static char DPStateKey;
 static NSHashTable<NSView *> *DPCollapsedFolders;
 static BOOL DPReopening;
 
@@ -17,15 +28,22 @@ static NSView *DPTopHeader(NSView *folder) {
     return [header isKindOfClass:NSView.class] ? header : nil;
 }
 
-static NSNumber *DPFolderExpanded(NSView *folder) {
+static BOOL DPFolderExpanded(NSView *folder, BOOL *expanded) {
     if (DPIsKind(folder, DPDiaTabGroupView)) {
         BOOL *flag = DPIvar(folder, "shouldDisplayExpandedContainer");
-        return flag ? @(*flag) : nil;
+        if (flag) *expanded = *flag;
+        return flag != NULL;
     }
     id chevron = DPObjectIvar(folder, "$__lazy_storage_$_chevronIconView");
     CALayer *layer = [chevron isKindOfClass:NSView.class] ? ((NSView *)chevron).layer : nil;
-    if (!layer) return nil;
-    return @(fabs(atan2(layer.transform.m12, layer.transform.m11)) < 0.1);
+    if (layer) *expanded = fabs(atan2(layer.transform.m12, layer.transform.m11)) < 0.1;
+    return layer != nil;
+}
+
+static DPFolderState *DPStateOf(NSView *folder) {
+    DPFolderState *state = DPGet(folder, &DPStateKey);
+    if (!state) DPSet(folder, &DPStateKey, state = [DPFolderState new]);
+    return state;
 }
 
 static void DPClickHeader(NSView *folder) {
@@ -47,35 +65,33 @@ static void DPReopenFolders(void) {
     NSArray<NSView *> *folders = DPCollapsedFolders.allObjects;
     [DPCollapsedFolders removeAllObjects];
     // Multiple collapses at once mean collapse-all, not an emptied folder.
-    if (!DPKeepFoldersOpen.on || folders.count != 1 || !folders[0].window || [DPFolderExpanded(folders[0]) boolValue]) return;
-    DPSet(folders[0], &DPReopenedKey, @(CACurrentMediaTime()));
+    BOOL expanded = NO;
+    if (!DPKeepFoldersOpen.on || folders.count != 1 || !folders[0].window || (DPFolderExpanded(folders[0], &expanded) && expanded)) return;
+    DPStateOf(folders[0])->reopened = CACurrentMediaTime();
     DPClickHeader(folders[0]);
 }
 
 static void DPClearFolder(NSView *folder) {
-    DPSet(folder, &DPExpandedKey, nil);
-    DPSet(folder, &DPModelKey, nil);
-    DPSet(folder, &DPClickedKey, nil);
-    DPSet(folder, &DPReopenedKey, nil);
+    if (DPGet(folder, &DPStateKey)) DPSet(folder, &DPStateKey, nil);
 }
 
 static void DPCheckFolder(NSView *folder) {
-    if (!DPKeepFoldersOpen.on) {
-        if (DPGet(folder, &DPExpandedKey) || DPGet(folder, &DPModelKey)) DPClearFolder(folder);
-        return;
+    if (!DPKeepFoldersOpen.on) return DPClearFolder(folder);
+    BOOL expanded;
+    if (!DPFolderExpanded(folder, &expanded) || !folder.window) return;
+    DPFolderState *state = DPStateOf(folder);
+    uintptr_t model = (uintptr_t)DPObjectIvar(folder, "viewModel");
+    if (model != state->model) {
+        if (model) state->known = NO;
+        state->model = model;
     }
-    NSNumber *expanded = DPFolderExpanded(folder);
-    if (!expanded || !folder.window) return;
-    id model = DPObjectIvar(folder, "viewModel");
-    NSValue *modelID = model ? [NSValue valueWithPointer:(__bridge const void *)model] : nil;
-    if (modelID && ![DPGet(folder, &DPModelKey) isEqual:modelID]) DPSet(folder, &DPExpandedKey, nil);
-    DPSet(folder, &DPModelKey, modelID);
-    BOOL collapsed = [DPGet(folder, &DPExpandedKey) boolValue] && !expanded.boolValue;
-    DPSet(folder, &DPExpandedKey, expanded);
+    BOOL collapsed = state->known && state->expanded && !expanded;
+    state->known = YES;
+    state->expanded = expanded;
     CFTimeInterval now = CACurrentMediaTime();
-    if (!collapsed || now - [DPGet(folder, &DPClickedKey) doubleValue] < 1) return;
+    if (!collapsed || now - state->clicked < 1) return;
     if (now - DPFoldedAt < 2) return;
-    if (now - [DPGet(folder, &DPReopenedKey) doubleValue] < 1) return;
+    if (now - state->reopened < 1) return;
     if (!DPCollapsedFolders.count)
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 10), dispatch_get_main_queue(), ^{ DPReopenFolders(); });
     [DPCollapsedFolders addObject:folder];
@@ -87,7 +103,7 @@ static void DPFolder_layout(NSView *self, SEL _cmd) {
 }
 
 static void DPFolder_mouse(NSView *self, SEL _cmd, NSEvent *event) {
-    if (DPKeepFoldersOpen.on && !DPReopening) DPSet(self, &DPClickedKey, @(CACurrentMediaTime()));
+    if (DPKeepFoldersOpen.on && !DPReopening) DPStateOf(self)->clicked = CACurrentMediaTime();
     DPCallOriginal(DPFolder_mouse, self, event);
 }
 
@@ -95,15 +111,17 @@ static void DPHeader_mouse(NSView *self, SEL _cmd, NSEvent *event) {
     if (DPKeepFoldersOpen.on && !DPReopening) {
         NSView *folder = self.superview;
         while (folder && !DPIsKind(folder, DPDiaTabGroupView)) folder = folder.superview;
-        if (folder) DPSet(folder, &DPClickedKey, @(CACurrentMediaTime()));
+        if (folder) DPStateOf(folder)->clicked = CACurrentMediaTime();
     }
     DPCallOriginal(DPHeader_mouse, self, event);
 }
 
 static void DPFolder_prepareForReuse(NSView *self, SEL _cmd) {
     DPCallOriginal(DPFolder_prepareForReuse, self);
-    DPSet(self, &DPExpandedKey, nil);
-    DPSet(self, &DPModelKey, nil);
+    DPFolderState *state = DPGet(self, &DPStateKey);
+    if (!state) return;
+    state->known = NO;
+    state->model = 0;
 }
 
 static void DPApplyKeepFoldersOpen(DPPatch *patch) {

@@ -316,10 +316,10 @@ static void DPTabShape_layout(NSView *self, SEL _cmd) {
         NSView *rim = DPIvarObject(self, "rimHighlightView");
         if (rim) {
             void **slot = DPIvar(rim, "path");
-            if (slot) {
-                CGPathRef old = (CGPathRef)*slot;
+            CFTypeRef old = slot ? *slot : NULL;
+            if (slot && (!old || CFGetTypeID(old) == CGPathGetTypeID())) {
                 *slot = (void *)CGPathRetain(path);
-                if (old) CGPathRelease(old);
+                if (old) CFRelease(old);
             }
             DPShapeLayerIvar(rim, "$__lazy_storage_$_shapeLayer").path = path;
             rim.needsLayout = YES;
@@ -339,24 +339,25 @@ static void DPInstallCompactTabRows(void) {
     DPHook(DPDiaTabList, @selector(performDragOperation:), (IMP)DPTabList_perform);
 }
 
-static void DPCollectCompactViews(NSView *view, Class cls, NSMutableArray<NSView *> *out) {
+static void DPCollectEvery(NSView *view, Class cls, NSMutableArray<NSView *> *out) {
     if ([view isKindOfClass:cls]) [out addObject:view];
-    for (NSView *sub in view.subviews) DPCollectCompactViews(sub, cls, out);
+    for (NSView *sub in view.subviews) DPCollectEvery(sub, cls, out);
 }
 
-static NSArray<NSView *> *DPAllCompactViews(const char *className) {
+// Unlike DPFindViews, also hidden and minimized windows, so a toggle reaches every list.
+NSArray *DPEveryView(const char *className) {
     Class cls = objc_getClass(className);
     if (!cls) return @[];
     NSMutableArray<NSView *> *out = [NSMutableArray new];
-    for (NSWindow *window in NSApp.windows) DPCollectCompactViews(window.contentView, cls, out);
+    for (NSWindow *window in NSApp.windows) DPCollectEvery(window.contentView, cls, out);
     return out;
 }
 
 static void DPApplyCompactTabRows(DPPatch *patch) {
-    for (NSView *view in DPAllCompactViews(DPDiaTabListCollection)) [((NSCollectionView *)view).collectionViewLayout invalidateLayout];
-    for (NSView *cell in DPAllCompactViews(DPDiaTabGroupCell)) cell.needsLayout = YES;
-    for (NSView *shape in DPAllCompactViews(DPDiaTabShape)) shape.needsLayout = YES;
-    for (NSView *label in DPAllCompactViews(DPDiaFeatheredLabel)) {
+    for (NSCollectionView *list in DPEveryView(DPDiaTabListCollection)) [list.collectionViewLayout invalidateLayout];
+    for (NSView *cell in DPEveryView(DPDiaTabGroupCell)) cell.needsLayout = YES;
+    for (NSView *shape in DPEveryView(DPDiaTabShape)) shape.needsLayout = YES;
+    for (NSView *label in DPEveryView(DPDiaFeatheredLabel)) {
         label.needsLayout = YES;
         [label layoutSubtreeIfNeeded];
     }

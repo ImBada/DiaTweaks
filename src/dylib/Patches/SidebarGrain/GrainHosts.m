@@ -1,6 +1,7 @@
 #import "SidebarGrain.h"
 
 NSHashTable<NSView *> *DPGrainHosts;
+static NSMapTable<NSView *, NSView *> *DPGrainPages;
 static char DPGrainViewKey;
 
 static BOOL DPHasSidebarFooter(NSView *view, NSView *strip) {
@@ -19,9 +20,12 @@ BOOL DPGrainHostAvailable(NSView *host) {
 NSRect DPGrainHostBounds(NSView *host) {
     NSRect bounds = host.bounds;
     if (!DPIsKind(host, DPDiaTabStrip)) return bounds;
-    NSView *content = DPFindView(host.window.contentView, ^BOOL(NSView *view) {
-        return DPIsKind(view, DPDiaContentContainer);
-    });
+    if (!DPGrainPages) DPGrainPages = [NSMapTable weakToWeakObjectsMapTable];
+    NSView *content = [DPGrainPages objectForKey:host];
+    if (!content.window || content.window != host.window) {
+        content = DPFindView(host.window.contentView, ^BOOL(NSView *view) { return DPIsKind(view, DPDiaContentContainer); });
+        [DPGrainPages setObject:content forKey:host];
+    }
     if (!content) return NSZeroRect;
     NSRect page = [host convertRect:content.bounds fromView:content];
     CGFloat edge = host.isFlipped ? NSMinY(page) : NSMaxY(page);
@@ -65,6 +69,8 @@ void DPTrackGrainHost(NSView *host) {
 }
 
 void DPRefreshSidebarGrain(void) { DPUpdateGrainHosts(YES); }
+
+void DPRefreshSidebarGrainFrames(void) { DPUpdateGrainHosts(NO); }
 
 NSString *DPVerifyGrainHosts(DPPatch *patch) {
     NSMutableArray<NSView *> *hosts = [NSMutableArray new];

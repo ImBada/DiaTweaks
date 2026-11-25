@@ -15,6 +15,22 @@ NSView *DPGroup(NSArray<NSView *> *rows) {
     NSStackView *stack = [NSStackView new];
     stack.orientation = NSUserInterfaceLayoutOrientationVertical;
     stack.spacing = 0;
+    DPFillView *box = [DPFillView new];
+    stack.translatesAutoresizingMaskIntoConstraints = NO;
+    [box addSubview:stack];
+    [NSLayoutConstraint activateConstraints:@[
+        [stack.leadingAnchor constraintEqualToAnchor:box.leadingAnchor],
+        [stack.trailingAnchor constraintEqualToAnchor:box.trailingAnchor],
+        [stack.topAnchor constraintEqualToAnchor:box.topAnchor],
+        [stack.bottomAnchor constraintEqualToAnchor:box.bottomAnchor],
+    ]];
+    DPSetGroupRows(box, rows);
+    return box;
+}
+
+void DPSetGroupRows(NSView *group, NSArray<NSView *> *rows) {
+    NSStackView *stack = group.subviews.firstObject;
+    for (NSView *view in stack.arrangedSubviews.copy) [view removeFromSuperview];
     [rows enumerateObjectsUsingBlock:^(NSView *row, NSUInteger i, BOOL *_) {
         if (i > 0) {
             DPSeparatorView *line = [DPSeparatorView new];
@@ -25,16 +41,18 @@ NSView *DPGroup(NSArray<NSView *> *rows) {
         [stack addArrangedSubview:row];
         [row.widthAnchor constraintEqualToAnchor:stack.widthAnchor].active = YES;
     }];
-    DPFillView *box = [DPFillView new];
-    stack.translatesAutoresizingMaskIntoConstraints = NO;
-    [box addSubview:stack];
-    [NSLayoutConstraint activateConstraints:@[
-        [stack.leadingAnchor constraintEqualToAnchor:box.leadingAnchor],
-        [stack.trailingAnchor constraintEqualToAnchor:box.trailingAnchor],
-        [stack.topAnchor constraintEqualToAnchor:box.topAnchor],
-        [stack.bottomAnchor constraintEqualToAnchor:box.bottomAnchor],
-    ]];
-    return box;
+}
+
+BOOL DPTidyGroup(NSView *group) {
+    NSArray<NSView *> *views = ((NSStackView *)group.subviews.firstObject).arrangedSubviews;
+    BOOL any = NO;
+    for (NSUInteger i = 0; i < views.count; i += 2) {
+        BOOL visible = !views[i].hidden;
+        if (i) views[i - 1].hidden = !visible || !any;
+        any |= visible;
+    }
+    group.hidden = !any;
+    return any;
 }
 
 NSView *DPRow(NSView *leading, NSView *trailing) {
@@ -51,6 +69,19 @@ NSView *DPRow(NSView *leading, NSView *trailing) {
         [trailing.leadingAnchor constraintGreaterThanOrEqualToAnchor:leading.trailingAnchor constant:12],
         [trailing.trailingAnchor constraintEqualToAnchor:row.trailingAnchor constant:-12],
         [trailing.centerYAnchor constraintEqualToAnchor:row.centerYAnchor],
+    ]];
+    return row;
+}
+
+NSView *DPFullRow(NSView *content) {
+    NSView *row = [NSView new];
+    content.translatesAutoresizingMaskIntoConstraints = NO;
+    [row addSubview:content];
+    [NSLayoutConstraint activateConstraints:@[
+        [content.leadingAnchor constraintEqualToAnchor:row.leadingAnchor constant:12],
+        [content.trailingAnchor constraintEqualToAnchor:row.trailingAnchor constant:-12],
+        [content.topAnchor constraintEqualToAnchor:row.topAnchor constant:10],
+        [content.bottomAnchor constraintEqualToAnchor:row.bottomAnchor constant:-10],
     ]];
     return row;
 }
@@ -102,7 +133,7 @@ NSView *DPLinkRow(NSView *row, NSString *title, void (^open)(void)) {
 + (NSImage *)imageWithPrivateSystemSymbolName:(NSString *)name accessibilityDescription:(NSString *)description;
 @end
 
-// NSImageView throws on a missing symbol, which crashed Settings.
+// NSImageView throws on a missing symbol.
 NSImageView *DPSymbol(NSString *symbols, CGFloat size, NSColor *color) {
     static NSMutableDictionary<NSString *, id> *cache;
     if (!cache) cache = [NSMutableDictionary new];
@@ -159,11 +190,23 @@ NSTextField *DPHiddenNote(void) {
     return note;
 }
 
+NSTextField *DPExperimentalBadge(void) { return DPLabel(@"Experimental", 11, NSFontWeightSemibold, NSColor.systemOrangeColor); }
+
+void DPPresentAlert(NSAlert *alert, NSWindow *window, void (^finish)(NSModalResponse response)) {
+    if (window) [alert beginSheetModalForWindow:window completionHandler:finish];
+    else finish([alert runModal]);
+}
+
+void DPPresentPanel(NSSavePanel *panel, NSWindow *window, void (^finish)(NSModalResponse response)) {
+    if (window) [panel beginSheetModalForWindow:window completionHandler:finish];
+    else finish([panel runModal]);
+}
+
 NSTextField *DPHeader(NSString *text) { return DPLabel(text, 12, NSFontWeightSemibold, NSColor.secondaryLabelColor); }
 
 NSColor *DPTintColor(NSString *tint) {
-    SEL sel = tint.length ? NSSelectorFromString(tint) : NULL;
-    return sel && [NSColor respondsToSelector:sel] ? [NSColor valueForKey:tint] : NSColor.systemGrayColor;
+    id color = [tint hasSuffix:@"Color"] && [NSColor respondsToSelector:NSSelectorFromString(tint)] ? [NSColor valueForKey:tint] : nil;
+    return [color isKindOfClass:NSColor.class] ? color : NSColor.systemGrayColor;
 }
 
 NSTextField *DPLabel(NSString *text, CGFloat size, NSFontWeight weight, NSColor *color) {

@@ -3,24 +3,19 @@
 
 static NSString *const DPWidthKey = @"littleDiaWidth", *const DPHeightKey = @"littleDiaHeight", *const DPFrameKey = @"littleDiaFrame";
 
-static NSUserDefaults *DPSettings(void) {
-    static NSUserDefaults *settings;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{ settings = [[NSUserDefaults alloc] initWithSuiteName:@"com.diapatches"]; });
-    return settings;
+static double DPSavedSize(NSString *key, double fallback, double low, double high) {
+    double value = [DPSettingsDefaults() doubleForKey:key];
+    return value > 0 ? MIN(MAX(value, low), high) : fallback;
 }
 
-NSSize DPLittleDiaSize(void) {
-    NSNumber *width = [DPSettings() objectForKey:DPWidthKey], *height = [DPSettings() objectForKey:DPHeightKey];
-    return NSMakeSize(width ? width.doubleValue : 1180, height ? height.doubleValue : 860);
-}
+NSSize DPLittleDiaSize(void) { return NSMakeSize(DPSavedSize(DPWidthKey, 1180, 480, 2000), DPSavedSize(DPHeightKey, 860, 360, 1400)); }
 
 NSRect DPLittleDiaSavedFrame(void) {
-    NSString *saved = [DPSettings() stringForKey:DPFrameKey];
+    NSString *saved = [DPSettingsDefaults() stringForKey:DPFrameKey];
     return saved ? NSRectFromString(saved) : NSZeroRect;
 }
 
-void DPSaveLittleDiaFrame(NSRect frame) { [DPSettings() setObject:NSStringFromRect(frame) forKey:DPFrameKey]; }
+void DPSaveLittleDiaFrame(NSRect frame) { [DPSettingsDefaults() setObject:NSStringFromRect(frame) forKey:DPFrameKey]; }
 
 @interface DPSizeRow : NSStackView <NSTextFieldDelegate>
 @property (nonatomic, copy) NSString *key;
@@ -34,8 +29,8 @@ void DPSaveLittleDiaFrame(NSRect frame) { [DPSettings() setObject:NSStringFromRe
     double value = round(MIN(MAX(control.doubleValue, self.slider.minValue), self.slider.maxValue));
     self.slider.doubleValue = value;
     self.field.doubleValue = value;
-    [DPSettings() setDouble:value forKey:self.key];
-    [DPSettings() removeObjectForKey:DPFrameKey];
+    [DPSettingsDefaults() setDouble:value forKey:self.key];
+    [DPSettingsDefaults() removeObjectForKey:DPFrameKey];
 }
 
 - (BOOL)control:(NSControl *)control textView:(NSTextView *)textView doCommandBySelector:(SEL)command {
@@ -85,10 +80,8 @@ NSArray<NSView *> *DPLittleDiaRows(void) {
 extern DPPatch DPLittleDiaEscape;
 
 static BOOL DPHasCommandBarOverlay(NSWindow *window) {
-    Class overlayCls = NSClassFromString(@"DPCommandBarOverlay");
-    if (!overlayCls) return NO;
     for (NSView *sub in window.contentView.subviews)
-        if ([sub isKindOfClass:overlayCls] && !sub.isHidden) return YES;
+        if (DPIsKind(sub, "DPCommandBarOverlay") && !sub.isHidden) return YES;
     return NO;
 }
 
@@ -136,10 +129,11 @@ DP_PATCH(DPLittleDiaFollowRules) {
 
 DP_PATCH(DPLittleDiaRemember) {
     .key = @"littleDiaRemember",
+    .experimental = YES,
     .order = 104,
     .title = @"Remember Size and Position",
     .detail = @"Opens Little Dia where and how big you last left it, not centred at the Window Width and Height. Changing either of those forgets it. "
-              @"If that spot isn’t on a screen, it opens centred. Experimental.",
+              @"If that spot isn’t on a screen, it opens centred.",
     .symbol = @"arrow.up.left.and.arrow.down.right",
     .tint = @"systemMintColor",
     .requires = @"littleDia",

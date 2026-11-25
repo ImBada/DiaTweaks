@@ -13,8 +13,8 @@ use crate::{
 };
 
 pub fn set(env: &Env, ui: &Ui, paused: bool) -> Result<()> {
-    let manifest = Manifest::load(&env.manifest())?;
-    let _lock = lock::acquire(&env.support)?;
+    let manifest = Manifest::load(env)?;
+    let _lock = lock::acquire(env, ui)?;
     if dia::is_paused(&env.support) == paused {
         ui.done(if paused {
             "Tweaks are already paused."

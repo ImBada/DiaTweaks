@@ -151,6 +151,7 @@ static void DPPeekShowCover(DPPeekCard *peek, CGImageRef contents, void (^promot
     DPSet(peek, &DPPeekCoverKey, cover);
     [parent addChildWindow:cover ordered:NSWindowAbove];
     cover.displayLink = [parent displayLinkWithTarget:cover selector:@selector(step:)];
+    if (!cover.displayLink) return [cover dismiss];
     [cover.displayLink addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];
     DPPeekUpdateSyncTimer();
     // A hidden or switched-away destination may never get its display ticks.

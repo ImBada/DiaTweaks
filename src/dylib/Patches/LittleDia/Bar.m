@@ -8,6 +8,7 @@
 @property (nonatomic) NSButton *profiles;
 @property (nonatomic) NSView *address;
 @property (nonatomic) NSView *divider;
+@property (nonatomic, weak) NSView *downloads;
 @property (nonatomic, copy) NSString *profile;
 @property (nonatomic) NSTimer *timer;
 @end
@@ -231,8 +232,7 @@ static NSButton *DPMakeProfilesButton(void) {
 - (void)dealloc { [_timer invalidate]; }
 @end
 
-static char DPBarKey;
-static char DPHiddenByUsKey;
+static char DPBarKey, DPHiddenByUsKey, DPDiaOriginKey, DPDiaSizeKey;
 static const CGFloat DPAddressHeight = 30;
 
 // The page has no change notifications that reach here, so the bar looks at it a few times a second.
@@ -258,6 +258,28 @@ static BOOL DPNameOpenButton(DPLittleBar *bar) {
     return YES;
 }
 
+static void DPRemoveBar(NSView *title) {
+    DPLittleBar *bar = DPGet(title, &DPBarKey);
+    if (!bar) return;
+    DPSet(title, &DPBarKey, nil);
+    [bar.timer invalidate];
+    for (NSView *view in [bar.leading arrayByAddingObjectsFromArray:@[ bar.open, bar.profiles ]]) [view removeFromSuperview];
+    [bar.address removeFromSuperview];
+    [bar.divider removeFromSuperview];
+    title.alphaValue = 1;
+    DPMatchPage(title.superview, nil);
+    for (NSView *view in title.superview.subviews)
+        if ([DPGet(view, &DPHiddenByUsKey) boolValue]) {
+            view.hidden = NO;
+            DPSet(view, &DPHiddenByUsKey, nil);
+        }
+    NSValue *origin = DPGet(title, &DPDiaOriginKey), *size = DPGet(title, &DPDiaSizeKey);
+    DPSet(title, &DPDiaOriginKey, nil);
+    DPSet(title, &DPDiaSizeKey, nil);
+    if (origin) [title setFrameOrigin:origin.pointValue];
+    if (size) [title setFrameSize:size.sizeValue];
+}
+
 static DPLittleBar *DPMakeBar(NSView *title) {
     DPLittleBar *bar = [DPLittleBar new];
     bar.title = title;
@@ -279,7 +301,8 @@ static DPLittleBar *DPMakeBar(NSView *title) {
     __weak DPLittleBar *weakBar = bar;
     bar.timer = [NSTimer scheduledTimerWithTimeInterval:0.25 repeats:YES block:^(NSTimer *timer) {
         DPLittleBar *live = weakBar;
-        if (!live) return [timer invalidate];
+        if (!live.title) return [timer invalidate];
+        if (!DPLittleDia.on) return DPRemoveBar(live.title);
         if (!live.title.window) return;
         DPUpdateButtons(live);
         if (DPNameOpenButton(live)) DPRelayoutLittleDiaBars();
@@ -287,6 +310,16 @@ static DPLittleBar *DPMakeBar(NSView *title) {
         DPMatchPage(live.title.superview, DPLittleDiaPage(live.title.window));
     }];
     return bar;
+}
+
+// Newer Dia shows and hides its Downloads button inside a stack, so hide the row's view that holds it.
+static NSView *DPDownloadsHolder(DPLittleBar *bar, NSView *row) {
+    if (bar.downloads.superview == row) return bar.downloads;
+    NSArray<NSView *> *ours = [@[ bar.open, bar.profiles, bar.address, bar.divider, bar.title ] arrayByAddingObjectsFromArray:bar.leading];
+    for (NSView *view in row.subviews)
+        if (!view.hidden && ![ours containsObject:view] && DPFindView(view, ^BOOL(NSView *each) { return DPHasLabel(each, @"Downloads"); }))
+            return bar.downloads = view;
+    return nil;
 }
 
 static void DPPlaceBar(DPLittleBar *bar) {
@@ -327,39 +360,17 @@ static void DPPlaceBar(DPLittleBar *bar) {
     CGFloat hairline = 1 / MAX(1, row.window.backingScaleFactor);
     if (bar.divider.superview != row) [row addSubview:bar.divider];
     bar.divider.frame = NSMakeRect(0, row.isFlipped ? NSHeight(row.bounds) - hairline : 0, NSWidth(row.bounds), hairline);
-    // Newer Dia shows and hides its Downloads button inside a stack, so hide the row's view that holds it.
-    for (NSView *view in row.subviews)
-        if (!view.hidden && DPFindView(view, ^BOOL(NSView *each) { return DPHasLabel(each, @"Downloads"); })) {
-            view.hidden = YES;
-            DPSet(view, &DPHiddenByUsKey, @YES);
-        }
+    NSView *downloads = DPDownloadsHolder(bar, row);
+    if (downloads && !downloads.hidden) {
+        downloads.hidden = YES;
+        DPSet(downloads, &DPHiddenByUsKey, @YES);
+    }
     DPUpdateButtons(bar);
 }
 
-static void DPRemoveBar(NSView *title) {
-    DPLittleBar *bar = DPGet(title, &DPBarKey);
-    if (!bar) return;
-    DPSet(title, &DPBarKey, nil);
-    [bar.timer invalidate];
-    for (NSView *view in [bar.leading arrayByAddingObjectsFromArray:@[ bar.open, bar.profiles ]]) [view removeFromSuperview];
-    [bar.address removeFromSuperview];
-    [bar.divider removeFromSuperview];
-    title.alphaValue = 1;
-    DPMatchPage(title.superview, nil);
-    for (NSView *view in title.superview.subviews)
-        if ([DPGet(view, &DPHiddenByUsKey) boolValue]) {
-            view.hidden = NO;
-            DPSet(view, &DPHiddenByUsKey, nil);
-        }
-}
-
-static char DPDiaOriginKey, DPDiaSizeKey;
-
 static BOOL DPInPopupBar(NSView *view) {
-    Class barClass = objc_getClass(DPDiaPopupBar);
-    if (!barClass) return NO;
     for (NSView *each = view.superview; each; each = each.superview)
-        if ([each isKindOfClass:barClass]) return YES;
+        if (DPIsKind(each, DPDiaPopupBar)) return YES;
     return NO;
 }
 
@@ -384,8 +395,14 @@ static DPLittleBar *DPActiveBar(NSView *title) {
     return nil;
 }
 
+// Dia's own address title shares this class, so anything that isn't, or won't be, a Little Dia bar passes straight through.
+static BOOL DPTitlePassesThrough(NSView *title) {
+    BOOL wanted = DPLittleDia.on && DPIsLittleDiaWindow(title.window);
+    return (!wanted && !DPGet(title, &DPBarKey)) || !DPInPopupBar(title);
+}
+
 static void DPTitle_setFrameOrigin(NSView *self, SEL _cmd, NSPoint origin) {
-    if (!DPInPopupBar(self)) return DPCallOriginal(DPTitle_setFrameOrigin, self, origin);
+    if (DPTitlePassesThrough(self)) return DPCallOriginal(DPTitle_setFrameOrigin, self, origin);
     DPSet(self, &DPDiaOriginKey, [NSValue valueWithPoint:origin]);
     DPLittleBar *bar = DPActiveBar(self);
     if (!bar) return DPCallOriginal(DPTitle_setFrameOrigin, self, origin);
@@ -394,7 +411,7 @@ static void DPTitle_setFrameOrigin(NSView *self, SEL _cmd, NSPoint origin) {
 }
 
 static void DPTitle_setFrameSize(NSView *self, SEL _cmd, NSSize size) {
-    if (!DPInPopupBar(self)) return DPCallOriginal(DPTitle_setFrameSize, self, size);
+    if (DPTitlePassesThrough(self)) return DPCallOriginal(DPTitle_setFrameSize, self, size);
     DPSet(self, &DPDiaSizeKey, [NSValue valueWithSize:size]);
     if (!DPGet(self, &DPDiaOriginKey)) DPSet(self, &DPDiaOriginKey, [NSValue valueWithPoint:self.frame.origin]);
     DPLittleBar *bar = DPActiveBar(self);

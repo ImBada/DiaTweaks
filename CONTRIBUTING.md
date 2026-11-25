@@ -17,6 +17,7 @@ Each patch is one folder in `src/dylib/Patches/`, built on StdPatch: `src/dylib/
 
 - `make patch NAME=HideFooButton` creates `Patches/HideFooButton/HideFooButton.m` with a `DP_PATCH` in it. That registers it: its row in Settings, its saved switch, its place in `make test` and its entry in `build/patches.json`, the list `diatweaks` shows, come from the fields, and `.order` sets where it's listed.
 - Find what to change with the developer tools. Turn them on with `defaults write com.diapatches devTools -bool YES`, relaunch Dia, and use **Help → DiaPatches: Copy View Tree** for the front window's views with their classes, frames and accessibility labels.
+- Chasing a layout loop or a view that won't stop resizing? Quit Dia and open it with `DIAPATCH_LAYOUT_LOOPS=1 /Applications/Dia.app/Contents/MacOS/Dia`. It writes the views that lay out over and over to `layout-loops.txt` next to `DiaPatches.dylib`. It's off otherwise, devTools or not, because it slows every view down, and the file is deleted the next time Dia opens without it.
 - Hiding a button only takes a `.hides` function, such as `DPHasLabel(view, @"Recent tabs")` or `DPIsKind(view, DPDiaLibraryButton)`. StdPatch hides it wherever Dia shows it, and checks it in `make test`.
 - Anything else hooks Dia in `.install` with `DPHook`, and calls through with `DPCallOriginal`. Dia's class names go in `StdPatch/Dia.h`.
 - `.apply` applies a toggle at once. Without it the patch animates: `progress` eases between 0 and 1 while `.relayout` runs each frame.

@@ -193,7 +193,7 @@ static void testBriefLanguage(NSString *dir) {
     makeDir(skillDir);
     makeDir(home);
 
-    NSString *domain = [NSString stringWithFormat:@"com.diapatches.test.brief.%d", getpid()];
+    NSString *domain = [dir stringByAppendingPathComponent:@"brief-prefs"];
     CFStringRef cfdom = (__bridge CFStringRef)domain;
     setenv("DIATWEAKS_DOMAIN", domain.UTF8String, 1);
 
@@ -248,6 +248,18 @@ static void testBriefLanguage(NSString *dir) {
     CFPreferencesAppSynchronize(cfdom);
 }
 
+static void testFeedFollowsDomain(NSString *dir) {
+    NSString *domain = [dir stringByAppendingPathComponent:@"feed-prefs"];
+    setenv("DIATWEAKS_DOMAIN", domain.fileSystemRepresentation, 1);
+    unsetenv("DIAPATCH_FEED");
+    CFPreferencesSetAppValue(CFSTR("diaFeed"), CFSTR("https://example.invalid/early-birds.xml"), (__bridge CFStringRef)domain);
+    CFPreferencesAppSynchronize((__bridge CFStringRef)domain);
+    expect([diaFeed() isEqual:@"https://example.invalid/early-birds.xml"], @"the Early Birds feed is read from DIATWEAKS_DOMAIN");
+    CFPreferencesSetAppValue(CFSTR("diaFeed"), NULL, (__bridge CFStringRef)domain);
+    CFPreferencesAppSynchronize((__bridge CFStringRef)domain);
+    unsetenv("DIATWEAKS_DOMAIN");
+}
+
 static void testIconCatalog(NSString *dir) {
     NSString *bad = [dir stringByAppendingPathComponent:@"bad.car"];
     [@"corrupt" writeToFile:bad atomically:YES encoding:NSUTF8StringEncoding error:NULL];
@@ -274,6 +286,121 @@ static void testUninstallPreservesStateWhenPristineMissing(NSString *dir) {
     expect(exists(helper), @"failed uninstall does not tear down relay/files before pristine check");
 }
 
+static void testRootGuard(void) {
+    unsetenv("DIAPATCH_ALLOW_ROOT");
+    expect(refusesRoot(@"install", 0) && refusesRoot(@"apply", 0) && refusesRoot(@"local", 0), @"root can't change Dia or local tweaks");
+    expect(!refusesRoot(@"status", 0) && !refusesRoot(@"check", 0) && !refusesRoot(@"--help", 0), @"root can still read status, check and help");
+    expect(!refusesRoot(@"install", 501), @"a normal user can install");
+    setenv("DIAPATCH_ALLOW_ROOT", "1", 1);
+    expect(!refusesRoot(@"install", 0), @"DIAPATCH_ALLOW_ROOT lets root through");
+    unsetenv("DIAPATCH_ALLOW_ROOT");
+}
+
+static void testLogCap(NSString *dir) {
+    gHome = [dir stringByAppendingPathComponent:@"log-home"];
+    makeDir(gHome);
+    NSString *log = inHome(@"diapatch.log"), *old = inHome(@"diapatch.old.log");
+    [[NSMutableData dataWithLength:(1 << 20) + 1] writeToFile:log atomically:YES];
+    [@"older" writeToFile:old atomically:YES encoding:NSUTF8StringEncoding error:NULL];
+    struct stat before, after;
+    gLog = fopen(log.fileSystemRepresentation, "ae");
+    setvbuf(gLog, NULL, _IOLBF, 0);
+    fstat(fileno(gLog), &before);
+    capLog();
+    note(@"after the cap");
+    fstat(fileno(gLog), &after);
+    fclose(gLog);
+    expect(after.st_ino == before.st_ino, @"capping keeps the log's inode, which other runs lock");
+    expect(after.st_size > 0 && after.st_size < 100, @"a log over 1 MB starts over");
+    expect([[NSFileManager.defaultManager attributesOfItemAtPath:old error:NULL] fileSize] == (1 << 20) + 1, @"the full log replaces diapatch.old.log");
+
+    gLog = fopen(log.fileSystemRepresentation, "ae");
+    capLog();
+    fstat(fileno(gLog), &before);
+    fclose(gLog);
+    gLog = NULL;
+    expect(before.st_size == after.st_size, @"a small log is left alone");
+}
+
+static void testLoginKeychain(NSString *dir) {
+    NSString *folder = [dir stringByAppendingPathComponent:@"Keychains"];
+    NSString *legacy = [folder stringByAppendingPathComponent:@"login.keychain"], *current = [folder stringByAppendingPathComponent:@"login.keychain-db"];
+    makeDir(folder);
+    expect(!firstKeychain(@"security: SecKeychainCopyDefault: A default keychain could not be found.", folder), @"no keychain at all signs ad hoc");
+    [NSData.data writeToFile:legacy atomically:YES];
+    expect([firstKeychain(@"\"/nonexistent/login.keychain-db\"", folder) isEqual:legacy], @"a Mac migrated from before Sierra uses login.keychain");
+    [NSData.data writeToFile:current atomically:YES];
+    expect([firstKeychain(nil, folder) isEqual:current], @"login.keychain-db wins over login.keychain");
+    expect([firstKeychain([NSString stringWithFormat:@"    \"%@\"\n", legacy], folder) isEqual:legacy], @"the default keychain security reports wins");
+}
+
+static void testHalfStagedApply(NSString *dir) {
+    gHome = [dir stringByAppendingPathComponent:@"apply-home"];
+    gApp = [dir stringByAppendingPathComponent:@"Applied.app"];
+    gStaged = inHome(@"staged/Dia.app");
+    gReady = inHome(@"staged/ready");
+    makeDir([gStaged stringByAppendingPathComponent:@"Contents"]);
+    gFailure = nil;
+    expect(apply(), @"apply succeeds when a stopped build left an unfinished staged Dia");
+    expect(!exists(gStaged) && !exists(gReady) && !exists(gApp), @"apply cleans up the unfinished staged Dia and never installs it");
+    expect(!gFailure, @"cleaning up an unfinished staged Dia isn't an error");
+
+    makeDir(gStaged);
+    [@"1" writeToFile:gReady atomically:YES encoding:NSUTF8StringEncoding error:NULL];
+    expect(apply() && !exists(gStaged) && !exists(gReady) && !exists(gApp), @"apply discards an old Dia a stopped apply swapped into staged/");
+}
+
+static void testMoveDiagnosis(NSString *dir) {
+    NSString *locked = [dir stringByAppendingPathComponent:@"locked"], *bundle = [dir stringByAppendingPathComponent:@"Incoming.app"];
+    makeDir(locked);
+    makeDir(bundle);
+    gApp = [locked stringByAppendingPathComponent:@"Dia.app"];
+    chmod(locked.fileSystemRepresentation, 0555);
+    gFailure = nil;
+    expect(!moveBundle(bundle, gApp) && exists(bundle), @"moveBundle can't replace Dia in a folder the user can't write");
+    expect([gFailure containsString:@"isn't writable by your user account"] && [gFailure containsString:@"sudo chown -R"]
+               && ![gFailure containsString:@"App Management"],
+           @"an unwritable folder names ownership, not App Management");
+    gHome = [locked stringByAppendingPathComponent:@"home"];
+    expect(!makeDir(inHome(@"staged")) && [gFailure containsString:[@"your account can't write to " stringByAppendingString:locked]],
+           @"makeDir names the folder the user can't write");
+    chmod(locked.fileSystemRepresentation, 0755);
+    NSString *missing = [NSHomeDirectory() stringByAppendingPathComponent:[@"Library/dp-missing-" stringByAppendingString:NSUUID.UUID.UUIDString]];
+    expect([unwritable(missing) containsString:[NSString stringWithFormat:@"sudo chown -R \"%@\" \"%@/Library\"", NSUserName(), NSHomeDirectory()]],
+           @"a folder in the home folder gets the exact chown command for its nearest existing parent");
+
+    gApp = bundle;
+    expect([moveProblem(locked, gApp, EPERM) containsString:@"App Management"], @"EPERM in a writable folder points at App Management");
+    expect([moveProblem(locked, gApp, EROFS) containsString:@"read-only volume"], @"EROFS names the read-only volume");
+    expect(onReadOnlyVolume(@"/System/Library/CoreServices/Finder.app") && !onReadOnlyVolume(@"/Applications") && !onReadOnlyVolume(dir),
+           @"onReadOnlyVolume tells the sealed system volume from the data volume");
+}
+
+static void testRememberedDia(NSString *dir) {
+    gHome = [dir stringByAppendingPathComponent:@"remember-home"];
+    NSString *own = [dir stringByAppendingPathComponent:@"Applications/Dia.app"];
+    makeDir(own);
+    makeDir(gHome);
+    [own writeToFile:inHome(@"dia-app") atomically:YES encoding:NSUTF8StringEncoding error:NULL];
+    expect([findDia() isEqual:own], @"apply from Dia's quit hook targets the Dia install patched, even outside /Applications");
+    removeTree(own);
+    expect(![findDia() isEqual:own], @"a Dia that has since moved isn't used");
+}
+
+static volatile sig_atomic_t gHangups;
+
+static void countHangup(int number) { gHangups++; }
+
+static void testShield(void) {
+    signal(SIGHUP, countHangup);
+    sigset_t previous = shield();
+    raise(SIGHUP);
+    expect(!gHangups, @"a hangup waits while a bundle is swapped");
+    sigprocmask(SIG_SETMASK, &previous, NULL);
+    expect(gHangups == 1, @"the hangup lands once the swap is done");
+    signal(SIGHUP, SIG_DFL);
+}
+
 int main(void) {
     @autoreleasepool {
         gCommand = "test";
@@ -283,8 +410,16 @@ int main(void) {
         testMoveAndResumeApplyTweaks(dir);
         testNewer();
         testBriefLanguage(dir);
+        testFeedFollowsDomain(dir);
         testIconCatalog(dir);
         testUninstallPreservesStateWhenPristineMissing(dir);
+        testRootGuard();
+        testLogCap(dir);
+        testLoginKeychain(dir);
+        testHalfStagedApply(dir);
+        testMoveDiagnosis(dir);
+        testShield();
+        testRememberedDia(dir);
         removeTree(dir);
     }
     if (!gFailures) puts("all diapatch checks passed");

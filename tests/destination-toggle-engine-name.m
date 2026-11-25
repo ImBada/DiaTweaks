@@ -213,6 +213,18 @@ int main(void) {
         [field layout];
         checkText("on again", toggle.titleField, @"Ecosia");
 
+        int relabels = 0;
+        for (int i = 0; i < 40; i++) {
+            toggle.titleField.stringValue = @"Google";
+            [field layout];
+            relabels += [toggle.titleField.stringValue isEqualToString:@"Ecosia"];
+        }
+        check("Dia writing Google back on every layout stops being fought within one turn", relabels > 0 && relabels <= 8);
+        [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.2]];
+        toggle.titleField.stringValue = @"Google";
+        [field layout];
+        checkText("the next turn relabels again", toggle.titleField, @"Ecosia");
+
         // The dropdown's content sits in a child window, so the engine resolves through parentWindow: the child is never in DPBrowsers.
         NSTextField *chatRow, *googleRow;
         NSWindow *child;

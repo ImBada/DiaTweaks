@@ -75,17 +75,15 @@ void DPApplyToolbarOpacity(DPToolbarHover *hover) {
 }
 
 void DPApplyToolbar(NSView *pane) {
-    NSView *bar = DPSubview(pane, DPDiaToolbar);
-    if (!bar) return;
-
     BOOL active = DPHideToolbar.on || DPHideToolbar.progress > 0;
     DPToolbarHover *hover = [DPToolbarHover forPane:pane];
+    if (!active && !hover.touched && !DPLittleDiaIsOver(pane.window)) return;
+    NSView *bar = DPSubview(pane, DPDiaToolbar);
+    if (!bar) return;
     if (!active && !hover.touched) {
-        if (DPLittleDiaIsOver(pane.window)) {
-            if (bar.alphaValue != 0) bar.alphaValue = 0;
-            NSView *bookmarks = DPBookmarksUnder(pane, bar);
-            if (bookmarks && bookmarks.alphaValue != 0) bookmarks.alphaValue = 0;
-        }
+        if (bar.alphaValue != 0) bar.alphaValue = 0;
+        NSView *bookmarks = DPBookmarksUnder(pane, bar);
+        if (bookmarks && bookmarks.alphaValue != 0) bookmarks.alphaValue = 0;
         return;
     }
 

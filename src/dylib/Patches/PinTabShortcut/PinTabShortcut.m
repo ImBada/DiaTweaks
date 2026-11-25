@@ -38,8 +38,9 @@ static void DPRunItem(NSMenuItem *item) { [item.menu performActionForItemAtIndex
 
 static NSURL *DPTabURL(NSView *tab) {
     NSDictionary *views = DPSwiftValue(tab, @"contentViews");
-    if (views.count != 1) return nil;
-    return DPSwiftValue(DPSwiftValue(DPSwiftValue(views.allValues.firstObject, @"viewModel"), @"delegate"), @"webContentURL");
+    if (![views isKindOfClass:NSDictionary.class] || views.count != 1) return nil;
+    NSURL *url = DPSwiftValue(DPSwiftValue(DPSwiftValue(views.allValues.firstObject, @"viewModel"), @"delegate"), @"webContentURL");
+    return [url isKindOfClass:NSURL.class] ? url : nil;
 }
 
 static NSView *DPSelectedTab(NSWindow *window) {

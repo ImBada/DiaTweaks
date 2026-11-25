@@ -213,6 +213,9 @@ DP_PATCH(DPPeek) {
     .install = DPInstallPeek,
     .apply = DPApplyPeek,
     .verify = DPVerifyPeek,
+    .settings = DPSettingList({DPSettingBool, @"peekToolbar", .defaultBool = YES}, {DPSettingBool, @"peekGenie", .defaultBool = YES},
+                              {DPSettingNumber, @"peekDarkness", .defaultNumber = 0.45, .min = 0, .max = 1},
+                              {DPSettingNumber, @"peekSpeed", .defaultNumber = 0.9, .min = 0.25, .max = 3}),
     .rows = DPPeekSettingsRows,
     .hint = @"Tip: right after Dia starts, open or switch to any tab once to start Peek.",
 };

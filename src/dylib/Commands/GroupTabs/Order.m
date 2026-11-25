@@ -43,17 +43,12 @@ void DPMoveTab(id delegate, id browser, NSNumber *sid, NSInteger index, void (^d
     if (!delegate || !browser || !sid || !props) return failed ? failed() : (void)0;
     void (*create)(id, SEL, id, NSArray *, id, void (^)(id)) = (void *)objc_msgSend;
     void (*move)(id, SEL, id, id, NSInteger, void (^)(id)) = (void *)objc_msgSend;
-    void (*ungroup)(id, SEL, id, NSArray *, void (^)(id)) = (void *)objc_msgSend;
     create(delegate, @selector(browser:createTabGroupWithSessionIds:properties:completion:), browser, @[sid], props, ^(id result) {
         dispatch_async(dispatch_get_main_queue(), ^{
             id group = [result respondsToSelector:@selector(groupId)] ? DPMsg(result, @selector(groupId)) : nil;
             if (!group) return failed ? failed() : (void)0;
             move(delegate, @selector(browser:moveTabGroupWithId:toNewIndex:completion:), browser, group, index, ^(id _) {
-                dispatch_async(dispatch_get_main_queue(), ^{
-                    ungroup(delegate, @selector(browser:removeTabsFromGroupWithSessionIds:completion:), browser, @[sid], ^(id _) {
-                        if (done) dispatch_async(dispatch_get_main_queue(), done);
-                    });
-                });
+                dispatch_async(dispatch_get_main_queue(), ^{ DPRemoveFromGroups(delegate, browser, @[sid], done); });
             });
         });
     });
@@ -66,9 +61,9 @@ static void DPRunMoves(id delegate, id browser, NSArray<NSArray *> *moves, NSUIn
 
 static NSArray<NSArray *> *DPPlanMoves(NSArray<NSString *> *target, NSMutableArray<NSString *> *now, NSDictionary<NSString *, NSNumber *> *sessions, NSUInteger start) {
     NSMutableArray *moves = [NSMutableArray new];
-    if (![[NSSet setWithArray:now] isEqualToSet:[NSSet setWithArray:target]]) return moves;
+    if (now.count != target.count || ![[NSSet setWithArray:now] isEqualToSet:[NSSet setWithArray:target]]) return moves;
     for (NSUInteger i = 0; i < target.count; i++) {
-        while (![now[i] isEqualToString:target[i]]) {
+        while (![now[i] isEqual:target[i]]) {
             BOOL due = sessions[target[i]] != nil;
             NSString *tab = due ? target[i] : now[i];
             NSUInteger to = due ? i : now.count - 1;

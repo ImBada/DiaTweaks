@@ -52,10 +52,11 @@ static void DPApplySplitClientHello(DPPatch *patch) {
 
 DP_PATCH(DPSplitClientHello) {
     .key = @"splitClientHello",
+    .experimental = YES,
     .order = 120,
     .section = @"Network",
     .title = @"Split TLS ClientHello",
-    .detail = @"Send each HTTPS connection’s first message in two pieces, cut inside the site’s name, to get past networks that block sites by name. Not HTTP/3, DNS or address blocks, and a few servers refuse it. While on, Dia’s network code runs inside Dia, outside its sandbox. Experimental.",
+    .detail = @"Send each HTTPS connection’s first message in two pieces, cut inside the site’s name, to get past networks that block sites by name. Not HTTP/3, DNS or address blocks, and a few servers refuse it. While on, Dia’s network code runs inside Dia, outside its sandbox.",
     .symbol = @"network.badge.shield.half.filled network",
     .tint = @"systemCyanColor",
     .relaunch = YES,

@@ -2,14 +2,25 @@
 #import <objc/runtime.h>
 #import "StdPatch/StdPatch.h"
 
-static NSString *DPPauseTestDomain(void) { return [NSString stringWithFormat:@"com.diapatches.pause-test.%d", getpid()]; }
+// An absolute path keeps the plist in the test's folder: cfprefsd rewrites a removed ~/Library/Preferences domain later.
+static NSString *DPPauseTestDomain;
 
 @interface NSUserDefaults (DPPauseTest)
 - (instancetype)dp_pauseInitWithSuiteName:(NSString *)suite;
 @end
 @implementation NSUserDefaults (DPPauseTest)
 - (instancetype)dp_pauseInitWithSuiteName:(NSString *)suite {
-    return [self dp_pauseInitWithSuiteName:[suite isEqual:@"com.diapatches"] ? DPPauseTestDomain() : suite];
+    return [self dp_pauseInitWithSuiteName:[suite isEqual:@"com.diapatches"] ? DPPauseTestDomain : suite];
+}
+@end
+
+// Chromium flags like --type=renderer would make SafeMode treat this test as a Dia helper and skip launch bookkeeping.
+@interface NSProcessInfo (DPPauseTest)
+- (NSArray<NSString *> *)dp_pauseArguments;
+@end
+@implementation NSProcessInfo (DPPauseTest)
+- (NSArray<NSString *> *)dp_pauseArguments {
+    return [[self dp_pauseArguments] subarrayWithRange:NSMakeRange(0, 1)];
 }
 @end
 #import "SafeMode/SafeMode.h"
@@ -153,9 +164,11 @@ DP_PATCH(DPRelaunchStub) {
 #import "SafeMode/SafeMode.m"
 #import "StdPatch/Patch.m"
 #import "Local/Local.m"
+#import "Local/Catalog.m"
 #import "Local/Build.m"
 #import "Local/Extract.m"
 #import "Local/State.m"
+#import "Local/UI.m"
 #import "StdPatch/Shortcut.m"
 #import "Settings/Controls.m"
 #import "Settings/Items.m"
@@ -185,8 +198,16 @@ int main(void) {
         [NSApplication sharedApplication];
         method_exchangeImplementations(class_getInstanceMethod(NSUserDefaults.class, @selector(initWithSuiteName:)),
                                        class_getInstanceMethod(NSUserDefaults.class, @selector(dp_pauseInitWithSuiteName:)));
+        Class processInfo = object_getClass(NSProcessInfo.processInfo);
+        method_exchangeImplementations(class_getInstanceMethod(processInfo, @selector(arguments)),
+                                       class_getInstanceMethod(processInfo, @selector(dp_pauseArguments)));
         NSString *temporary = [NSTemporaryDirectory() stringByAppendingPathComponent:[NSUUID UUID].UUIDString];
         NSString *support = [temporary stringByAppendingPathComponent:@"support"];
+        const char *homeDir = [temporary stringByAppendingPathComponent:@"home"].fileSystemRepresentation;
+        DPPauseTestDomain = [temporary stringByAppendingPathComponent:@"defaults"];
+        setenv("DIAPATCH_HOME", homeDir, 1);
+        setenv("DIATWEAKS_DOMAIN", DPPauseTestDomain.fileSystemRepresentation, 1);
+        setenv("DIAPATCH_CATALOG_URL", [temporary stringByAppendingPathComponent:@"catalog"].fileSystemRepresentation, 1);
         [NSFileManager.defaultManager createDirectoryAtPath:support withIntermediateDirectories:YES attributes:nil error:nil];
         DPTestDylib = [[support stringByAppendingPathComponent:@"DiaPatches.dylib"] fileSystemRepresentation];
         NSString *pause = [support stringByAppendingPathComponent:@"paused"];
@@ -194,7 +215,6 @@ int main(void) {
         // Registered defaults avoid writing to disk.
         NSUserDefaults *defaults = [[NSUserDefaults alloc] initWithSuiteName:@"com.diapatches"];
         [defaults registerDefaults:@{ @"pauseTest" : @YES, @"pauseSubOption" : @YES, @"pauseRelaunchTest" : @NO }];
-        DPDefaults = defaults;
         static DPPatch *patches[] = { &DPStub, &DPSubOptionStub, &DPRelaunchStub };
         DPPatches = patches;
         DPPatchCount = 3;
@@ -329,6 +349,38 @@ int main(void) {
         expect(!DPPaused && !DPPauseSaved() && !lastHandOff, @"resuming in Safe Mode clears pause without relaunching");
         DPSafeMode = 0;
 
+        setenv("DIAPATCH_HOME", support.fileSystemRepresentation, 1);
+        DPPausedAtLaunch = NO;
+        DPLocalTweaks.on = YES;
+        DPSetLocalSafeModeOff(YES);
+        DPPageView *localPage = [[DPPageView alloc] initWithPatch:&DPLocalTweaks];
+        NSTextField *firstHeader = nil;
+        for (NSView *view in localPage.arrangedSubviews)
+            if (!firstHeader && [view isMemberOfClass:NSTextField.class]) firstHeader = (NSTextField *)view;
+        expect([firstHeader.stringValue isEqual:@"Safe Mode"], @"Local Tweaks leads with a Safe Mode card after a crash");
+        NSButton *turnOn = findButton(localPage, ^BOOL(NSButton *b) { return [b.title isEqual:@"Turn Local Tweaks Back On"]; });
+        NSButton *addTweak = findButton(localPage, ^BOOL(NSButton *b) { return [b.title isEqual:@"Add Tweak…"]; });
+        NSButton *openFolder = findButton(localPage, ^BOOL(NSButton *b) { return [b.title isEqual:@"Open Folder"]; });
+        expect(turnOn.enabled && addTweak.enabled && openFolder.enabled, @"Local Tweaks buttons start enabled");
+        DPLocalTweaks.on = NO;
+        [NSNotificationCenter.defaultCenter postNotificationName:DPPatchesDidChangeNotification object:nil];
+        expect(turnOn.enabled && openFolder.enabled && !addTweak.enabled, @"Turn Local Tweaks Back On works while Local Tweaks is off");
+        DPSetPaused(YES);
+        [NSNotificationCenter.defaultCenter postNotificationName:DPPatchesDidChangeNotification object:nil];
+        expect(!turnOn.enabled && !openFolder.enabled, @"pausing disables every Local Tweaks button");
+        DPSetPaused(NO);
+        DPSafeMode = 1;
+        [NSNotificationCenter.defaultCenter postNotificationName:DPPatchesDidChangeNotification object:nil];
+        expect(!turnOn.enabled && !openFolder.enabled, @"Safe Mode disables every Local Tweaks button");
+        DPSafeMode = 0;
+        lastHandOff = nil;
+        [NSNotificationCenter.defaultCenter postNotificationName:DPPatchesDidChangeNotification object:nil];
+        [turnOn performClick:nil];
+        expect(!DPLocalSafeModeOff() && [lastHandOff isEqual:@[@"apply"]], @"Turn Local Tweaks Back On clears the flag and relaunches");
+        localPage = [[DPPageView alloc] initWithPatch:&DPLocalTweaks];
+        expect(findLabel(localPage, @"Safe Mode") == nil, @"the Safe Mode card goes away once Local Tweaks is back on");
+        setenv("DIAPATCH_HOME", homeDir, 1);
+
         DPSetPaused(YES);
         DPLeaveSafeMode();
         expect(DPPauseSaved(), @"leaving safe mode leaves the pause alone");
@@ -352,7 +404,7 @@ int main(void) {
         [clashButton record:backspace];
         expect(clashButton.monitor == nil && [clashButton.label.stringValue isEqual:@"Add new…"], @"Backspace clears shortcut and stops recording");
 
-        [NSUserDefaults.standardUserDefaults removePersistentDomainForName:DPPauseTestDomain()];
+        [NSUserDefaults.standardUserDefaults removePersistentDomainForName:DPPauseTestDomain];
         [NSFileManager.defaultManager removeItemAtPath:temporary error:nil];
     }
     if (!failures) printf("all pause checks passed\n");

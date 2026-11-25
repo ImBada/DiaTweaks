@@ -109,14 +109,15 @@ void DPRestoreStack(NSWindow *little, NSDictionary *noted) {
     DPOrderBehind(little, noted[@"stack"]);
 }
 
+// Only an unhide that a link to Little Dia can follow; the unveil is queued before any window goes clear.
 static void DPVeilWindows(void) {
-    if (!DPLittleDia.on) return;
+    if (!DPLittleDia.on || DPLittleDiaFollowRules.on || !DPLittleDiaReady()) return;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 250 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{ DPUnveil(); });
     for (NSWindow *window in NSApp.windows)
-        if (window.level == NSNormalWindowLevel && !DPIsLittleDiaWindow(window) && window.alphaValue > 0) {
+        if (window.level == NSNormalWindowLevel && !DPIsLittleDiaWindow(window) && window.alphaValue > 0 && ![DPVeiled objectForKey:window]) {
             [DPVeiled setObject:@(window.alphaValue) forKey:window];
             window.alphaValue = 0;
         }
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 250 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{ DPUnveil(); });
 }
 
 void DPInstallLittleDiaStack(void) {
@@ -131,5 +132,8 @@ void DPInstallLittleDiaStack(void) {
         if (!DPLittleDia.on) return;
         DPBeforeActivating = DPWindowStack();
         DPNotedAt = [NSDate date];
+    }];
+    [center addObserverForName:NSWindowWillCloseNotification object:nil queue:nil usingBlock:^(NSNotification *note) {
+        if (DPPutAway.count) [DPPutAway removeObjectIdenticalTo:note.object];
     }];
 }

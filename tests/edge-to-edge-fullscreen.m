@@ -313,6 +313,35 @@ static void TestVerify(void) {
     DPEdgeToEdge.on = YES;
 }
 
+static void TestOffLeavesDiaAlone(void) {
+    SetPatches(NO, NO);
+    DPSquareSidebarCorners.on = NO;
+    DPSquareSidebarCorners.progress = 0;
+    _TtC6Window14PlatformWindow *window = MakeWindow(NSMakeSize(1440, 900), YES);
+    Fixture f = MakeFixture(window, NSMakeRect(220, 6, 1214, 888));
+    _TtC5ARCUI10ShadowView *shadow = [[_TtC5ARCUI10ShadowView alloc] initWithFrame:f.rounded.bounds];
+    [f.rounded addSubview:shadow];
+    f.chatHost.hidden = NO;
+    f.rounded.layer.maskedCorners = kCALayerMinXMinYCorner;
+    [f.container setFrameSize:NSMakeSize(1000, 800)];
+    NSRect dia = f.container.frame;
+    [f.container layout];
+    [f.container updateLayer];
+    [shadow layout];
+    [NSNotificationCenter.defaultCenter postNotificationName:NSWindowDidEnterFullScreenNotification object:window];
+    DrainMain();
+    Check(NSEqualRects(f.container.frame, dia), @"off: a frame Dia set outside setFrame: stays put");
+    Check(f.rounded.layer.maskedCorners == kCALayerMinXMinYCorner && !f.rounded.layer.mask, @"off: Dia's masked corners are untouched");
+    Check(f.rounded.layer.cornerCurve == kCACornerCurveCircular, @"off: Dia's corner curve is untouched");
+    Check(f.chatHost.layer.cornerCurve != kCACornerCurveContinuous, @"off: the chat card's corner curve is untouched");
+    CALayer *foreign = [CALayer layer];
+    foreign.cornerRadius = 10;
+    foreign.mask = [CALayer layer];
+    [foreign.mask addSublayer:[CALayer layer]];
+    Check(!DPCornersRound(foreign, YES) && !DPCornersRound(foreign, NO), @"a mask Dia built without our two halves doesn't crash the check");
+    [f.container removeFromSuperview];
+}
+
 static void TestWindowClose(void) {
     SetPatches(YES, YES);
     NSUInteger before = DPContainers.allObjects.count;
@@ -345,9 +374,10 @@ int main(void) {
         TestPopover();
         TestPauseTweaks();
         TestVerify();
+        TestOffLeavesDiaAlone();
         TestWindowClose();
     }
     if (failures) return 1;
-    puts("PASS: per-window full-screen edge-to-edge, transitions, live toggles, corners, chat card, popover, pause, and verify");
+    puts("PASS: per-window full-screen edge-to-edge, transitions, live toggles, corners, chat card, popover, pause, verify, and off");
     return 0;
 }

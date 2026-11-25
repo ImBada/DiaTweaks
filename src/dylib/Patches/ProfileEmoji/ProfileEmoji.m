@@ -4,12 +4,11 @@ extern DPPatch DPProfileEmoji;
 
 static NSString *const DPEmojisKey = @"profileEmojis";
 static const CGFloat DPSidebarEmojiSize = 13.5, DPSidebarEmojiWidth = 16, DPSidebarDotWidth = 6, DPSidebarGap = 10;
-static NSUserDefaults *DPEmojiDefaults;
 static NSHashTable<NSViewController *> *DPProfilePanes;
 static char DPLabelKey, DPRowKey;
 
 static NSString *DPEmoji(NSString *spaceID) {
-    return DPProfileEmoji.on && spaceID ? [DPEmojiDefaults dictionaryForKey:DPEmojisKey][spaceID] : nil;
+    return DPProfileEmoji.on && spaceID ? [DPSettingsDefaults() dictionaryForKey:DPEmojisKey][spaceID] : nil;
 }
 
 static NSString *DPSpaceIDOf(NSView *view, NSDictionary *views) {
@@ -24,7 +23,7 @@ static BOOL DPAnyEmoji(NSDictionary *views, NSDictionary *emojis) {
 
 static BOOL DPAnySidebarEmoji(NSView *switcher) {
     if (!DPProfileEmoji.on || !switcher) return NO;
-    NSDictionary *emojis = [DPEmojiDefaults dictionaryForKey:DPEmojisKey];
+    NSDictionary *emojis = [DPSettingsDefaults() dictionaryForKey:DPEmojisKey];
     return emojis.count && DPAnyEmoji(DPSwiftValue(switcher, @"itemViews"), emojis);
 }
 
@@ -82,7 +81,7 @@ static CGFloat DPSidebarItemWidth(NSView *item, NSDictionary *views, NSDictionar
 static void DPSidebarItem_setFrame(NSView *self, SEL _cmd, NSRect frame) {
     if (!DPProfileEmoji.on || NSWidth(frame) <= 0 || NSWidth(frame) >= DPSidebarDotWidth + DPSidebarGap)
         return DPCallOriginal(DPSidebarItem_setFrame, self, frame);
-    NSDictionary *emojis = [DPEmojiDefaults dictionaryForKey:DPEmojisKey];
+    NSDictionary *emojis = [DPSettingsDefaults() dictionaryForKey:DPEmojisKey];
     if (!emojis.count) return DPCallOriginal(DPSidebarItem_setFrame, self, frame);
     NSView *switcher = self.superview;
     NSDictionary *views = DPSwiftValue(switcher, @"itemViews");
@@ -120,7 +119,10 @@ static void DPSidebarItem_updateLayer(NSView *self, SEL _cmd) {
     NSString *emoji = DPEmoji(DPSpaceIDOf(self, DPSwiftValue(self.superview, @"itemViews")));
     if ((emoji != nil) != (label != nil)) {
         __weak NSView *weakSelf = self;
-        dispatch_async(dispatch_get_main_queue(), ^{ weakSelf.needsLayout = YES; });
+        dispatch_async(dispatch_get_main_queue(), ^{
+            NSView *item = weakSelf;
+            if (DPProfileEmoji.on || DPGet(item, &DPLabelKey)) item.needsLayout = YES;
+        });
         return;
     }
     if (!label) return;
@@ -139,19 +141,9 @@ static void DPTopDot_layout(NSView *self, SEL _cmd) {
     DPShowEmoji(self, dot, DPEmoji(spaceID), 8, focused ? 1 : 0.45);
 }
 
-static void DPCollectEmojiViews(NSView *view, Class cls, NSMutableArray<NSView *> *out) {
-    if ([view isKindOfClass:cls]) [out addObject:view];
-    for (NSView *sub in view.subviews) DPCollectEmojiViews(sub, cls, out);
-}
-
 static void DPRefresh(void) {
-    for (NSString *name in @[ @DPDiaSpaceSwitcher, @DPDiaSpaceSwitcherItem, @DPDiaPageIndicatorDot ]) {
-        Class cls = objc_getClass(name.UTF8String);
-        if (!cls) continue;
-        NSMutableArray<NSView *> *views = [NSMutableArray new];
-        for (NSWindow *window in NSApp.windows) DPCollectEmojiViews(window.contentView, cls, views);
-        for (NSView *view in views) view.needsLayout = YES;
-    }
+    for (const char *const *name = DPClasses(DPDiaSpaceSwitcher, DPDiaSpaceSwitcherItem, DPDiaPageIndicatorDot); *name; name++)
+        for (NSView *view in DPFindAllViews(*name)) view.needsLayout = YES;
 }
 
 @interface DPEmojiField : NSTextField <NSTextFieldDelegate>
@@ -171,9 +163,9 @@ static void DPRefresh(void) {
                                       usingBlock:^(NSString *character, NSRange _, NSRange __, BOOL *___) { last = character; }];
     last = [last stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
     if (![self.stringValue isEqual:last]) self.stringValue = last;
-    NSMutableDictionary *emoji = [[DPEmojiDefaults dictionaryForKey:DPEmojisKey] mutableCopy] ?: [NSMutableDictionary dictionary];
+    NSMutableDictionary *emoji = [[DPSettingsDefaults() dictionaryForKey:DPEmojisKey] mutableCopy] ?: [NSMutableDictionary dictionary];
     emoji[self.spaceID] = last.length ? last : nil;
-    [DPEmojiDefaults setObject:emoji forKey:DPEmojisKey];
+    [DPSettingsDefaults() setObject:emoji forKey:DPEmojisKey];
     DPRefresh();
 }
 @end
@@ -188,7 +180,7 @@ static void DPAddEmojiRow(NSViewController *pane) {
     NSTextField *label = [NSTextField labelWithString:@"Emoji"];
     label.font = title.font;
     label.textColor = title.textColor;
-    DPEmojiField *field = [DPEmojiField textFieldWithString:[DPEmojiDefaults dictionaryForKey:DPEmojisKey][spaceID] ?: @""];
+    DPEmojiField *field = [DPEmojiField textFieldWithString:[DPSettingsDefaults() dictionaryForKey:DPEmojisKey][spaceID] ?: @""];
     field.spaceID = spaceID;
     field.delegate = field;
     field.alignment = NSTextAlignmentCenter;
@@ -233,7 +225,6 @@ static void DPProfilePane_viewDidLoad(NSViewController *self, SEL _cmd) {
 }
 
 static void DPInstallProfileEmoji(void) {
-    DPEmojiDefaults = [[NSUserDefaults alloc] initWithSuiteName:@"com.diapatches"];
     DPProfilePanes = [NSHashTable weakObjectsHashTable];
     DPHookClass(objc_getClass(DPDiaSpaceSwitcherItem), @selector(setFrame:), (IMP)DPSidebarItem_setFrame);
     DPHook(DPDiaSpaceSwitcherItem, @selector(layout), (IMP)DPSidebarItem_layout);

@@ -181,7 +181,6 @@ void DPToggleLittleDiaLauncher(void) {
 
 void DPHideLittleDiaLauncher(void) { [[DPLittleDiaLauncherController shared] close]; }
 
-// The launcher has no page to ask, so it reads the same default search engine Peek uses.
 NSURL *DPLittleDiaSearchURL(NSString *text) {
     id browser = DPCommandBrowser();
     id context = [browser respondsToSelector:@selector(context)] ? DPMsg(browser, @selector(context)) : nil;
@@ -194,7 +193,9 @@ NSURL *DPLittleDiaSearchURL(NSString *text) {
     if (![template isKindOfClass:NSString.class] || ![template containsString:@"{searchTerms}"] || [template containsString:@"{google:"])
         template = @"https://www.google.com/search?q={searchTerms}";
     template = [template stringByReplacingOccurrencesOfString:@"{searchTerms}" withString:query];
-    NSRegularExpression *rest = [NSRegularExpression regularExpressionWithPattern:@"\\{[^}]*\\}" options:0 error:nil];
+    static NSRegularExpression *rest;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ rest = [NSRegularExpression regularExpressionWithPattern:@"\\{[^}]*\\}" options:0 error:nil]; });
     return [NSURL URLWithString:[rest stringByReplacingMatchesInString:template options:0 range:NSMakeRange(0, template.length) withTemplate:@""]];
 }
 

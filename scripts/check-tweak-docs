@@ -8,11 +8,13 @@ trap 'rm -rf "$wiki"' EXIT
 trap 'exit 130' INT TERM
 git clone -q --depth 1 https://github.com/JaceThings/DiaTweaks.wiki.git "$wiki"
 
-count=$(plutil -extract patches raw -o - "$manifest")
+titles=$(python3 -c '
+import json, sys
+for p in json.load(open(sys.argv[1]))["patches"] + [p for t in json.load(open(sys.argv[2]))["tweaks"] for p in t["patches"]]: print(p["title"])
+' "$manifest" tweaks/index.json)
+count=0
 failed=0
-i=0
-while [ "$i" -lt "$count" ]; do
-    title=$(plutil -extract "patches.$i.title" raw -o - "$manifest")
+while IFS= read -r title; do
     page=$(printf '%s\n' "$title" | tr ' ' '-')
     if [ ! -f "$wiki/$page.md" ]; then
         echo "the wiki has no page called \"$title\": add one from docs/tweak-page.md" >&2
@@ -22,7 +24,9 @@ while [ "$i" -lt "$count" ]; do
         echo "the wiki sidebar has no link to $page: add it under its section" >&2
         failed=1
     fi
-    i=$((i + 1))
-done
+    count=$((count + 1))
+done <<TITLES
+$titles
+TITLES
 [ "$failed" -eq 0 ] && echo "all $count tweaks have a wiki page"
 exit "$failed"

@@ -10,24 +10,21 @@ static BOOL DPSuppressConnectPrompts(void) {
     return DPHideConnectAppPrompts.on || DPTurnOffAI.on;
 }
 
+static NSString *DPTrimmed(NSString *text) {
+    return [text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+}
+
 static BOOL DPIsConnectTitle(NSString *raw) {
     if (![raw isKindOfClass:NSString.class]) return NO;
-    NSString *text = [raw stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
-    if (![text hasSuffix:@" to Dia?"]) return NO;
-    NSUInteger prefixLen = 0;
-    if ([text hasPrefix:@"Connect "]) prefixLen = 8;
-    else if ([text hasPrefix:@"Reconnect "]) prefixLen = 10;
-    if (!prefixLen || text.length <= prefixLen + 8) return NO;
-    NSString *app = [[text substringWithRange:NSMakeRange(prefixLen, text.length - prefixLen - 8)]
-        stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
-    return app.length > 0;
+    NSString *text = DPTrimmed(raw);
+    NSUInteger prefix = [text hasPrefix:@"Connect "] ? 8 : [text hasPrefix:@"Reconnect "] ? 10 : 0;
+    if (!prefix || ![text hasSuffix:@" to Dia?"] || text.length <= prefix + 8) return NO;
+    return DPTrimmed([text substringWithRange:NSMakeRange(prefix, text.length - prefix - 8)]).length > 0;
 }
 
 static BOOL DPIsDeclineTitle(NSString *raw) {
     if (![raw isKindOfClass:NSString.class]) return NO;
-    NSString *text = [[raw stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet]
-        stringByReplacingOccurrencesOfString:@"\u2019" withString:@"'"];
-    NSString *lower = text.lowercaseString;
+    NSString *lower = [DPTrimmed(raw) stringByReplacingOccurrencesOfString:@"\u2019" withString:@"'"].lowercaseString;
     return [lower hasPrefix:@"don't connect"] || [lower isEqualToString:@"not now"];
 }
 
@@ -48,18 +45,10 @@ BOOL DPIsSingleAppUpsellBar(NSView *view) {
     }) != nil;
 }
 
-static void DPAppsUpsellBar_layout(NSView *self, SEL _cmd) {
-    [DPHideHosts addObject:self];
-    DPEnforceHides(self);
-    DPCallOriginal(DPAppsUpsellBar_layout, self);
-}
-
-// Dia tags each dialog button with its 0-based index, so the decline button is tag 0 whenever it comes first.
 static NSButton *DPDeclineButtonIn(NSView *panel) {
     if (!panel) return nil;
     return (NSButton *)DPFindView(panel, ^BOOL(NSView *view) {
-        if (![view isKindOfClass:NSButton.class]) return NO;
-        if (DPDialogButtonClass && ![view isKindOfClass:DPDialogButtonClass]) return NO;
+        if (![view isKindOfClass:NSButton.class] || (DPDialogButtonClass && ![view isKindOfClass:DPDialogButtonClass])) return NO;
         NSButton *button = (NSButton *)view;
         return button.target == panel && button.action == @selector(handleButton:) && DPIsDeclineTitle(button.title);
     });
@@ -68,14 +57,10 @@ static NSButton *DPDeclineButtonIn(NSView *panel) {
 static NSView *DPConnectPromptIn(NSView *root, NSButton **declineOut) {
     __block NSButton *matchedDecline = nil;
     NSView *panel = DPFindView(root, ^BOOL(NSView *view) {
-        if (!DPIsConnectAppPrompt(view)) return NO;
-        NSButton *decline = DPDeclineButtonIn(view);
-        if (!decline) return NO;
-        matchedDecline = decline;
-        return YES;
+        matchedDecline = DPIsConnectAppPrompt(view) ? DPDeclineButtonIn(view) : nil;
+        return matchedDecline != nil;
     });
-    if (!panel) return nil;
-    if (declineOut) *declineOut = matchedDecline;
+    if (panel && declineOut) *declineOut = matchedDecline;
     return panel;
 }
 
@@ -101,14 +86,11 @@ static void DPHidePromptWindow(NSWindow *window, NSView *panel) {
 }
 
 static void DPHideOverlayHost(NSView *panel) {
-    if (DPDialogPanelVCClass) {
-        for (NSView *up = panel.superview; up; up = up.superview) {
-            if ([up.nextResponder isKindOfClass:DPDialogPanelVCClass]) {
-                up.hidden = YES;
-                break;
-            }
+    for (NSView *up = DPDialogPanelVCClass ? panel.superview : nil; up; up = up.superview)
+        if ([up.nextResponder isKindOfClass:DPDialogPanelVCClass]) {
+            up.hidden = YES;
+            break;
         }
-    }
     panel.hidden = YES;
 }
 
@@ -128,7 +110,7 @@ static void DPScheduleDecline(NSView *panel, NSButton *decline) {
     });
 }
 
-// Prevent hotkeys (e.g. Return on a hidden sheet) from accepting a suppressed prompt and guarantee at-most-once delivery.
+// A hotkey (Return on a hidden sheet) must not accept a suppressed prompt, and Dia must hear the decline once.
 static void DPDialogPanel_handleButton(NSView *self, SEL _cmd, id sender) {
     BOOL suppressed = [DPGet(self, &DPDismissedKey) boolValue];
     if (suppressed) {
@@ -239,7 +221,7 @@ static void DPInstallHideConnectAppPrompts(void) {
     DPHook(DPDiaDialogPanelVC, @selector(viewDidLoad), (IMP)DPDialogPanelVC_viewDidLoad);
     DPHook(DPDiaDialogPanel, @selector(viewDidMoveToWindow), (IMP)DPDialogPanel_viewDidMoveToWindow);
     DPHook(DPDiaDialogPanel, @selector(handleButton:), (IMP)DPDialogPanel_handleButton);
-    DPHook(DPDiaAppsUpsellBar, @selector(layout), (IMP)DPAppsUpsellBar_layout);
+    DPHostHides(DPDiaAppsUpsellBar);
 }
 
 static void DPApplyHideConnectAppPrompts(DPPatch *patch) {

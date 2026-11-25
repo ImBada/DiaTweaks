@@ -77,6 +77,7 @@ static BOOL hasLabelText(NSView *root, NSString *needle) {
 
 int main(void) {
     @autoreleasepool {
+        unsetenv("DIATWEAKS_DOMAIN");
         [NSApplication sharedApplication];
         method_exchangeImplementations(class_getInstanceMethod(NSUserDefaults.class, @selector(initWithSuiteName:)),
                                        class_getInstanceMethod(NSUserDefaults.class, @selector(dp_updatesInitWithSuiteName:)));
@@ -213,6 +214,26 @@ int main(void) {
                @"non-dictionary dia entry in check JSON handled safely without exception");
         DPSoftwareUpdateView *emptyNotesView = [[DPSoftwareUpdateView alloc] initWithFrame:NSMakeRect(0, 0, 560, 400)];
         expect(!hasLabelText(emptyNotesView, @"Release Notes"), @"empty releaseNotes string does not render broken Release Notes link");
+        pumpUntil(^BOOL { return !updates.checking; }, 5);
+
+        writeStubCLI(cli, [NSString stringWithFormat:@"#!/bin/sh\necho \"$*\" >> \"%@\"\nsleep 0.2\nprintf '{\"dia\":null,\"tweaks\":{\"latest\":\"v1.2.0\",\"available\":true}}'\n", logFile]);
+        [@"" writeToFile:logFile atomically:YES encoding:NSUTF8StringEncoding error:nil];
+        __block int finished = 0;
+        for (int i = 0; i < 4; i++) [updates check:^{ finished++; }];
+        pumpUntil(^BOOL { return finished == 4; }, 5);
+        NSString *checkLog = [NSString stringWithContentsOfFile:logFile encoding:NSUTF8StringEncoding error:nil];
+        expect(finished == 4 && [checkLog componentsSeparatedByString:@"check --json"].count == 2, @"overlapping checks share one diapatch run and all hear back");
+
+        for (NSString *garbage in @[ @"[1,2,3]", @"not json at all", @"", @"7", @"null", @"{\"dia\":\"text\",\"tweaks\":[1]}", @"{\"dia\":{\"latest\":[1],\"available\":\"yes\",\"staged\":7,\"size\":\"big\",\"error\":3}}" ]) {
+            writeStubCLI(cli, [NSString stringWithFormat:@"#!/bin/sh\nprintf '%%s' '%@'\n", garbage]);
+            checked = NO;
+            [updates check:^{ checked = YES; }];
+            pumpUntil(^BOOL { return checked; }, 5);
+            expect(checked && !updates.checking && ![updates staged:DPDia] && ![updates staged:DPTweaks] && ![updates downloading:DPDia],
+                   [NSString stringWithFormat:@"check output %@ never leaves a check pending or a part staged", garbage]);
+            expect(![updates available:DPDia] && ![updates available:DPTweaks] && [updates progress:DPDia] <= 1,
+                   [NSString stringWithFormat:@"check output %@ reads as nothing available", garbage]);
+        }
 
         [NSUserDefaults.standardUserDefaults removePersistentDomainForName:DPTestDomain()];
         [NSFileManager.defaultManager removeItemAtPath:temp error:nil];

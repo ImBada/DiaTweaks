@@ -2,6 +2,7 @@
 #import <AVFoundation/AVFoundation.h>
 #import <ImageIO/ImageIO.h>
 #import <VideoToolbox/VideoToolbox.h>
+#import <sys/stat.h>
 
 #ifndef DP_PREVIEWS
 #define DP_PREVIEWS "https://raw.githubusercontent.com/wiki/JaceThings/DiaTweaks/previews/"
@@ -39,6 +40,26 @@ static NSArray<NSString *> *DPPreviewNames(NSString *key, NSString *layout) {
     return names;
 }
 
+static id DPDecodedPreview(NSURL *file, id (^decode)(void)) {
+    static NSCache<NSString *, id> *cache;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        cache = [NSCache new];
+        cache.countLimit = 6;
+    });
+    struct stat info;
+    if (stat(file.fileSystemRepresentation, &info)) return decode();
+    NSString *key = [NSString stringWithFormat:@"%@ %lld %ld.%ld", file.path, info.st_size, info.st_mtimespec.tv_sec, info.st_mtimespec.tv_nsec];
+    id decoded = [cache objectForKey:key];
+    if (!decoded && (decoded = decode())) [cache setObject:decoded forKey:key];
+    return decoded;
+}
+
+static BOOL DPSameFile(NSURL *file, NSData *data) {
+    struct stat info;
+    return !stat(file.fileSystemRepresentation, &info) && info.st_size == (off_t)data.length && [[NSData dataWithContentsOfURL:file] isEqualToData:data];
+}
+
 static BOOL DPIsPreview(NSData *data, NSString *name) {
     if (data.length < 8) return NO;
     if ([name hasSuffix:@".mp4"]) return !memcmp((const char *)data.bytes + 4, "ftyp", 4);
@@ -65,7 +86,7 @@ static void DPFetchPreview(NSArray<NSString *> *names, void (^done)(NSURL *file,
                 return DPFetchPreview([names subarrayWithRange:NSMakeRange(1, names.count - 1)], done);
             }
             if (!preview) return done(nil, NO);
-            BOOL changed = ![[NSData dataWithContentsOfURL:cached] isEqualToData:data];
+            BOOL changed = !DPSameFile(cached, data);
             if (changed) [data writeToURL:cached atomically:YES];
             done(cached, changed);
         });
@@ -149,21 +170,23 @@ static BOOL DPIsLocalKey(NSString *key) {
     _media.contentsGravity = kCAGravityResizeAspectFill;
     _media.frame = self.bounds;
     [self.layer addSublayer:_media];
-    // Off in the top half, on in the bottom.
     if ([file.lastPathComponent hasSuffix:@"-onoff.webp"]) {
-        CGImageRef image = [[[NSImage alloc] initWithContentsOfURL:file] CGImageForProposedRect:NULL context:nil hints:nil];
-        size_t width = image ? CGImageGetWidth(image) : 0, half = image ? CGImageGetHeight(image) / 2 : 0;
-        if (!width || !half) return [self show:nil];
-        id off = (__bridge_transfer id)CGImageCreateWithImageInRect(image, CGRectMake(0, 0, width, half));
-        id on = (__bridge_transfer id)CGImageCreateWithImageInRect(image, CGRectMake(0, half, width, half));
-        if (!off || !on) return [self show:nil];
-        _states = @[ off, on ];
+        // Off in the top half, on in the bottom.
+        _states = DPDecodedPreview(file, ^id {
+            CGImageRef image = [[[NSImage alloc] initWithContentsOfURL:file] CGImageForProposedRect:NULL context:nil hints:nil];
+            size_t width = image ? CGImageGetWidth(image) : 0, half = image ? CGImageGetHeight(image) / 2 : 0;
+            if (!width || !half) return nil;
+            id off = (__bridge_transfer id)CGImageCreateWithImageInRect(image, CGRectMake(0, 0, width, half));
+            id on = (__bridge_transfer id)CGImageCreateWithImageInRect(image, CGRectMake(0, half, width, half));
+            return off && on ? @[ off, on ] : nil;
+        });
+        if (!_states) return [self show:nil];
         [self showState];
         [self updatePlayback];
         return;
     }
     if (![file.pathExtension isEqualToString:@"mp4"]) {
-        _media.contents = [[NSImage alloc] initWithContentsOfURL:file];
+        _media.contents = DPDecodedPreview(file, ^id { return [[NSImage alloc] initWithContentsOfURL:file]; });
         return;
     }
     // Not an AVPlayerLayer: macOS can hand that to the display hardware, which draws black bars at the preview's edges.

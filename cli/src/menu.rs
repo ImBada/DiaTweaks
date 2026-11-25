@@ -1,7 +1,7 @@
 use anyhow::Result;
 
 use crate::{
-    dia,
+    config, dia,
     env::Env,
     pause, restore,
     signals::{self, Cancelled},
@@ -14,6 +14,7 @@ use crate::{
 enum Action {
     Tweaks,
     Pause,
+    Settings,
     UpdateDia,
     UpdateDiaTweaks,
     Status,
@@ -32,10 +33,15 @@ pub fn run(env: &Env, ui: &Ui) -> Result<()> {
         } else {
             ("Pause tweaks", "turn every tweak off, keeping settings")
         };
-        action = ui::prompt(
-            cliclack::select("What do you want to do?")
+        let picked = ui::prompt(
+            cliclack::select("What do you want to do? (Esc to quit)")
                 .item(Action::Tweaks, "Tweaks", "turn tweaks on or off")
                 .item(Action::Pause, pause_label, pause_hint)
+                .item(
+                    Action::Settings,
+                    "Back up or import settings",
+                    "save or load your tweaks and settings",
+                )
                 .item(Action::UpdateDia, "Update Dia", "")
                 .item(Action::UpdateDiaTweaks, "Update DiaTweaks", "")
                 .item(Action::Status, "Status", "")
@@ -47,10 +53,16 @@ pub fn run(env: &Env, ui: &Ui) -> Result<()> {
                 .item(Action::Quit, "Quit", "")
                 .initial_value(action)
                 .interact(),
-        )?;
+        );
+        action = match picked {
+            Ok(action) => action,
+            Err(err) if signals::interrupted() || !err.is::<Cancelled>() => return Err(err),
+            Err(_) => Action::Quit,
+        };
         let result = match action {
             Action::Tweaks => tweaks::menu(env, ui),
             Action::Pause => pause::set(env, ui, !paused),
+            Action::Settings => config::menu(env, ui),
             Action::UpdateDia => update_dia::run(env, ui),
             Action::UpdateDiaTweaks => update::run(env, ui),
             Action::Status => status::show(env, ui),

@@ -4,6 +4,7 @@
 @interface DPAddressView : NSView <NSTextFieldDelegate>
 @property (nonatomic, weak) NSView *title;
 @property (nonatomic) NSTextField *label, *field;
+@property (nonatomic, copy) NSString *shownHost, *shownRest;
 @property (nonatomic) BOOL hovered, beginning, ending;
 @property (nonatomic, copy) NSString *notice;
 @property (nonatomic) NSUInteger notices;
@@ -94,10 +95,14 @@
         host = self.notice;
         rest = @"";
     }
-    NSFont *font = [NSFont systemFontOfSize:13];
-    NSMutableAttributedString *text = [[NSMutableAttributedString alloc] initWithString:host attributes:@{NSFontAttributeName : font, NSForegroundColorAttributeName : NSColor.labelColor}];
-    [text appendAttributedString:[[NSAttributedString alloc] initWithString:rest attributes:@{NSFontAttributeName : font, NSForegroundColorAttributeName : NSColor.secondaryLabelColor}]];
-    if (![self.label.attributedStringValue isEqual:text]) self.label.attributedStringValue = text;
+    if (![host isEqualToString:self.shownHost] || ![rest isEqualToString:self.shownRest]) {
+        self.shownHost = host;
+        self.shownRest = rest;
+        NSFont *font = [NSFont systemFontOfSize:13];
+        NSMutableAttributedString *text = [[NSMutableAttributedString alloc] initWithString:host attributes:@{NSFontAttributeName : font, NSForegroundColorAttributeName : NSColor.labelColor}];
+        [text appendAttributedString:[[NSAttributedString alloc] initWithString:rest attributes:@{NSFontAttributeName : font, NSForegroundColorAttributeName : NSColor.secondaryLabelColor}]];
+        self.label.attributedStringValue = text;
+    }
     CGFloat height = ceil(self.label.intrinsicContentSize.height);
     NSRect frame = NSMakeRect(10, round((NSHeight(self.bounds) - height) / 2), MAX(0, NSWidth(self.bounds) - 20), height);
     if (!NSEqualRects(self.label.frame, frame)) self.label.frame = frame;

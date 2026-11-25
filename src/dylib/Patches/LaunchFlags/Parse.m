@@ -24,53 +24,42 @@ NSArray<NSString *> *DPParseLaunchFlags(NSString *text, NSArray<NSString *> *__a
     if (unclosedQuote) *unclosedQuote = NO;
     NSMutableArray<NSString *> *flags = [NSMutableArray array];
     NSMutableArray<NSString *> *bad = ignored ? [NSMutableArray array] : nil;
-    if (![text isKindOfClass:NSString.class] || !text.length) {
-        if (ignored) *ignored = @[];
-        return flags;
-    }
+    NSUInteger length = [text isKindOfClass:NSString.class] ? text.length : 0;
+    NSMutableData *buffer = [NSMutableData dataWithLength:(2 * length + 1) * sizeof(unichar)];
+    unichar *chars = buffer.mutableBytes, *token = chars + length;
+    if (length) [text getCharacters:chars range:NSMakeRange(0, length)];
 
-    NSUInteger length = text.length, i = 0;
+    NSUInteger i = 0;
     while (i < length) {
-        while (i < length && DPIsSpace([text characterAtIndex:i])) i++;
+        while (i < length && DPIsSpace(chars[i])) i++;
         if (i >= length) break;
-        if ([text characterAtIndex:i] == '#') {
-            while (i < length && [text characterAtIndex:i] != '\n') i++;
+        if (chars[i] == '#') {
+            while (i < length && chars[i] != '\n') i++;
             continue;
         }
 
-        NSMutableString *token = [NSMutableString string];
+        NSUInteger size = 0;
         unichar quote = 0;
         while (i < length) {
-            unichar c = [text characterAtIndex:i++];
+            unichar c = chars[i++];
             if (quote) {
                 if (c == quote) {
                     quote = 0;
-                } else if (quote == '"' && c == '\\' && i < length) {
-                    unichar next = [text characterAtIndex:i];
-                    if (next == '"' || next == '\\') {
-                        [token appendFormat:@"%C", next];
-                        i++;
-                    } else {
-                        [token appendString:@"\\"];
-                    }
+                } else if (quote == '"' && c == '\\' && i < length && (chars[i] == '"' || chars[i] == '\\')) {
+                    token[size++] = chars[i++];
                 } else if (c != '\0') {
-                    [token appendFormat:@"%C", c];
+                    token[size++] = c;
                 }
                 continue;
             }
             if (DPIsSpace(c)) break;
             if (c == '\'' || c == '"') {
                 quote = c;
-            } else if (c == '\\' && i < length) {
-                unichar next = [text characterAtIndex:i];
-                if (DPIsSpace(next) || next == '\'' || next == '"' || next == '\\') {
-                    if (next != '\r' && next != '\n') [token appendFormat:@"%C", next];
-                    i++;
-                } else {
-                    [token appendString:@"\\"];
-                }
+            } else if (c == '\\' && i < length && (DPIsSpace(chars[i]) || chars[i] == '\'' || chars[i] == '"' || chars[i] == '\\')) {
+                if (chars[i] != '\r' && chars[i] != '\n') token[size++] = chars[i];
+                i++;
             } else if (c != '\0') {
-                [token appendFormat:@"%C", c];
+                token[size++] = c;
             }
         }
 
@@ -78,12 +67,10 @@ NSArray<NSString *> *DPParseLaunchFlags(NSString *text, NSArray<NSString *> *__a
             if (unclosedQuote) *unclosedQuote = YES;
             break;
         }
-        if (!token.length) continue;
-        if (DPIsValidLaunchFlag(token)) {
-            if (![flags containsObject:token]) [flags addObject:token];
-        } else {
-            [bad addObject:token];
-        }
+        if (!size) continue;
+        NSString *flag = [NSString stringWithCharacters:token length:size];
+        if (!DPIsValidLaunchFlag(flag)) [bad addObject:flag];
+        else if (![flags containsObject:flag]) [flags addObject:flag];
     }
 
     if (ignored) *ignored = bad;

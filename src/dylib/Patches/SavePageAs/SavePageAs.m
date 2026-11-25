@@ -36,9 +36,10 @@ static id DPFrontPage(void) {
 
 static void DPSaveFrontPage(void) { [DPFrontPage() performSelector:@selector(save)]; }
 
-static void DPAddSaveItem(void) {
+static void DPShowSaveItem(BOOL shown) {
     NSMenu *file = [NSApp.mainMenu itemWithTitle:@"File"].submenu;
-    if (!file || [file indexOfItem:DPSaveItem] >= 0) return;
+    if (!file || !DPSaveItem || shown == ([file indexOfItem:DPSaveItem] >= 0)) return;
+    if (!shown) return [file removeItem:DPSaveItem];
     NSInteger print = [file indexOfItemWithTitle:@"Print…"];
     [file insertItem:DPSaveItem atIndex:print >= 0 ? print : file.numberOfItems];
 }
@@ -47,8 +48,7 @@ static void DPInstallSavePageAs(void) {
     DPPages = [NSHashTable weakObjectsHashTable];
     DPHook(DPDiaWebContents, @selector(setVisibility:), (IMP)DPPage_setVisibility);
     DPSaveItem = DPMenuItem(@"Save Page As…", ^{ DPSaveFrontPage(); });
-    DPSaveItem.hidden = !DPSavePageAs.on;
-    DPOnLaunch(^{ DPAddSaveItem(); });
+    DPOnLaunch(^{ DPShowSaveItem(DPSavePageAs.on); });
     [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskKeyDown handler:^NSEvent *(NSEvent *event) {
         if (!DPSavePageAs.on || !DPShortcutMatches(event, &DPSavePageAs) || !DPFrontPage()) return event;
         if (!event.isARepeat) DPSaveFrontPage();
@@ -56,14 +56,11 @@ static void DPInstallSavePageAs(void) {
     }];
 }
 
-static void DPApplySavePageAs(DPPatch *patch) {
-    DPAddSaveItem();
-    DPSaveItem.hidden = !patch->on;
-}
+static void DPApplySavePageAs(DPPatch *patch) { DPShowSaveItem(patch->on); }
 
 static NSString *DPVerifySavePageAs(DPPatch *patch) {
     NSMenu *file = [NSApp.mainMenu itemWithTitle:@"File"].submenu;
-    BOOL shown = file && [file indexOfItem:DPSaveItem] >= 0 && !DPSaveItem.hidden;
+    BOOL shown = file && [file indexOfItem:DPSaveItem] >= 0;
     if (shown == patch->on) return nil;
     return patch->on ? @"the File menu has no Save Page As" : @"Save Page As stays in the File menu";
 }

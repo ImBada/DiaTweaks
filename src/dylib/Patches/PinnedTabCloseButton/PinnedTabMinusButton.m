@@ -4,6 +4,7 @@ enum { DPDismiss = 2 };
 
 static NSImage *DPMinus;
 static char DPDiaImageKey;
+static BOOL DPMinusShown;
 
 static id DPMinusController(NSView *content) {
     NSView *tab = DPEnclosingTab(content);
@@ -22,17 +23,17 @@ static NSButton *DPCloseButton(NSView *content) {
 
 static void DPContent_layout(NSView *self, SEL _cmd) {
     DPCallOriginal(DPContent_layout, self);
-    NSButton *button = DPCloseButton(self);
-    if (!button) return;
     BOOL on = DPMinusOn();
-    if (!on && !DPGet(button, &DPDiaImageKey)) return;
+    if (!on && !DPMinusShown) return;
+    NSButton *button = DPCloseButton(self);
+    if (!button || (!on && !DPGet(button, &DPDiaImageKey))) return;
     NSImage *dia = DPDiaValue(button, &DPDiaImageKey, button.image);
     if (!dia) {
         if (!on) DPSet(button, &DPDiaImageKey, nil);
         return;
     }
     BOOL minus = on && DPMinusController(self);
-    if (minus) DPOverride(button, &DPDiaImageKey, dia, DPMinus);
+    if (minus) DPOverride(button, &DPDiaImageKey, dia, DPMinus), DPMinusShown = YES;
     else if (DPGet(button, &DPDiaImageKey)) DPSet(button, &DPDiaImageKey, nil);
     NSImage *shown = minus ? DPMinus : dia;
     if (button.image != shown) button.image = shown;

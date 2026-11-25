@@ -1,5 +1,6 @@
 #import "Patches/Peek/Peek.h"
 #import "Patches/LittleDia/LittleDia.h"
+#import <objc/message.h>
 
 const CGFloat DPPeekToolbarHeight = 38;
 static const CGFloat DPInset = 6, DPGap = 2, DPButton = 28, DPAddressHeight = 30;
@@ -121,10 +122,8 @@ NSView *DPPeekToolbarAddress(NSView *toolbar) { return [toolbar isKindOfClass:DP
 
 void DPPeekNavigate(id page, DPPeekStep step) {
     id navigation = DPValueForKey(page, @"navigationController");
-    if (step == DPPeekBack && [DPValueForKey(page, @"canGoBack") boolValue] && [navigation respondsToSelector:@selector(goBack)])
-        [navigation performSelector:@selector(goBack)];
-    else if (step == DPPeekForward && [DPValueForKey(page, @"canGoForward") boolValue] && [navigation respondsToSelector:@selector(goForward)])
-        [navigation performSelector:@selector(goForward)];
-    else if (step == DPPeekReload && [navigation respondsToSelector:@selector(reload)])
-        [navigation performSelector:@selector(reload)];
+    SEL action = step == DPPeekReload ? @selector(reload) : NULL;
+    if (step == DPPeekBack && [DPValueForKey(page, @"canGoBack") boolValue]) action = @selector(goBack);
+    if (step == DPPeekForward && [DPValueForKey(page, @"canGoForward") boolValue]) action = @selector(goForward);
+    if (action && [navigation respondsToSelector:action]) ((void (*)(id, SEL))objc_msgSend)(navigation, action);
 }

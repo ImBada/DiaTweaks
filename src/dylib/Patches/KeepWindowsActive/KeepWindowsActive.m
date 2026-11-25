@@ -13,7 +13,8 @@
 extern DPPatch DPKeepWindowsActive;
 
 static BOOL DPIsBrowserWindow(NSWindow *window) {
-    return (window.styleMask & NSWindowStyleMaskTitled) && ![window isKindOfClass:NSPanel.class];
+    return (window.styleMask & NSWindowStyleMaskTitled) && ![window isKindOfClass:NSPanel.class]
+        && !DPIsKind(window.contentViewController, DPDiaSettingsController) && !DPIsKind(window.toolbar.delegate, DPDiaSettingsController);
 }
 
 static BOOL DPKeptActive(NSWindow *window) {
@@ -74,9 +75,10 @@ static void DPInstallKeepWindowsActive(void) {
 
 DP_PATCH(DPKeepWindowsActive) {
     .key = @"keepWindowsActive",
+    .experimental = YES,
     .order = 96,
     .title = @"Keep Windows Active",
-    .detail = @"Keep windows looking active, with their shadow, sidebar color and window buttons, when you switch to another app. Experimental.",
+    .detail = @"Keep windows looking active, with their shadow, sidebar color and window buttons, when you switch to another app.",
     .symbol = @"rectangle.fill.on.rectangle.fill",
     .tint = @"systemBrownColor",
     .section = @"Window",

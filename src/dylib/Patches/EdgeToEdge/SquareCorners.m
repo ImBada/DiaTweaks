@@ -10,6 +10,10 @@ typedef struct CACornerRadii { CGSize topLeft, topRight, bottomRight, bottomLeft
 @property(readonly) BOOL _usesCornerRadii;
 @end
 
+static BOOL DPUsesCornerRadii(CALayer *layer) {
+    return [layer respondsToSelector:@selector(_usesCornerRadii)] && layer._usesCornerRadii;
+}
+
 // All-zero cornerRadii fall back to cornerRadius, and some releases keep _usesCornerRadii set for them.
 static BOOL DPRadiiEmpty(CACornerRadii radii) {
     return CGSizeEqualToSize(radii.topLeft, CGSizeZero) && CGSizeEqualToSize(radii.topRight, CGSizeZero)
@@ -17,10 +21,10 @@ static BOOL DPRadiiEmpty(CACornerRadii radii) {
 }
 
 static void DPClearCornerRadii(CALayer *layer) {
-    if (![layer respondsToSelector:@selector(setCornerRadii:)] || !layer._usesCornerRadii) return;
+    if (![layer respondsToSelector:@selector(setCornerRadii:)] || !DPUsesCornerRadii(layer)) return;
     CACornerRadii zero = {0};
     layer.cornerRadii = zero;
-    if (!layer._usesCornerRadii || DPRadiiEmpty(layer.cornerRadii)) return;
+    if (!DPUsesCornerRadii(layer) || DPRadiiEmpty(layer.cornerRadii)) return;
     // Zero didn't take, so pin the corners to Dia's radius rather than leave them square.
     CGFloat r = layer.cornerRadius;
     CACornerRadii round = { { r, r }, { r, r }, { r, r }, { r, r } };
@@ -31,7 +35,7 @@ static void DPMaskCorners(NSView *container, CALayer *layer, CGFloat left, CGFlo
     if ([layer respondsToSelector:@selector(setCornerRadii:)]) {
         layer.mask = nil;
         layer.maskedCorners = DPLeftCorners | DPRightCorners;
-        // All-zero cornerRadii falls back to cornerRadius, so square stays a hair above zero.
+        // Square stays a hair above zero, which DPRadiiEmpty would read as unset.
         CGFloat l = MAX(0.01, layer.cornerRadius * (1 - left)), r = MAX(0.01, layer.cornerRadius * (1 - right));
         CACornerRadii radii = { { l, l }, { r, r }, { r, r }, { l, l } };
         DPAnimateLayer(container, layer, @"cornerRadii", [NSValue valueWithBytes:&radii objCType:@encode(CACornerRadii)]);
@@ -116,11 +120,12 @@ static void DPReshapePaths(NSView *container, CGFloat base, CGFloat grow, CGFloa
 }
 
 BOOL DPCornersRound(CALayer *layer, BOOL right) {
-    if ([layer respondsToSelector:@selector(cornerRadii)] && layer._usesCornerRadii) {
+    if ([layer respondsToSelector:@selector(cornerRadii)] && DPUsesCornerRadii(layer)) {
         CACornerRadii radii = layer.cornerRadii;
         if (!DPRadiiEmpty(radii)) return (right ? radii.topRight.width : radii.topLeft.width) >= 0.5;
     }
-    if (layer.mask) return layer.mask.sublayers[right].cornerRadius > 0;
+    NSArray<CALayer *> *halves = layer.mask.sublayers;
+    if (layer.mask) return halves.count > (NSUInteger)right && halves[right].cornerRadius > 0;
     return layer.cornerRadius > 0 && (layer.maskedCorners & (right ? DPRightCorners : DPLeftCorners));
 }
 
@@ -209,7 +214,7 @@ void DPRoundCornerControls(NSView *container) {
         CGFloat top = content.isFlipped ? NSMinY(rect) : NSHeight(content.bounds) - NSMaxY(rect), left = NSMinX(rect), right = width - NSMaxX(rect);
         CGFloat topLeft = top < 12 && left < 12 ? MAX(dia, page.topLeft.width - MAX(top, left)) : dia;
         CGFloat topRight = top < 12 && right < 12 ? MAX(dia, page.topRight.width - MAX(top, right)) : dia;
-        if (topLeft == dia && topRight == dia && !layer._usesCornerRadii) return NO;
+        if (topLeft == dia && topRight == dia && !DPUsesCornerRadii(layer)) return NO;
         CGSize l = CGSizeMake(topLeft, topLeft), r = CGSizeMake(topRight, topRight), d = CGSizeMake(dia, dia);
         CACornerRadii radii = layer.contentsAreFlipped ? (CACornerRadii){ d, d, r, l } : (CACornerRadii){ l, r, d, d };
         DPSet(layer, &DPControlCornerKey, @YES);
@@ -225,13 +230,12 @@ static void DPUseContinuousCurve(CALayer *layer) {
 }
 
 void DPApplySquareCorners(NSView *container) {
+    BOOL active = DPEdgeToEdgeActive();
+    if (!active && !DPGet(container, &DPCornersTouchedKey)) return;
     CGFloat base, grow, left, right;
     CALayer *layer = DPCornerShape(container, &base, &grow, &left, &right);
     if (!layer) return;
-    if (!DPEdgeToEdgeActive()) {
-        if (DPGet(container, &DPCornersTouchedKey)) DPRestoreSquareCorners(container, layer);
-        return;
-    }
+    if (!active) return DPRestoreSquareCorners(container, layer);
     DPSet(container, &DPCornersTouchedKey, @YES);
     DPWithoutAnimation(^{
         DPUseContinuousCurve(layer);

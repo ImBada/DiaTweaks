@@ -29,8 +29,8 @@ static BOOL DPOnPinnedIcon(id page) {
     return pinnedHere;
 }
 
-// Scripting calls only the icons pinned; a pinned row says so in its menu.
-static BOOL DPFromPinnedTab(id page) { return DPPeekInPinnedRow(NSApp.keyWindow, page) || DPOnPinnedIcon(page); }
+// Scripting calls only the icons pinned; a pinned row says so in its menu. Ask the page's own window, not the key one.
+static BOOL DPFromPinnedTab(id page, NSWindow *window) { return (window && DPPeekInPinnedRow(window, page)) || DPOnPinnedIcon(page); }
 
 static BOOL DPInLittleDia(id page) {
     for (NSWindow *window in NSApp.windows)
@@ -55,8 +55,8 @@ BOOL DPLittleDiaTakesTabLink(id page, NSURL *url, BOOL leavesPinned) {
     if (!page || DPInLittleDia(page) || DPPeekShows(page) || !DPPeekIsWeb(DPPageURL(page))) return NO;
     id browser = DPBrowserOfContents(page);
     if (!DPOpensInOwnProfile(browser)) return NO;
-    if (!leavesPinned && ![DPChoice(&DPLittleDiaTabLinks) isEqual:DPFromAllTabs] && !DPFromPinnedTab(page)) return NO;
     NSWindow *source = DPBrowserWindow(browser);
+    if (!leavesPinned && ![DPChoice(&DPLittleDiaTabLinks) isEqual:DPFromAllTabs] && !DPFromPinnedTab(page, source)) return NO;
     dispatch_async(dispatch_get_main_queue(), ^{ DPOpenTabLinkInLittleDia(url, source); });  // Not from inside Chromium's callback.
     return YES;
 }
@@ -80,10 +80,11 @@ static NSString *DPVerifyTabLinks(DPPatch *patch) {
 
 DP_PATCH(DPLittleDiaTabLinks) {
     .key = @"littleDiaTabLinks",
+    .experimental = YES,
     .order = 104,
     .title = @"Open Links from Tabs",
     .detail = @"Links that would open a new tab open in Little Dia over the page instead. "
-              @"Choose pinned tabs only, including links that leave a pinned tab’s site, or every tab. Clicks with Option, Command, Shift or Control held keep their usual meaning. Experimental.",
+              @"Choose pinned tabs only, including links that leave a pinned tab’s site, or every tab. Clicks with Option, Command, Shift or Control held keep their usual meaning.",
     .symbol = @"arrow.up.forward.app arrow.up.right.square",
     .tint = @"systemMintColor",
     .requires = @"littleDia",

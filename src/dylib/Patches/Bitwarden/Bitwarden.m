@@ -20,8 +20,8 @@ static NSString *DPProxyPath(void) {
 }
 #endif
 
-static NSError *gWriteError;
-static NSString *gWritePath;
+static NSError *DPBitwardenWriteError;
+static NSString *DPBitwardenWritePath;
 
 static void DPRemoveOwnHostFiles(NSString *keptFolder) {
     for (NSString *dir in DPHostFolders()) {
@@ -32,24 +32,24 @@ static void DPRemoveOwnHostFiles(NSString *keptFolder) {
 }
 
 static void DPRegisterHost(BOOL on) {
-    gWriteError = nil;
-    gWritePath = nil;
+    DPBitwardenWriteError = nil;
+    DPBitwardenWritePath = nil;
     if (!on) return DPRemoveOwnHostFiles(nil);
     NSString *proxy = DPProxyPath();
     if (!proxy) return;
     NSError *error = nil;
     NSString *hostFolder = DPHostFolder(YES, &error);
     if (!hostFolder) {
-        gWriteError = error;
-        gWritePath = [DPHostFolders().lastObject stringByAppendingPathComponent:kHostFile];
+        DPBitwardenWriteError = error;
+        DPBitwardenWritePath = [DPHostFolders().lastObject stringByAppendingPathComponent:kHostFile];
         return;
     }
     NSString *path = [hostFolder stringByAppendingPathComponent:kHostFile];
     if ([NSFileManager.defaultManager fileExistsAtPath:path] && ![DPHostAt(path)[@"description"] isEqual:kDescription]) return;
     NSDictionary *manifest = @{ @"name" : kHost, @"description" : kDescription, @"path" : proxy, @"type" : @"stdio", @"allowed_origins" : @[ kExtension ] };
     if (![[NSJSONSerialization dataWithJSONObject:manifest options:NSJSONWritingPrettyPrinted error:nil] writeToFile:path options:NSDataWritingAtomic error:&error]) {
-        gWriteError = error;
-        gWritePath = path;
+        DPBitwardenWriteError = error;
+        DPBitwardenWritePath = path;
         return;
     }
     DPRemoveOwnHostFiles(hostFolder);
@@ -58,7 +58,7 @@ static void DPRegisterHost(BOOL on) {
 static NSString *DPBitwardenProblem(DPPatch *patch) {
     NSString *path = [DPHostFolder(NO, nil) stringByAppendingPathComponent:kHostFile];
     if (!DPProxyPath()) return DPTesting ? nil : @"The Bitwarden desktop app isn’t installed. Install it, then try again.";
-    if (gWriteError) return DPWriteProblem(gWritePath ?: path, gWriteError);
+    if (DPBitwardenWriteError) return DPWriteProblem(DPBitwardenWritePath ?: path, DPBitwardenWriteError);
     NSDictionary *host = DPHostAt(path);
     if (![host[@"name"] isEqual:kHost]) return [NSString stringWithFormat:@"%@ isn’t a valid host file.", path];
     if (![host[@"path"] isKindOfClass:NSString.class] || ![NSFileManager.defaultManager isExecutableFileAtPath:host[@"path"]])
@@ -72,9 +72,10 @@ static void DPApplyBitwarden(DPPatch *patch) { DPRegisterHost(patch->on); }
 
 DP_PATCH(DPBitwarden) {
     .key = @"bitwarden",
+    .experimental = YES,
     .order = 103,
     .title = @"Allow Bitwarden",
-    .detail = @"Unlock the Bitwarden extension with the Bitwarden app, such as with Touch ID. Bitwarden only sets this up for browsers it knows, so this adds the file Dia reads when it’s missing, and takes away only that file. Experimental.",
+    .detail = @"Unlock the Bitwarden extension with the Bitwarden app, such as with Touch ID. Bitwarden only sets this up for browsers it knows, so this adds the file Dia reads when it’s missing, and takes away only that file.",
     .symbol = @"shield.lefthalf.filled",
     .tint = @"systemGreenColor",
     .section = @"Passwords",

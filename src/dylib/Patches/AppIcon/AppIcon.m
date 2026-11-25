@@ -2,8 +2,7 @@
 #import "Updates/Updates.h"
 #include <sys/stat.h>
 
-static NSUInteger DPSwitches;
-static BOOL DPBuilding, DPStale, DPBuilt;
+static BOOL DPBuilding, DPStale, DPBuilt, DPSwitching, DPSwitchAgain;
 static NSString *DPUnlinkable;
 
 static void DPAlert(NSString *message, NSString *detail) {
@@ -39,7 +38,7 @@ static void DPRebuildCatalog(void) {
     if (DPUnlinkable && DPSavedOn(&DPAppIcon)) return DPAlertUnlinkable();
     if (DPBuilding) return (void)(DPStale = YES);
     DPBuilding = YES;
-    CFPreferencesAppSynchronize(CFSTR("com.diapatches"));
+    CFPreferencesAppSynchronize((__bridge CFStringRef)DPSettingsDomain());
     DPRunCLI(@[ @"build" ], ^(NSString *output) {
         DPBuilding = NO;
         DPBuilt = YES;
@@ -61,22 +60,26 @@ static void DPRebuildCatalog(void) {
     });
 }
 
-static void DPApplyAppIcon(DPPatch *patch) {
-    if (DPTesting) return;
-    BOOL linked = DPCatalogLinked(), saved = DPSavedOn(patch);
-    if (!linked) {
-        // Pause turns patches off without saving: keep the bundle as built.
-        if (patch->on != saved) return;
-        if (saved || DPBuilt || DPBuilding) DPRebuildCatalog();
-        return;
-    }
-    CFPreferencesAppSynchronize(CFSTR("com.diapatches"));
-    NSUInteger current = ++DPSwitches;
+// One set-icon at a time: two in flight can finish out of order and leave the older choice on disk.
+static void DPSwitchIcon(DPPatch *patch) {
+    if (DPSwitching) return (void)(DPSwitchAgain = YES);
+    DPSwitching = YES;
+    CFPreferencesAppSynchronize((__bridge CFStringRef)DPSettingsDomain());
     DPRunCLI(@[ @"set-icon" ], ^(NSString *output) {
-        if (current != DPSwitches) return;
+        DPSwitching = NO;
+        if (DPSwitchAgain) return DPSwitchAgain = NO, DPSwitchIcon(patch);
         output ? DPDrawOwnTile() : DPAlert(@"Couldn’t change Dia’s icon", @"Dia keeps its current icon.");
         if (patch->on == DPSavedOn(patch) && (!DPSavedOn(patch) || DPBuilt || DPBuilding)) DPRebuildCatalog();
     });
+}
+
+static void DPApplyAppIcon(DPPatch *patch) {
+    if (DPTesting) return;
+    if (DPCatalogLinked()) return DPSwitchIcon(patch);
+    BOOL saved = DPSavedOn(patch);
+    // Pause turns patches off without saving: keep the bundle as built.
+    if (patch->on != saved) return;
+    if (saved || DPBuilt || DPBuilding) DPRebuildCatalog();
 }
 
 static BOOL DPWorkspace_setIcon(NSWorkspace *self, SEL _cmd, NSImage *image, NSString *path, NSWorkspaceIconCreationOptions options) {

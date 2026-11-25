@@ -13,7 +13,7 @@ static const CGFloat DPFindWidth = 260, DPFindHeight = 30, DPFindMargin = 8, DPF
 @end
 
 static void DPPeekStopFind(id page) {
-    if ([page respondsToSelector:@selector(stopFind)]) [page performSelector:@selector(stopFind)];
+    if ([page respondsToSelector:@selector(stopFind)]) ((void (*)(id, SEL))objc_msgSend)(page, @selector(stopFind));
 }
 
 @implementation DPPeekFind

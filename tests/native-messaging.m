@@ -1,5 +1,6 @@
 #import "StdPatch/StdPatch.h"
 #import "Updates/Updates.h"
+#include <spawn.h>
 #include <sys/stat.h>
 
 static NSString *gAppSupportRoot;
@@ -242,6 +243,80 @@ static void testPasskeysChromelessAndTransition(void) {
     unlockAndRemove(gAppSupportRoot);
 }
 
+static NSMutableDictionary<NSString *, void (^)(NSNotification *)> *gDistributedObservers;
+static int gHelperAlerts;
+
+@implementation NSDistributedNotificationCenter (DPPasskeysTest)
+- (id)dp_captureObserverForName:(NSNotificationName)name object:(id)object queue:(NSOperationQueue *)queue usingBlock:(void (^)(NSNotification *))block {
+    gDistributedObservers[name] = [block copy];
+    return [NSObject new];
+}
+@end
+
+@implementation NSAlert (DPPasskeysTest)
+- (NSModalResponse)dp_countRunModal {
+    gHelperAlerts++;
+    return NSAlertSecondButtonReturn;
+}
+@end
+
+// Apple's own binaries may only launch from where they're installed, so the stand-in processes are copies of this test.
+static pid_t spawnIdleCopy(NSString *path) {
+    NSFileManager *fm = NSFileManager.defaultManager;
+    [fm createDirectoryAtPath:path.stringByDeletingLastPathComponent withIntermediateDirectories:YES attributes:nil error:nil];
+    [fm removeItemAtPath:path error:nil];
+    NSCAssert([fm copyItemAtPath:NSBundle.mainBundle.executablePath toPath:path error:nil], @"copy test to %@", path);
+    pid_t pid = 0;
+    const char *argv[] = { path.fileSystemRepresentation, "--idle", NULL };
+    NSCAssert(posix_spawn(&pid, argv[0], NULL, NULL, (char *const *)argv, NULL) == 0, @"spawn %@", path);
+    return pid;
+}
+
+static void testPasskeysTrustOnlyTheirHelper(void) {
+    gAppSupportRoot = makeTempDir();
+    installFakeRelay();
+    gLoadedExtensions = [NSMutableArray array];
+    gDroppedExtensions = [NSMutableArray array];
+    [NSApplication sharedApplication];
+    Method add = class_getInstanceMethod(NSDistributedNotificationCenter.class, @selector(addObserverForName:object:queue:usingBlock:));
+    Method capture = class_getInstanceMethod(NSDistributedNotificationCenter.class, @selector(dp_captureObserverForName:object:queue:usingBlock:));
+    Method runModal = class_getInstanceMethod(NSAlert.class, @selector(runModal)), count = class_getInstanceMethod(NSAlert.class, @selector(dp_countRunModal));
+    method_exchangeImplementations(add, capture);
+    method_exchangeImplementations(runModal, count);
+    gDistributedObservers = [NSMutableDictionary dictionary];
+    gHelperAlerts = 0;
+
+    DPPasskeys.on = YES;
+    DPPasskeys.install();
+    void (^show)(NSNotification *) = gDistributedObservers[@"com.diapatches.passkeys.show"];
+    void (^signIn)(NSNotification *) = gDistributedObservers[@"com.diapatches.passkeys.signIn"];
+    NSCAssert(show && signIn, @"passkeys listens for its helper");
+
+    pid_t helper = spawnIdleCopy(DPAppSupport(@"DiaPatches/pristine/Dia.app/Contents/MacOS/Dia"));
+    pid_t stranger = spawnIdleCopy(DPAppSupport(@"Elsewhere/Dia.app/Contents/MacOS/Dia"));
+    pid_t lookalike = spawnIdleCopy(DPAppSupport(@"DiaPatches/pristine/Dia.app.evil/Contents/MacOS/Dia"));
+    NSArray *spoofed = @[ @(stranger).stringValue, @(lookalike).stringValue, @(getpid()).stringValue, @"0", @"-1", @"not a pid", @(1) ];
+    for (id object in spoofed) {
+        signIn([NSNotification notificationWithName:@"com.diapatches.passkeys.signIn" object:object]);
+        show([NSNotification notificationWithName:@"com.diapatches.passkeys.show" object:object]);
+    }
+    NSCAssert(gHelperAlerts == 0, @"a notification naming any process but the passkey helper shows no prompt, got %d", gHelperAlerts);
+    signIn([NSNotification notificationWithName:@"com.diapatches.passkeys.signIn" object:@(helper).stringValue]);
+    NSCAssert(gHelperAlerts == 1, @"the passkey helper still gets its sign-in prompt");
+    DPPasskeys.on = NO;
+    signIn([NSNotification notificationWithName:@"com.diapatches.passkeys.signIn" object:@(helper).stringValue]);
+    NSCAssert(gHelperAlerts == 1, @"passkeys off ignores even its helper");
+    DPPasskeys.install();
+
+    for (NSNumber *pid in @[ @(helper), @(stranger), @(lookalike) ]) {
+        kill(pid.intValue, SIGKILL);
+        waitpid(pid.intValue, NULL, 0);
+    }
+    method_exchangeImplementations(add, capture);
+    method_exchangeImplementations(runModal, count);
+    unlockAndRemove(gAppSupportRoot);
+}
+
 static void testICloudPasswordsTemplatesAndChromeless(void) {
     gAppSupportRoot = makeTempDir();
     installFakeRelay();
@@ -325,6 +400,15 @@ static void testICloudPasswordsTemplatesAndChromeless(void) {
                              @"allowed_origins" : @[ @"chrome-extension://aeblfdkhhhdcdjpifhhbdiojplfjncoa/" ] });
     NSDictionary *op = onePasswordHostIn(@[ DPAppSupport(@"Google/Chrome/NativeMessagingHosts"), diaDir ]);
     NSCAssert([op[@"path"] hasSuffix:@"/1Password-BrowserSupport"], @"diapatch onePasswordHostIn falls back to Dia/User Data");
+
+    DPICloudPasswords.on = NO;
+    DPICloudPasswords.apply(&DPICloudPasswords);
+    writeJSON(openPath, @{ @"name" : @"com.openpasswords.icloud", @"path" : @42 });
+    DPICloudPasswords.on = YES;
+    DPICloudPasswords.apply(&DPICloudPasswords);
+    NSCAssert([readJSON(openPath)[@"path"] isEqual:@42], @"a host file whose path isn't a string is left alone, not crashed on");
+    DPICloudPasswords.on = NO;
+    DPICloudPasswords.apply(&DPICloudPasswords);
 
     NSString *liveHelper = DPAppleHelper();
     if (liveHelper) NSCAssert([NSFileManager.defaultManager isExecutableFileAtPath:liveHelper], @"live Apple helper must be executable");
@@ -548,10 +632,12 @@ static void testProtonPass(void) {
     unlockAndRemove(gAppSupportRoot);
 }
 
-int main(void) {
+int main(int argc, char **argv) {
+    if (argc > 1 && !strcmp(argv[1], "--idle")) return sleep(30), 0;
     @autoreleasepool {
         testHostFolderFallback();
         testPasskeysChromelessAndTransition();
+        testPasskeysTrustOnlyTheirHelper();
         testICloudPasswordsTemplatesAndChromeless();
         testBitwardenAndOnePasswordChromeless();
         testProtonPass();

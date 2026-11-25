@@ -3,6 +3,7 @@
 #import <objc/message.h>
 
 static const NSUInteger DPTidyMaxTabs = 50;
+static NSUInteger DPTidyRun;
 
 void DPTidyAskModel(NSArray *tabs, void (^done)(NSArray *groups, NSString *error));
 
@@ -29,10 +30,11 @@ static NSArray<NSDictionary *> *DPTidyOps(NSArray *groups, NSArray<NSDictionary 
     return ops;
 }
 
-static void DPTidyGroup(id browser, id delegate, NSArray<NSDictionary *> *tabs) {
+static void DPTidyGroup(id browser, id delegate, NSArray<NSDictionary *> *tabs, NSUInteger run) {
     NSMutableArray *prompt = [NSMutableArray array];
     for (NSDictionary *tab in tabs) [prompt addObject:@{@"title": tab[@"title"], @"address": tab[@"address"]}];
     DPTidyAskModel(prompt, ^(NSArray *groups, NSString *error) {
+        if (run != DPTidyRun) return;
         if (error) { DPTidySetBusy(NO); return DPTidyFail(error); }
         NSArray *ops = DPTidyOps(groups, tabs);
         NSLog(@"DiaPatches: Tidy Tabs made %lu groups from %lu tabs", (unsigned long)ops.count, (unsigned long)tabs.count);
@@ -43,7 +45,7 @@ static void DPTidyGroup(id browser, id delegate, NSArray<NSDictionary *> *tabs) 
         for (NSDictionary *tab in tabs) if ([idSet containsObject:tab[@"session"]]) urls[tab[@"session"]] = tab[@"url"];
         NSDictionary *places = DPTabPlaces(urls);
         DPRunOps(delegate, browser, ops, 0, ^{
-            DPTidySetBusy(NO);
+            if (run == DPTidyRun) DPTidySetBusy(NO);
             DPOfferUndo(delegate, browser, ids, places);
         });
     });
@@ -66,9 +68,18 @@ void DPTidyTabsNow(NSWindow *window) {
     }
     if (candidates.count < 2) return DPTidyFail(@"There are no loose tabs to tidy.");
     DPTidySetBusy(YES);
+    NSUInteger run = ++DPTidyRun;
+    // A completion Dia or the model drops would otherwise leave the brooms busy until relaunch.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 120 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        if (run != DPTidyRun || !DPTidyIsBusy()) return;
+        DPTidyRun++;
+        DPTidySetBusy(NO);
+        DPTidyFail(@"Gave up waiting for an answer.");
+    });
     void (*ask)(id, SEL, id, void (^)(NSArray *)) = (void *)objc_msgSend;
     ask(delegate, @selector(browser:getAllTabGroupsWithCompletion:), browser, ^(NSArray *groups) {
         dispatch_async(dispatch_get_main_queue(), ^{
+            if (run != DPTidyRun) return;
             NSMutableSet<NSNumber *> *grouped = [NSMutableSet set];
             for (id info in [groups isKindOfClass:NSArray.class] ? groups : @[]) {
                 NSArray *rawIDs = [info respondsToSelector:@selector(tabSessionIds)] ? DPMsg(info, @selector(tabSessionIds)) : nil;
@@ -78,7 +89,7 @@ void DPTidyTabsNow(NSWindow *window) {
             for (NSDictionary *tab in candidates)
                 if (![grouped containsObject:tab[@"session"]] && tabs.count < DPTidyMaxTabs) [tabs addObject:tab];
             if (tabs.count < 2) { DPTidySetBusy(NO); return DPTidyFail(@"There are no loose tabs to tidy."); }
-            DPTidyGroup(browser, delegate, tabs);
+            DPTidyGroup(browser, delegate, tabs, run);
         });
     });
 }

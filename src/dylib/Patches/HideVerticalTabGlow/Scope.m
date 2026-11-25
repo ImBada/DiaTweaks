@@ -1,7 +1,9 @@
 #import "HideVerticalTabGlow.h"
 
 BOOL DPIsVerticalTab(NSView *shape) {
-    Class strip = objc_getClass(DPDiaTabStrip), root = objc_getClass(DPVerticalSidebarRoot);
+    static Class strip, root;
+    strip = strip ?: objc_getClass(DPDiaTabStrip);
+    root = root ?: objc_getClass(DPVerticalSidebarRoot);
     BOOL sidebar = NO;
     for (NSView *up = shape; up; up = up.superview) {
         if (strip && [up isKindOfClass:strip]) return NO;

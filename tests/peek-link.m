@@ -57,6 +57,9 @@ int main(void) {
         same(@"https://example.com/p?x#caf%C3%A9%2B%20%25", @"example.com/p?x#café%2B %25");
         same(@"https://example.com/a%7Cb%5Ec%22d", @"example.com/a|b^c\"d");
         same(@"https://example.com/a%5Bb%5D?x%5B%5D=caf%C3%A9#f%23g", @"example.com/a[b]?x[]=café#f#g");
+        same(@"https://example.com/Path?Q=1", @"Example.COM/Path?Q=1");
+        same(@"HTTPS://example.com/a%20b", @"EXAMPLE.com/a b");
+        same(@"https://xn--mnchen-3ya.de/%C3%BC", @"MÜNCHEN.de/ü");
 
         [parsed removeAllObjects];
         key(@"example.com/café b/日%25本", @"example.com/caf%C3%A9%20b/%E6%97%A5%25%E6%9C%AC");
@@ -69,6 +72,7 @@ int main(void) {
         key(@"http://127.0.0.1:8470/x.html?a=b&c=d;e#f", @"127.0.0.1:8470/x.html?a=b&c=d;e#f");
         key(@"https://user@example.com:8080/a/", @"user@example.com:8080/a");
         key(@"https://example.com", @"example.com");
+        key(@"Https://User@Example.COM:8080/A/", @"User@example.com:8080/A");
         expect(!parsed.count, @"an address with an ASCII host never reaches NSURL");
         key(@"münchen.localhost:8470/ü?q=é%20#%C3%BC", @"xn--mnchen-3ya.localhost:8470/%C3%BC?q=%C3%A9%20#%C3%BC");
         expect([parsed isEqualToArray:@[ @"http://münchen.localhost:8470" ]], [NSString stringWithFormat:@"only the host is handed to NSURL, got %@", parsed]);
@@ -91,6 +95,8 @@ int main(void) {
         differ(@"https://example.com/caf%C3%A9/x", @"example.com/cafe/x");
         differ(@"https://example.com/p#caf%C3%A9%20", @"example.com/p#cafe%20");
         differ(@"https://example.com/s?q=caf%C3%A9%2B1", @"example.com/s?q=café+1");
+        differ(@"https://example.com/Path", @"example.com/path");
+        differ(@"https://User@example.com/", @"user@example.com");
     }
     if (failures) printf("%d failures\n", failures);
     else printf("peek links ok\n");

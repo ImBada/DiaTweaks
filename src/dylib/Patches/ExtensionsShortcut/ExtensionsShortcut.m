@@ -2,6 +2,7 @@
 
 extern DPPatch DPExtensionsShortcut;
 static NSMapTable<NSWindow *, id> *DPBrowsers;
+static id DPKeyMonitor;
 
 static NSDictionary *DPDefaultExtensionsShortcut(void) {
     return @{ @"keyCode" : @7, @"modifiers" : @(NSEventModifierFlagShift | NSEventModifierFlagCommand), @"key" : @"X" };
@@ -60,17 +61,21 @@ static void DPShowExtensions(NSWindow *window, id browser) {
     [DPExtensionsMenu(browser, window) popUpMenuPositioningItem:nil atLocation:corner inView:content];
 }
 
-static void DPInstallExtensionsShortcut(void) {
-    DPBrowsers = [NSMapTable weakToWeakObjectsMapTable];
-    DPHook(DPDiaBrowser, @selector(setWindow:), (IMP)DPBrowser_setWindow);
-    [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskKeyDown handler:^NSEvent *(NSEvent *event) {
+static void DPApplyExtensionsShortcut(DPPatch *patch) {
+    DPSyncMonitor(&DPKeyMonitor, patch->on, NSEventMaskKeyDown, ^NSEvent *(NSEvent *event) {
         if (!DPExtensionsShortcut.on || !DPShortcutMatches(event, &DPExtensionsShortcut)) return event;
         NSWindow *window = event.window;
         id browser = window ? [DPBrowsers objectForKey:window] : nil;
         if (!browser) return event;
         if (!event.isARepeat) dispatch_async(dispatch_get_main_queue(), ^{ DPShowExtensions(window, browser); });
         return nil;
-    }];
+    });
+}
+
+static void DPInstallExtensionsShortcut(void) {
+    DPBrowsers = [NSMapTable weakToWeakObjectsMapTable];
+    DPHook(DPDiaBrowser, @selector(setWindow:), (IMP)DPBrowser_setWindow);
+    DPApplyExtensionsShortcut(&DPExtensionsShortcut);
 }
 
 DP_PATCH(DPExtensionsShortcut) {
@@ -83,6 +88,7 @@ DP_PATCH(DPExtensionsShortcut) {
     .section = @"Toolbar",
     .classes = DPClasses(DPDiaBrowser),
     .install = DPInstallExtensionsShortcut,
+    .apply = DPApplyExtensionsShortcut,
     .shortcut = @"extensionsMenuShortcut",
     .defaultShortcut = DPDefaultExtensionsShortcut,
 };

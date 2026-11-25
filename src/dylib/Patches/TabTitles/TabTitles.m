@@ -14,9 +14,10 @@ static void DPInstallTabTitles(void) {
 
 DP_PATCH(DPTabTitles) {
     .key = @"tabTitles",
+    .experimental = YES,
     .order = 205,
     .title = @"Clean Tab Titles",
-    .detail = @"Show a tab’s own title when it starts with invisible characters that make Dia show the domain instead. Experimental.",
+    .detail = @"Show a tab’s own title when it starts with invisible characters that make Dia show the domain instead.",
     .hint = @"Reload open tabs after changing this setting.",
     .symbol = @"textformat",
     .tint = @"systemPinkColor",

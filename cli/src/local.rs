@@ -1,20 +1,22 @@
 use std::{
     fs, io,
+    os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
-    process::Command,
+    process::{Command, Stdio},
 };
 
-use anyhow::{bail, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use serde::Deserialize;
+use tempfile::TempDir;
 
 use crate::{
     dia::Diapatch,
-    env::Env,
-    manifest::Patch,
+    env::{self, Env},
+    manifest::{Manifest, Patch},
+    signals::{self, Cancelled},
     ui::{self, Ui},
 };
 
-/// `local-state.json`, written by the dylib and by `diapatch local build`.
 #[derive(Deserialize, Default)]
 pub struct LocalState {
     #[serde(default)]
@@ -36,15 +38,11 @@ pub struct LocalItem {
 
 impl LocalState {
     pub fn load(path: &Path) -> Result<Self> {
-        let data = match fs::read(path) {
-            Ok(data) => data,
-            Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(Self::default()),
-            Err(err) => {
-                return Err(err).with_context(|| format!("Couldn't read {}", path.display()));
-            }
-        };
-        // A damaged state file must not break `diatweaks list`: the tweaks still load, they just aren't listed.
-        Ok(serde_json::from_slice(&data).unwrap_or_default())
+        match fs::read(path) {
+            Ok(data) => Ok(serde_json::from_slice(&data).unwrap_or_default()),
+            Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(Self::default()),
+            Err(err) => Err(err).with_context(|| format!("Couldn't read {}", path.display())),
+        }
     }
 
     pub fn items(&self) -> &[LocalItem] {
@@ -98,35 +96,143 @@ pub fn list(env: &Env) -> Result<()> {
 }
 
 pub fn add(env: &Env, ui: &Ui, path: &Path) -> Result<()> {
+    if let Some(url) = path.to_str().filter(|text| text.contains("://")) {
+        let (_download, file) = download(ui, url)?;
+        return add(env, ui, &file);
+    }
     if !path.exists() {
+        let name = path.to_string_lossy();
+        if !name.contains('/') && path.extension().is_none() {
+            bail!(
+                "There's nothing at {name}. To download an optional DiaTweaks tweak, run `diatweaks local install {name}`."
+            );
+        }
         bail!("There's nothing at {}.", path.display());
     }
     let folder = env.local();
+    env.check_yours(&folder)?;
     fs::create_dir_all(&folder).with_context(|| format!("Couldn't create {}", folder.display()))?;
-    let name = path.file_name().context("That path has no name.")?;
-    let mut destination = folder.join(name);
-    if destination.exists() {
-        let stem = path.file_stem().unwrap_or_default().to_string_lossy();
-        let extension = path.extension().map(|value| value.to_string_lossy());
-        destination = first_free(&folder, &stem, extension.as_deref());
-    }
+    let stem = path.file_stem().context("That path has no name.")?;
+    let extension = path.extension().map(|value| value.to_string_lossy());
+    let destination = first_free(&folder, &stem.to_string_lossy(), extension.as_deref());
     copy(path, &destination)?;
-    ui.success(format_args!(
-        "Added {}.",
-        destination
-            .file_name()
-            .unwrap_or_default()
-            .to_string_lossy()
-    ));
-    build(env, ui, &[])
+    let added = destination
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy();
+    ui.success(format_args!("Added {added}."));
+    let id = destination
+        .file_stem()
+        .unwrap_or_default()
+        .to_string_lossy();
+    build(env, ui, &[id.into_owned()])
+}
+
+fn download(ui: &Ui, url: &str) -> Result<(TempDir, PathBuf)> {
+    let Some((source, name)) = github_download(url) else {
+        bail!("Download that link first (curl -LO {url}), then run: diatweaks local add <file>");
+    };
+    let dir = tempfile::Builder::new().prefix("diatweaks-").tempdir()?;
+    let file = dir.path().join(&name);
+    let spinner = ui.spinner(format_args!("Downloading {name}"));
+    let output = Command::new("/usr/bin/curl")
+        .args(["-fsSL", "--max-time", "60", "-o"])
+        .arg(&file)
+        .arg(&source)
+        .stdin(Stdio::null())
+        .output()
+        .context("Couldn't run curl.");
+    let output = spinner.check(output)?;
+    if signals::interrupted() {
+        return Err(spinner.fail(Cancelled::nothing_changed().into()));
+    }
+    if !output.status.success() {
+        let why = output_text(&output.stderr);
+        let why = why.trim_start_matches("curl: ");
+        let why = why
+            .split_once(") ")
+            .filter(|(code, _)| code.starts_with('('))
+            .map_or(why, |(_, message)| message);
+        return Err(spinner.fail(anyhow!(
+            "Couldn't download {source}: {why}. Check the link and your internet connection."
+        )));
+    }
+    spinner.stop(format_args!("Downloaded {name}"));
+    Ok((dir, file))
+}
+
+fn github_download(url: &str) -> Option<(String, String)> {
+    let rest = url.strip_prefix("https://")?;
+    let (host, path) = rest.split_once('/')?;
+    let path = path.split(['?', '#']).next()?.trim_end_matches('/');
+    let parts: Vec<&str> = path.split('/').collect();
+    match (host, parts.as_slice()) {
+        ("github.com" | "www.github.com", [owner, repo, "pull", number, ..]) => {
+            let number = number.trim_end_matches(".patch").trim_end_matches(".diff");
+            (!number.is_empty() && number.bytes().all(|byte| byte.is_ascii_digit())).then(|| {
+                (
+                    format!("https://github.com/{owner}/{repo}/pull/{number}.patch"),
+                    format!("pr-{number}.patch"),
+                )
+            })
+        }
+        ("github.com" | "www.github.com", [owner, repo, "blob" | "raw", rest @ ..])
+            if rest.len() >= 2 =>
+        {
+            Some((
+                format!("https://github.com/{owner}/{repo}/raw/{}", rest.join("/")),
+                (*rest.last()?).to_owned(),
+            ))
+        }
+        ("raw.githubusercontent.com", [_, _, _, .., name]) => {
+            Some((url.to_owned(), (*name).to_owned()))
+        }
+        _ => None,
+    }
 }
 
 pub fn build(env: &Env, ui: &Ui, names: &[String]) -> Result<()> {
-    let diapatch = Diapatch::find(env)?;
-    match run_local(ui, &diapatch, "build", names)? {
-        Some(error) => bail!("{error}"),
-        None => Ok(()),
+    delegate(env, ui, "build", names)
+}
+
+pub fn available(env: &Env, ui: &Ui) -> Result<()> {
+    delegate(env, ui, "available", &[])
+}
+
+pub fn install(env: &Env, ui: &Ui, names: &[String]) -> Result<()> {
+    delegate(env, ui, "install", names)
+}
+
+pub fn install_unless_built_in(env: &Env, ui: &Ui, names: &[String]) -> Result<()> {
+    let built_in = Manifest::load(env).ok();
+    let mut optional = Vec::new();
+    for name in names {
+        let found = built_in
+            .as_ref()
+            .and_then(|manifest| Some(&manifest.patches[manifest.find(name)?]));
+        match found {
+            Some(patch) => ui.info(format_args!(
+                "{} is already built into DiaTweaks — turn it on with: diatweaks on {}",
+                patch.title, patch.key
+            )),
+            None => optional.push(name.clone()),
+        }
     }
+    if optional.is_empty() {
+        return Ok(());
+    }
+    install(env, ui, &optional)
+}
+
+fn delegate(env: &Env, ui: &Ui, subcommand: &str, names: &[String]) -> Result<()> {
+    let Some(error) = run_local(ui, &Diapatch::find(env)?, subcommand, names)? else {
+        return Ok(());
+    };
+    const TOOLCHAIN: [&str; 4] = ["clang", "xcrun", "SDK", "headers"];
+    if TOOLCHAIN.iter().any(|sign| error.contains(sign)) {
+        bail!("{error}\nRun `diatweaks local doctor` to check your Command Line Tools.");
+    }
+    bail!("{error}")
 }
 
 fn run_local(
@@ -136,7 +242,8 @@ fn run_local(
     names: &[String],
 ) -> Result<Option<String>> {
     let path = diapatch.path();
-    let output = Command::new(path)
+    let output = diapatch
+        .command()
         .arg("local")
         .arg(subcommand)
         .args(names)
@@ -163,7 +270,7 @@ fn output_text(bytes: &[u8]) -> String {
 
 pub fn remove(env: &Env, ui: &Ui, name: &str) -> Result<()> {
     let path = find(env, name)?;
-    trash(&path)?;
+    trash(&env.home, &path)?;
     ui.success(format_args!(
         "Moved {} to the Trash.",
         path.file_name().unwrap_or_default().to_string_lossy()
@@ -181,69 +288,53 @@ pub fn open(env: &Env) -> Result<()> {
     Ok(())
 }
 
+const NO_DESKTOP: &str = "Couldn't write to ~/Desktop (Terminal may not have Desktop access in System Settings > Privacy & Security > Files and Folders).";
+
 pub fn export(env: &Env, ui: &Ui, name: &str) -> Result<()> {
     let source = find(env, name)?;
-    let desktop = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .map(|home| home.join("Desktop"))
-        .filter(|path| path.is_dir())
-        .unwrap_or_else(|| PathBuf::from("."));
-    let destination = desktop.join(format!("{name}.zip"));
-    let status = Command::new("/usr/bin/ditto")
-        .args(["-c", "-k", "--sequesterRsrc", "--keepParent"])
-        .arg(&source)
-        .arg(&destination)
-        .status()
-        .context("Couldn't run ditto.")?;
-    if !status.success() {
-        bail!("Couldn't zip {}.", source.display());
-    }
-    ui.success(format_args!("Exported {}.", destination.display()));
+    let zip = format!(
+        "{}.zip",
+        source.file_stem().unwrap_or_default().to_string_lossy()
+    );
+    let desktop = env.home.join("Desktop");
+    let saved = match zip_to(&source, &desktop.join(&zip))? {
+        None => desktop.join(&zip),
+        Some(_) => {
+            let here = std::env::current_dir().context(NO_DESKTOP)?;
+            if let Some(why) = zip_to(&source, &here.join(&zip))? {
+                bail!(
+                    "{NO_DESKTOP}\nIt couldn't go in {} either: {why}",
+                    here.display()
+                );
+            }
+            ui.warn(NO_DESKTOP);
+            here.join(&zip)
+        }
+    };
+    ui.success(format_args!("Exported {}.", saved.display()));
     Ok(())
 }
 
-pub fn doctor(env: &Env, ui: &Ui) -> Result<()> {
-    let mut problems = Vec::new();
-    let xcrun = |args: &[&str]| {
-        Command::new("/usr/bin/xcrun")
-            .args(args)
-            .output()
-            .is_ok_and(|output| output.status.success())
-    };
-    if xcrun(&["--find", "clang"]) {
-        ui.success("clang is available.");
-    } else {
-        problems.push(
-            "Install Xcode Command Line Tools (xcode-select --install) to compile .m tweaks, or use a prebuilt .dylib."
-                .to_string(),
-        );
-    }
-    if xcrun(&["--show-sdk-path"]) {
-        ui.success("The macOS SDK is available.");
-    } else {
-        problems.push("The macOS SDK is missing. Install Xcode Command Line Tools.".to_string());
-    }
-    let folder = env.local();
-    if folder.exists() {
-        match fs::metadata(&folder) {
-            Ok(meta) if meta.permissions().readonly() => {
-                problems.push(format!("{} isn't writable.", folder.display()));
-            }
-            Ok(_) => ui.success(format_args!("{} is writable.", folder.display())),
-            Err(err) => problems.push(format!("Couldn't read {}: {err}", folder.display())),
+fn zip_to(source: &Path, destination: &Path) -> Result<Option<String>> {
+    let output = Command::new("/usr/bin/ditto")
+        .args(["-c", "-k", "--sequesterRsrc", "--keepParent"])
+        .arg(source)
+        .arg(destination)
+        .stdin(Stdio::null())
+        .output()
+        .context("Couldn't run ditto.")?;
+    Ok((!output.status.success()).then(|| {
+        let why = output_text(&output.stderr);
+        if why.is_empty() {
+            format!("ditto stopped with {}", output.status)
+        } else {
+            why
         }
-    } else {
-        ui.info(format_args!(
-            "{} doesn't exist yet; it's created when you add a tweak.",
-            folder.display()
-        ));
-    }
-    // The dylib knows whether it carries headers and how every tweak builds, so ask it rather than guess.
-    match Diapatch::find(env).and_then(|diapatch| run_local(ui, &diapatch, "doctor", &[])) {
-        Ok(Some(error)) => problems.push(error),
-        Ok(None) => {}
-        Err(err) => problems.push(format!("{err:#}")),
-    }
+    }))
+}
+
+pub fn doctor(env: &Env, ui: &Ui) -> Result<()> {
+    let problems = problems(env, ui);
     if problems.is_empty() {
         ui.done("Local tweaks are ready to build.");
         return Ok(());
@@ -254,19 +345,69 @@ pub fn doctor(env: &Env, ui: &Ui) -> Result<()> {
     bail!("{} local tweak problem(s) to fix.", problems.len())
 }
 
+pub fn problems(env: &Env, ui: &Ui) -> Vec<String> {
+    let mut problems = Vec::new();
+    let command_line_tools = std::env::var_os("DEVELOPER_DIR")
+        .is_none()
+        .then(|| Path::new("/Library/Developer/CommandLineTools"));
+    let xcrun = |args: &[&str]| {
+        Command::new("/usr/bin/xcrun")
+            .args(args)
+            .stdin(Stdio::null())
+            .output()
+            .is_ok_and(|output| output.status.success())
+    };
+    let clang = command_line_tools.is_some_and(|tools| {
+        fs::metadata(tools.join("usr/bin/clang"))
+            .is_ok_and(|meta| meta.is_file() && meta.permissions().mode() & 0o111 != 0)
+    }) || xcrun(&["--find", "clang"]);
+    if clang {
+        ui.success("clang is available.");
+    } else {
+        problems.push(
+            "Install Xcode Command Line Tools (xcode-select --install) to compile .m tweaks, or use a prebuilt .dylib."
+                .to_string(),
+        );
+    }
+    let sdk = command_line_tools.is_some_and(|tools| tools.join("SDKs/MacOSX.sdk").exists())
+        || xcrun(&["--show-sdk-path"]);
+    if sdk {
+        ui.success("The macOS SDK is available.");
+    } else {
+        problems.push("The macOS SDK is missing. Install Xcode Command Line Tools.".to_string());
+    }
+    let folder = env.local();
+    match fs::symlink_metadata(&folder) {
+        Err(_) => ui.info(format_args!(
+            "{} doesn't exist yet; it's created when you add a tweak.",
+            folder.display()
+        )),
+        Ok(meta) if env::is_mine(&meta) && env::writable(&folder) => {
+            ui.success(format_args!("{} is writable.", folder.display()));
+        }
+        Ok(_) => problems.push(env.not_yours(&folder).to_string()),
+    }
+    match Diapatch::find(env).and_then(|diapatch| run_local(ui, &diapatch, "doctor", &[])) {
+        Ok(Some(error)) => problems.push(error),
+        Ok(None) => {}
+        Err(err) => problems.push(format!("{err:#}")),
+    }
+    problems
+}
+
+const EXTENSIONS: [&str; 6] = ["m", "dylib", "patch", "diff", "zip", "diatweak"];
+
 fn find(env: &Env, name: &str) -> Result<PathBuf> {
     let folder = env.local();
     let wanted = name
-        .trim_end_matches(".m")
-        .trim_end_matches(".dylib")
-        .trim_end_matches(".patch")
-        .trim_end_matches(".diff")
-        .trim_end_matches(".zip");
-    let entries =
-        fs::read_dir(&folder).with_context(|| format!("Couldn't read {}", folder.display()))?;
-    for entry in entries {
+        .rsplit_once('.')
+        .filter(|(_, extension)| EXTENSIONS.contains(extension))
+        .map_or(name, |(stem, _)| stem);
+    for entry in
+        fs::read_dir(&folder).with_context(|| format!("Couldn't read {}", folder.display()))?
+    {
         let entry = entry?;
-        let file = entry.file_name().to_string_lossy().into_owned();
+        let file = entry.file_name();
         if file == name
             || Path::new(&file)
                 .file_stem()
@@ -308,10 +449,8 @@ fn copy(from: &Path, to: &Path) -> Result<()> {
     }
 }
 
-// Never `rm -rf`: a local tweak is the user's own work, so it goes to the Trash where it can come back.
-fn trash(path: &Path) -> Result<()> {
-    let home = std::env::var_os("HOME").context("HOME isn't set")?;
-    let folder = PathBuf::from(home).join(".Trash");
+fn trash(home: &Path, path: &Path) -> Result<()> {
+    let folder = home.join(".Trash");
     fs::create_dir_all(&folder)?;
     let name = path
         .file_name()
@@ -341,9 +480,8 @@ mod tests {
     }
 
     fn manifest(dir: &Path) -> Manifest {
-        let path = dir.join("patches.json");
         write(
-            &path,
+            &dir.join("patches.json"),
             r#"{
                 "version": 1,
                 "patches": [
@@ -352,7 +490,7 @@ mod tests {
                 ]
             }"#,
         );
-        Manifest::load(&path).unwrap()
+        Manifest::load(&Env::at(dir)).unwrap()
     }
 
     fn state(dir: &Path, items: &str) {
@@ -378,7 +516,12 @@ mod tests {
         assert_eq!(manifest.patches.len(), 3);
         assert!(manifest.patches[2].local);
         assert!(!manifest.patches[0].local);
-        assert_eq!(manifest.resolve(&["my-tweak".into()]).unwrap(), vec![2]);
+        assert_eq!(
+            manifest
+                .resolve(&["my-tweak".into()], |_, _| Ok(false))
+                .unwrap(),
+            vec![2]
+        );
     }
 
     #[test]
@@ -434,6 +577,39 @@ mod tests {
     }
 
     #[test]
+    fn github_links_become_downloads() {
+        let pull =
+            |url: &str| github_download(url).map(|(source, name)| format!("{source} {name}"));
+        let expected = "https://github.com/JaceThings/DiaTweaks/pull/557.patch pr-557.patch";
+        for url in [
+            "https://github.com/JaceThings/DiaTweaks/pull/557",
+            "https://github.com/JaceThings/DiaTweaks/pull/557/",
+            "https://github.com/JaceThings/DiaTweaks/pull/557/files#diff-1",
+            "https://github.com/JaceThings/DiaTweaks/pull/557.patch",
+            "https://www.github.com/JaceThings/DiaTweaks/pull/557?w=1",
+        ] {
+            assert_eq!(pull(url).as_deref(), Some(expected), "{url}");
+        }
+        assert_eq!(
+            pull("https://github.com/a/b/blob/main/tweaks/Foo/Foo.m").as_deref(),
+            Some("https://github.com/a/b/raw/main/tweaks/Foo/Foo.m Foo.m")
+        );
+        assert_eq!(
+            pull("https://raw.githubusercontent.com/a/b/main/Foo.m?token=x").as_deref(),
+            Some("https://raw.githubusercontent.com/a/b/main/Foo.m?token=x Foo.m")
+        );
+        for url in [
+            "http://github.com/a/b/pull/1",
+            "https://github.com/a/b/pull/x",
+            "https://github.com/a/b",
+            "https://example.com/Foo.m",
+            "ftp://github.com/a/b/pull/1",
+        ] {
+            assert_eq!(pull(url), None, "{url}");
+        }
+    }
+
+    #[test]
     fn a_missing_or_damaged_state_file_is_not_an_error() {
         let dir = tempfile::tempdir().unwrap();
         assert!(LocalState::load(&dir.path().join("local-state.json"))
@@ -450,9 +626,8 @@ mod tests {
     #[test]
     fn load_with_local_reads_both_files() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("patches.json");
         write(
-            &path,
+            &dir.path().join("patches.json"),
             r#"{"version": 1, "patches": [
                 {"key": "hideToolbar", "title": "Hide Toolbar", "detail": "H", "defaultOn": false, "requires": null, "disabledBy": null}
             ]}"#,
@@ -464,8 +639,7 @@ mod tests {
                  "requires": null, "disabledBy": null, "coveredBy": null, "relaunch": false}
             ]}]"#,
         );
-        let manifest =
-            Manifest::load_with_local(&path, &dir.path().join("local-state.json")).unwrap();
+        let manifest = Manifest::load_with_local(&Env::at(dir.path())).unwrap();
         assert_eq!(manifest.patches.len(), 2);
         assert!(manifest.patches[1].local);
     }

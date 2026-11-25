@@ -29,17 +29,25 @@ static NSStackView *DPPickerStack(NSView *picker) {
     return (NSStackView *)DPSubview(picker, "NSStackView");
 }
 
+static uint8_t *DPIvarBytes(id object, const char *name, size_t length) {
+    Class cls = object ? object_getClass(object) : Nil;
+    Ivar ivar = cls ? class_getInstanceVariable(cls, name) : NULL;
+    ptrdiff_t offset = ivar ? ivar_getOffset(ivar) : -1;
+    if (offset < 0 || (size_t)offset + length > class_getInstanceSize(cls)) return NULL;
+    return (uint8_t *)(__bridge void *)object + offset;
+}
+
 static uint8_t DPThemeTag(NSView *button) {
-    uint8_t *theme = DPIvar(button, "theme");
+    uint8_t *theme = DPIvarBytes(button, "theme", 33);
     return theme ? theme[32] : 9;
 }
 
 static void DPSetPresetSelection(NSView *picker, BOOL suppress) {
-    uint8_t *name = DPIvar(picker, "selectedThemeName");
+    uint8_t *name = DPIvarBytes(picker, "selectedThemeName", 1);
     uint8_t selected = suppress || !name ? 9 : *name;
     for (NSView *view in DPPickerStack(picker).arrangedSubviews) {
         if (!DPIsKind(view, DPDiaThemeOption)) continue;
-        BOOL *flag = DPIvar(view, "isSelected");
+        BOOL *flag = (BOOL *)DPIvarBytes(view, "isSelected", sizeof(BOOL));
         if (flag) *flag = DPThemeTag(view) == selected;
         view.needsDisplay = YES;
     }
@@ -119,7 +127,7 @@ static void DPThemePicker_viewDidMoveToWindow(NSView *self, SEL _cmd) {
 // Dia keeps its own preset selected in the model; hiding the ring here leaves that model intact so it returns when the custom color goes.
 static void DPThemeOption_updateLayer(NSView *self, SEL _cmd) {
     if (DPProfileColorPicker.on && DPCircleForView(self).suppressesPresets) {
-        BOOL *selected = DPIvar(self, "isSelected");
+        BOOL *selected = (BOOL *)DPIvarBytes(self, "isSelected", sizeof(BOOL));
         if (selected) *selected = NO;
     }
     DPCallOriginal(DPThemeOption_updateLayer, self);

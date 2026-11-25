@@ -1,5 +1,6 @@
 #import "AppIcon.h"
 #import "IconCatalog.h"
+#import "TweakPrefs.h"
 #include <sys/stat.h>
 
 // Dia's own icon isn't always named AppIcon (beta builds use AppIconBeta).
@@ -16,21 +17,9 @@ static NSString *DPRemoving(NSString *path, NSString *problem) {
     return problem;
 }
 
-static NSString *DPDomainName(void) { return @(getenv("DIATWEAKS_DOMAIN") ?: "com.diapatches"); }
-
 static BOOL DPIsSymlink(NSString *path) {
     struct stat info;
     return path && lstat(path.fileSystemRepresentation, &info) == 0 && S_ISLNK(info.st_mode);
-}
-
-static BOOL DPIconEnabled(NSString *home) {
-    NS_VALID_UNTIL_END_OF_SCOPE NSString *name = DPDomainName();
-    CFStringRef domain = (__bridge CFStringRef)name;
-    CFPreferencesAppSynchronize(domain);
-    if ([NSFileManager.defaultManager fileExistsAtPath:[home stringByAppendingPathComponent:@"paused"]]) return NO;
-    NSDictionary *safeMode = [NSDictionary dictionaryWithContentsOfFile:[home stringByAppendingPathComponent:@"safe-mode.plist"]];
-    if ([safeMode[@"level"] integerValue] > 0) return NO;
-    return CFPreferencesGetAppBooleanValue(CFSTR("appIcon"), domain, NULL);
 }
 
 static NSString *DPOwnIcon(NSString *app) {
@@ -45,11 +34,9 @@ static NSString *DPIconsFolder(NSString *app, NSString *home) {
 }
 
 static NSString *DPChosenIcon(NSString *app, NSString *base, NSString *home) {
-    NS_VALID_UNTIL_END_OF_SCOPE NSString *name = DPDomainName();
-    CFStringRef domain = (__bridge CFStringRef)name;
     NSString *own = DPOwnIcon(app);
-    if (!DPIconEnabled(home)) return own;
-    NSString *icon = CFBridgingRelease(CFPreferencesCopyAppValue(CFSTR("appIconChoice"), domain));
+    if (!DPTweakOn(home, @"appIcon")) return own;
+    NSString *icon = DPPref(@"appIconChoice");
     if (![icon isKindOfClass:NSString.class] || [icon isEqual:DPDefaultChoice]) return own;
     return [DPOpenCatalog(base, NO).allRenditionNames containsObject:icon] ? icon : own;
 }
@@ -156,7 +143,7 @@ static NSString *DPRestoreCatalog(NSString *app, NSString *folder, NSString *hom
 NSString *DPPrepareIcons(NSString *app, NSString *installed, NSString *home) {
     NSString *folder = DPIconsFolder(app, home);
     NSString *catalog = DPCatalogPath(app);
-    if (!DPIconEnabled(home)) {
+    if (!DPTweakOn(home, @"appIcon")) {
         NSDictionary *info = [NSDictionary dictionaryWithContentsOfFile:DPInfoPath(app)];
         if (!DPIsSymlink(catalog) && ![info[@"CFBundleIconName"] isEqual:DPIconAlias] && !info[DPOwnIconKey]) return nil;
         return DPRestoreCatalog(app, folder, home);

@@ -60,6 +60,19 @@ BOOL DPTesting = YES;
 - (void)reloadData { self.notes = 0; }
 @end
 
+@interface DPOuterHost : NSView
+@end
+@implementation DPOuterHost
+@end
+
+@interface DPInnerButton : NSView
+@end
+@implementation DPInnerButton
+@end
+
+static BOOL isOuterHost(NSView *view) { return [view isKindOfClass:DPOuterHost.class]; }
+static BOOL isInnerButton(NSView *view) { return [view isKindOfClass:DPInnerButton.class]; }
+
 @interface DPTestWindow : NSWindow
 @end
 @implementation DPTestWindow
@@ -214,6 +227,50 @@ int main(void) {
 
         DPHideSetupSuggestions.on = NO;
         DPHideSetupSuggestions.apply(&DPHideSetupSuggestions);
+
+        static DPPatch outer = { .key = @"outerTest", .hides = isOuterHost }, inner = { .key = @"innerTest", .hides = isInnerButton };
+        DPPatch *nested[] = { &outer, &inner };
+        DPPatches = nested;
+        DPPatchCount = 2;
+        DPOuterHost *outerView = [[DPOuterHost alloc] initWithFrame:NSMakeRect(0, 0, 200, 100)];
+        DPInnerButton *innerButton = [[DPInnerButton alloc] initWithFrame:NSMakeRect(0, 0, 40, 20)];
+        [outerView addSubview:innerButton];
+        [window.contentView addSubview:outerView];
+        [DPHideHosts addObject:outerView];
+
+        DPEnforceHides(outerView);
+        check("nothing is enforced or hooked while every tweak is off",
+              !innerButton.hidden && !outerView.hidden && DPSuppressed.count == 0
+              && !DPIsHooked(DPInnerButton.class, @selector(setHidden:), (IMP)DPHidden_setHidden)
+              && !DPIsHooked(DPOuterHost.class, @selector(isHidden), (IMP)DPHidden_isHidden));
+
+        inner.on = YES;
+        DPApplyHides(&inner);
+        check("a tweak that is off doesn't shadow the on tweak's view inside its container", innerButton.hidden && !outerView.hidden);
+        check("only the class an on tweak hides gets hooked",
+              DPIsHooked(DPInnerButton.class, @selector(setHidden:), (IMP)DPHidden_setHidden)
+              && !DPIsHooked(DPOuterHost.class, @selector(setHidden:), (IMP)DPHidden_setHidden)
+              && !DPIsHooked(DPOuterHost.class, @selector(viewDidMoveToWindow), (IMP)DPHidden_viewDidMoveToWindow));
+        check("the on tweak verifies through the off tweak's container", !DPProblem(outerView, &inner));
+        check("the off tweak has nothing to verify", !DPProblem(outerView, &outer));
+
+        outer.on = YES;
+        DPApplyHides(&outer);
+        check("turning the container's tweak on hides the container", outerView.hidden);
+        outer.on = NO;
+        DPApplyHides(&outer);
+        check("turning it off again restores only the container", !outerView.hidden && innerButton.hidden);
+
+        inner.on = NO;
+        DPApplyHides(&inner);
+        check("turning the inner tweak off restores its view once and clears the marker", !innerButton.hidden && DPSuppressed.count == 0);
+
+        DPHideTrialButton.on = YES;
+        DPPatch *replaced[] = { &DPHideTrialButton };
+        DPPatches = replaced;
+        DPPatchCount = 1;
+        check("a new patch table is matched from scratch", DPHider(trial) == &DPHideTrialButton && !DPHider([[DPInnerButton alloc] initWithFrame:NSZeroRect]));
+        DPHideTrialButton.on = NO;
 
         if (failures) printf("%d failure(s)\n", failures);
         else printf("hide-ntp-prompts: all checks passed\n");

@@ -2,23 +2,38 @@
 set -eu
 cd "$(dirname "$0")/.."
 manifest=build/patches.json
+catalog=tweaks/index.json
 [ -f "$manifest" ] || { echo "$manifest is missing: run make first" >&2; exit 1; }
-symbols=$(plutil -extract patches json -o - "$manifest" | python3 -c '
+symbols=$(python3 -c '
 import json, sys
-for p in json.load(sys.stdin): print(p["symbol"] or "")
-'; grep -rhoE 'imageWithSystemSymbolName:@"[^"]+"|DPCommandItem\([^;]*, @"[a-z0-9.]+", \^' src/dylib | grep -oE '@"[a-z0-9. ]+"' | tr -d '@"')
+for p in json.load(open(sys.argv[1]))["patches"] + [p for t in json.load(open(sys.argv[2]))["tweaks"] for p in t["patches"]]: print(p.get("symbol") or "")
+' "$manifest" "$catalog"; grep -rhoE 'imageWithSystemSymbolName:@"[^"]+"|DPCommandItem\([^;]*, @"[a-z0-9.]+", \^' src/dylib tweaks | grep -oE '@"[a-z0-9. ]+"' | tr -d '@"')
 missing=$(printf '%s\n' "$symbols" | sort -u | osascript -l JavaScript -e '
 ObjC.import("AppKit")
 function run(argv) {
     const lines = $.NSString.alloc.initWithDataEncoding($.NSFileHandle.fileHandleWithStandardInput.readDataToEndOfFile, 4).js.split("\n")
     return lines.filter(line => line && !line.split(" ").some(name => $.NSImage.imageWithSystemSymbolNameAccessibilityDescription(name, $()).isNil() === false)).join("\n")
 }')
-python3 - "$manifest" "$missing" <<'PY'
+python3 - "$manifest" "$missing" "$catalog" <<'PY'
 import glob, json, re, sys
 patches = {p["key"]: p for p in json.load(open(sys.argv[1]))["patches"]}
+optional = [(t["id"], p) for t in json.load(open(sys.argv[3]))["tweaks"] for p in t["patches"]]
 problems = [f'no SF Symbol called "{name}"' for name in sys.argv[2].split("\n") if name]
 
-# The folder rows live in Settings, so read their keys and sections from there.
+def long_detail(key, patch):
+    if len(patch.get("detail") or "") > 280:
+        problems.append(f'{key}\'s description is {len(patch["detail"])} characters: keep it under 280 and put the rest on its wiki page')
+
+def experimental(key, patch):
+    if "experimental" in patch and (patch.get("detail") or "").rstrip().endswith("Experimental."):
+        problems.append(f"{key}'s detail ends with 'Experimental.' — set .experimental = YES on its DP_PATCH instead")
+
+def straight(key, patch):
+    for field in ("title", "detail", "section"):
+        value = patch.get(field)
+        if isinstance(value, str) and "'" in value:
+            problems.append(f'{key}\'s {field} uses a straight apostrophe: {value}')
+
 settings = open("src/dylib/Settings/Folder.m").read().split("DPFolders[] = {", 1)[1].split("\n};", 1)[0]
 folders = {key: section for key, _, _, _, _, section in re.findall(
     r'\{\s*@"([^"]+)",\s*@"([^"]+)",\s*@"([^"]*)",\s*@"([^"]+)",\s*@"([^"]+)",\s*@"([^"]+)"\s*\}', settings, re.S)}
@@ -50,18 +65,42 @@ for patch in patches.values():
         tints.setdefault(patch["section"], {}).setdefault(patch["tint"], []).append(patch["key"])
     elif patch["tint"] != root(patch)["tint"]:
         problems.append(f'{patch["key"]} is {patch["tint"]}, but its tweak {root(patch)["key"]} is {root(patch)["tint"]}')
-    if len(patch["detail"]) > 280:
-        problems.append(f'{patch["key"]}\'s description is {len(patch["detail"])} characters: keep it under 280 and put the rest on its wiki page')
+    long_detail(patch["key"], patch)
+    experimental(patch["key"], patch)
 for section, by_tint in tints.items():
     if len(by_tint) > 1:
         problems.append(f'{section} mixes colors: ' + "; ".join(f'{tint} for {", ".join(keys)}' for tint, keys in by_tint.items()))
 
 for key, patch in patches.items():
-    for field in ("title", "detail", "section"):
-        value = patch.get(field)
-        if isinstance(value, str) and "'" in value:
-            problems.append(f'{key}\'s {field} uses a straight apostrophe: {value}')
-for path in sorted(glob.glob("src/dylib/**/*.m", recursive=True)):
+    straight(key, patch)
+
+machine_keys = {"profileColors", "profileEmojis", "sidebarGrainProfiles", "collapsedPinned", "localTweaks", "launchFlagsApplied", "commandBarChatLocked", "littleDiaFrame", "autoUpdateDia", "autoUpdateTweaks", "showExperimentalTweaks"}
+taken = set(patches) | {patch["key"] for _, patch in optional}
+owners = {}
+for key, patch in patches.items():
+    specs = [("choice", patch.get("choice")), ("shortcut", patch.get("shortcut"))] + [("setting", spec) for spec in patch.get("settings") or []]
+    for kind, spec in filter(lambda item: item[1], specs):
+        name = spec.get("key")
+        if kind == "setting" and spec.get("type") not in ("bool", "number", "string"):
+            problems.append(f'{key}\'s setting {name} has type {spec.get("type")}, which must be bool, number or string')
+        if not name:
+            problems.append(f"{key} has a {kind} with no key")
+        elif name in machine_keys:
+            problems.append(f"{key}'s {kind} {name} is saved per Mac or profile, so it can't travel in a settings file")
+        elif name in taken:
+            problems.append(f"{key}'s {kind} {name} is also the key of a tweak")
+        elif name in owners:
+            problems.append(f"{key}'s {kind} {name} is already used by {owners[name]}")
+        else:
+            owners[name] = key
+for tweak, patch in optional:
+    key = patch["key"]
+    if key in patches:
+        problems.append(f'tweaks/{tweak} uses the key {key}, which a built-in tweak already has')
+    long_detail(key, patch)
+    experimental(key, patch)
+    straight(key, patch)
+for path in sorted(glob.glob("src/dylib/**/*.m", recursive=True) + glob.glob("tweaks/**/*.m", recursive=True)):
     for number, line in enumerate(open(path), 1):
         if re.search(r'\.(?:section|hint)\s*=\s*@"[^"]*\'', line):
             problems.append(f'{path}:{number} uses a straight apostrophe in a user-visible string')
@@ -69,7 +108,7 @@ for path in sorted(glob.glob("src/dylib/**/*.m", recursive=True)):
 bug = open(".github/ISSUE_TEMPLATE/bug.yml").read().split("id: patch", 1)[1].split("- type:", 1)[0]
 listed = set(re.findall(r'^\s+- (.+)$', bug, re.M))
 sentinels = {"Patches pane in Settings", "Installing, updating or restoring", "Not sure"}
-titles = {patch["title"] for patch in patches.values()}
+titles = {patch["title"] for patch in patches.values()} | {patch["title"] for _, patch in optional}
 for title in sorted(titles - listed):
     problems.append(f'bug.yml has no option for "{title}"')
 for option in sorted(listed - titles - sentinels):
@@ -78,6 +117,6 @@ for option in sorted(listed - titles - sentinels):
 for problem in problems:
     print(problem, file=sys.stderr)
 if not problems:
-    print(f"all {len(patches)} tweaks match their sections")
+    print(f"all {len(patches)} tweaks match their sections" + (f", and {len(optional)} optional tweaks are listed" if optional else ""))
 sys.exit(1 if problems else 0)
 PY

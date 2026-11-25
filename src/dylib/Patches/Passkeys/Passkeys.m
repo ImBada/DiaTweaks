@@ -1,5 +1,6 @@
 #import "StdPatch/StdPatch.h"
 #import "Updates/Updates.h"
+#import <libproc.h>
 #import <mach-o/getsect.h>
 #import <mach-o/ldsyms.h>
 
@@ -81,9 +82,19 @@ static NSString *DPPasskeysProblem(DPPatch *patch) {
 
 static BOOL gExtensionLoaded;
 
+// Any local process can post these notifications, so only the copy of Dia that diapatch launched for passkeys is trusted.
+static BOOL DPIsPasskeyHelper(pid_t pid) {
+    char path[PROC_PIDPATHINFO_MAXSIZE], bundle[PATH_MAX];
+    if (pid <= 0 || pid == getpid() || proc_pidpath(pid, path, sizeof path) <= 0) return NO;
+    if (!realpath(DPAppSupport(@"DiaPatches/pristine/Dia.app").fileSystemRepresentation, bundle)) return NO;
+    size_t length = strlen(bundle);
+    return !strncmp(path, bundle, length) && path[length] == '/';
+}
+
 static void DPShowHelper(NSNotification *note) {
-    if (!DPPasskeys.on) return;
-    NSRunningApplication *helper = [NSRunningApplication runningApplicationWithProcessIdentifier:[note.object intValue]];
+    pid_t pid = [note.object isKindOfClass:NSString.class] ? [note.object intValue] : 0;
+    if (!DPPasskeys.on || !DPIsPasskeyHelper(pid)) return;
+    NSRunningApplication *helper = [NSRunningApplication runningApplicationWithProcessIdentifier:pid];
     void (^show)(void) = ^{ [helper activateFromApplication:NSRunningApplication.currentApplication options:NSApplicationActivateAllWindows]; };
     if (![note.name hasSuffix:@"signIn"]) return show();
     NSAlert *alert = [NSAlert new];
@@ -121,9 +132,10 @@ static void DPApplyPasskeys(DPPatch *patch) {
 
 DP_PATCH(DPPasskeys) {
     .key = @"passkeys",
+    .experimental = YES,
     .order = 100,
     .title = @"Allow iCloud Passkeys",
-    .detail = @"Sign in to sites with passkeys saved in Apple Passwords. A patched Dia can’t reach them, so the original Dia that DiaTweaks keeps opens behind the Touch ID prompt, then quits. A password manager with passkeys of its own, such as Proton Pass, keeps its prompt. Experimental.",
+    .detail = @"Sign in to sites with passkeys saved in Apple Passwords. A patched Dia can’t reach them, so the original Dia that DiaTweaks keeps opens behind the Touch ID prompt, then quits. A password manager with passkeys of its own, such as Proton Pass, keeps its prompt.",
     .symbol = @"person.badge.key.fill",
     .tint = @"systemGreenColor",
     .section = @"Passwords",

@@ -25,7 +25,7 @@ static NSUInteger DPTextureCount(NSView *host) {
 }
 
 static void DPTestTextureProfiles(NSWindow *window, NSView *sidebar, NSView *footer) {
-    NSUserDefaults *defaults = DPGrainDefaults();
+    NSUserDefaults *defaults = DPSettingsDefaults();
     [window.contentView addSubview:sidebar]; [sidebar addSubview:footer];
     DPTestSwiftView *switcher = (id)DPTestHostView(DPDiaSpaceSwitcher, NSMakeRect(0, 0, 100, 28));
     DPTestSwiftView *first = [DPTestSwiftView new], *second = [DPTestSwiftView new];

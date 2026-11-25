@@ -2,12 +2,11 @@
 #import <sys/stat.h>
 
 static BOOL DPLocalIsPlumbing(NSString *path) {
-    for (NSString *prefix in @[ @"Makefile", @".github/", @"tests/", @"docs/", @"README.md", @"CONTRIBUTING.md", @"cli/", @"scripts/" ])
+    for (NSString *prefix in @[ @"Makefile", @".github/", @"tests/", @"docs/", @"README.md", @"CONTRIBUTING.md", @"cli/", @"scripts/", @"tweaks/index.json", @"tweaks/README.md" ])
         if ([path isEqual:prefix] || [path hasPrefix:prefix]) return YES;
     return NO;
 }
 
-// A diff can name any path, so a file is only written when it lands strictly inside the build folder.
 static BOOL DPLocalIsSafePath(NSString *path) {
     if (!path.length || [path hasPrefix:@"/"]) return NO;
     for (NSString *part in [path componentsSeparatedByString:@"/"])
@@ -30,7 +29,6 @@ static BOOL DPLocalIsIdentifier(NSString *name) {
     return YES;
 }
 
-// A PR's new .m and .h files are extracted; constants it adds to Dia.h become a forced include.
 void DPLocalExtractPatch(NSString *patch, NSString *folder, NSString **error) {
     NSString *text = [NSString stringWithContentsOfFile:patch encoding:NSUTF8StringEncoding error:NULL];
     if (!text) {
@@ -71,7 +69,8 @@ void DPLocalExtractPatch(NSString *patch, NSString *folder, NSString **error) {
         }
         NSString *extension = path.pathExtension.lowercaseString;
         if (isNew && ([extension isEqual:@"m"] || [extension isEqual:@"h"])) {
-            NSString *relative = [path hasPrefix:@"src/dylib/"] ? [path substringFromIndex:10] : path.lastPathComponent;
+            NSString *relative = [path hasPrefix:@"src/dylib/"] ? [path substringFromIndex:10]
+                                 : [path hasPrefix:@"tweaks/"] ? [path substringFromIndex:7] : path.lastPathComponent;
             NSString *destination = [folder stringByAppendingPathComponent:relative];
             if (!DPLocalIsSafePath(relative) || !DPLocalIsInside(destination, folder)) {
                 [ignored addObject:path];
@@ -115,28 +114,27 @@ void DPLocalExtractPatch(NSString *patch, NSString *folder, NSString **error) {
 }
 
 void DPLocalExtractArchive(NSString *archive, NSString *folder, NSString **error) {
-    NSString *listing = DPLocalRun(@[ @"/usr/bin/unzip", @"-Z1", archive ]);
-    if (!listing) {
-        *error = @"Couldn’t read the archive.";
+    NSFileHandle *handle = [NSFileHandle fileHandleForReadingAtPath:archive];
+    BOOL zip = [[handle readDataOfLength:2] isEqual:[@"PK" dataUsingEncoding:NSASCIIStringEncoding]];
+    [handle closeFile];
+    NSString *output = nil;
+    int status = zip ? DPLocalExec(@[ @"/usr/bin/tar", @"-xvf", archive, @"-C", folder ], &output) : -1;
+    NSArray<NSString *> *entries = [[output componentsSeparatedByString:@"\n"] filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"SELF BEGINSWITH 'x '"]];
+    NSFileManager *files = NSFileManager.defaultManager;
+    if ([output containsString:@"leading '/'"] || [[entries componentsJoinedByString:@"\n"] containsString:@".."]) {
+        [files removeItemAtPath:folder error:NULL];
+        *error = @"That archive has a path that would escape the folder, so it wasn’t unpacked.";
         return;
     }
-    for (NSString *entry in [listing componentsSeparatedByString:@"\n"]) {
-        if (!entry.length) continue;
-        if ([entry hasPrefix:@"/"] || [entry containsString:@".."]) {
-            *error = @"That archive has a path that would escape the folder, so it wasn’t unpacked.";
-            return;
-        }
-    }
-    if (!DPLocalRun(@[ @"/usr/bin/ditto", @"-x", @"-k", archive, folder ])) {
-        *error = @"Couldn’t unpack the archive.";
+    if (status != 0) {
+        *error = entries.count ? @"Couldn’t unpack the archive." : @"Couldn’t read the archive.";
         return;
     }
-    // `unzip -Z1` only lists names, so a symlink entry can still point the compiler outside the folder.
-    for (NSString *relative in [NSFileManager.defaultManager enumeratorAtPath:folder]) {
+    // tar refuses to write through a symlink but still unpacks one, which could point the compiler outside the folder.
+    for (NSString *relative in [files enumeratorAtPath:folder]) {
         struct stat info;
-        NSString *path = [folder stringByAppendingPathComponent:relative];
-        if (lstat(path.fileSystemRepresentation, &info) != 0 || !S_ISLNK(info.st_mode)) continue;
-        [NSFileManager.defaultManager removeItemAtPath:folder error:NULL];
+        if (lstat([folder stringByAppendingPathComponent:relative].fileSystemRepresentation, &info) != 0 || !S_ISLNK(info.st_mode)) continue;
+        [files removeItemAtPath:folder error:NULL];
         *error = @"That archive contains a symbolic link, so it wasn’t unpacked.";
         return;
     }

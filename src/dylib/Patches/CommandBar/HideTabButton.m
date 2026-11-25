@@ -30,14 +30,16 @@ static void DPSelectButton(NSView *background, BOOL selected) {
         *style = look[0] == NSNull.null ? 0 : (uintptr_t)CFBridgingRetain(look[0]);
         uint8_t was = *shape;
         *shape = [look[1] unsignedCharValue];
-        // Retain look[0] in saved so its pointer address can't be reused before restore.
+        // Holding look[0] keeps its address from being reused before the restore compares it.
         DPSet(background, &DPSavedKey, @[ @(original), @(was), @(*style), @(*shape), look[0] ]);
     } else {
         DPSet(background, &DPSavedKey, nil);
-        // CFBridgingRetain gave us the only +1 on this colour, so release it even if Dia has since replaced the style.
         uintptr_t ours = [saved[2] unsignedLongValue];
-        if (ours >= DPFirstFill) CFRelease((CFTypeRef)(void *)ours);
-        if (*style == ours) *style = [saved[0] unsignedLongValue];
+        // The slot owns the +1 we gave it: Dia releases it when it writes over the style, so release it only when taking it back out.
+        if (*style == ours) {
+            *style = [saved[0] unsignedLongValue];
+            if (ours >= DPFirstFill) CFRelease((CFTypeRef)(void *)ours);
+        }
         if (*shape == [saved[3] unsignedCharValue]) *shape = [saved[1] unsignedCharValue];
     }
     DPRedraw(background);

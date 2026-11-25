@@ -1,16 +1,10 @@
 #import "Patches/DestinationToggleEngineName/DestinationToggleEngineName.h"
+#import <objc/message.h>
 
 extern DPPatch DPDestinationToggleEngineName;
 
 static NSString *const DPGoogle = @"Google";
 static NSString *const DPChat = @"Chat";
-
-@protocol DPEngineNameChain
-- (id)context;
-- (id)preferences;
-- (id)getDefaultSearchEngine;
-- (NSString *)name;
-@end
 
 static NSMapTable<NSWindow *, id> *DPBrowsers;
 static char DPTextKey, DPLabelKey, DPTipKey;
@@ -22,13 +16,12 @@ static void DPBrowser_setWindow(id self, SEL _cmd, NSWindow *window) {
     if (window) [DPBrowsers setObject:self forKey:window];
 }
 
+static id DPAsk(id object, SEL sel) { return [object respondsToSelector:sel] ? ((id (*)(id, SEL))objc_msgSend)(object, sel) : nil; }
+
 NSString *DPEngineNameForWindow(NSWindow *window) {
     id browser = nil;
     for (NSWindow *w = window; w && !browser; w = w.parentWindow) browser = [DPBrowsers objectForKey:w];
-    id context = [(id<DPEngineNameChain>)browser context];
-    id preferences = [(id<DPEngineNameChain>)context preferences];
-    id engine = [(id<DPEngineNameChain>)preferences getDefaultSearchEngine];
-    NSString *name = [(id<DPEngineNameChain>)engine name];
+    NSString *name = DPAsk(DPAsk(DPAsk(DPAsk(browser, @selector(context)), @selector(preferences)), @selector(getDefaultSearchEngine)), @selector(name));
     return [name isKindOfClass:NSString.class] ? name : nil;
 }
 
@@ -83,6 +76,9 @@ static BOOL DPAnyOverride(NSArray<NSView *> *views) {
     return NO;
 }
 
+// Dia writing its own word back over ours on every layout would otherwise relabel and relayout until AppKit aborts it.
+static BOOL DPMayRelabel(NSView *view, NSArray *override, BOOL ours) { return !override || ours || DPMayAdjust(view); }
+
 // A view we already renamed keeps Dia's word in the override, so a new engine name replaces the old one.
 static BOOL DPRelabelText(NSView *view, NSString *name) {
     NSString *text = DPTextOf(view);
@@ -91,7 +87,7 @@ static BOOL DPRelabelText(NSView *view, NSString *name) {
     BOOL ours = override && [override[1] isEqual:text];
     NSString *dia = ours ? override[0] : text;
     if (name && ![name isEqualToString:DPGoogle]) {
-        if ([text isEqualToString:name] || ![dia isEqualToString:DPGoogle]) return NO;
+        if ([text isEqualToString:name] || ![dia isEqualToString:DPGoogle] || !DPMayRelabel(view, override, ours)) return NO;
         DPOverride(view, &DPTextKey, dia, name);
         DPSetText(view, name);
         return YES;
@@ -121,7 +117,7 @@ static BOOL DPRelabelSentence(NSArray<NSView *> *views, NSString *name) {
         if (![dia hasPrefix:DPTooltipSentence] || [dia rangeOfString:DPGoogle].location == NSNotFound) continue;
         if (name && ![name isEqualToString:DPGoogle]) {
             NSString *wanted = DPReplaced(dia, name);
-            if ([text isEqualToString:wanted]) continue;
+            if ([text isEqualToString:wanted] || !DPMayRelabel(view, override, ours)) continue;
             DPOverride(view, &DPTextKey, dia, wanted);
             DPSetText(view, wanted);
             changed = YES;

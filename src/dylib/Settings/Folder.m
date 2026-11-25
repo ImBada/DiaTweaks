@@ -24,6 +24,8 @@ const DPFolderSpec *DPFolderSpecNamed(NSString *key) {
     NSMutableArray<NSValue *> *_patches;
     NSMutableArray<DPPatchSwitch *> *_switches;
     NSMutableArray<NSTextField *> *_notes;
+    NSMutableArray<NSView *> *_rows;
+    NSView *_group;
 }
 
 - (instancetype)initWithFolder:(const DPFolderSpec *)folder {
@@ -32,23 +34,26 @@ const DPFolderSpec *DPFolderSpecNamed(NSString *key) {
     _patches = [NSMutableArray new];
     _switches = [NSMutableArray new];
     _notes = [NSMutableArray new];
+    _rows = [NSMutableArray new];
 
-    NSMutableArray<NSView *> *rows = [NSMutableArray new];
     for (NSValue *value in DPFolderMembers(folder->key)) {
         DPPatch *member = value.pointerValue;
         NSTextField *note = DPHiddenNote();
-        NSStackView *heading = DPHeading(member->symbol, member->tint, @[ DPLabel(member->title, 13, NSFontWeightRegular, NSColor.labelColor),
-                                                                         DPLabel(member->detail, 11, NSFontWeightRegular, NSColor.secondaryLabelColor), note ]);
+        NSMutableArray<NSView *> *lines = [NSMutableArray arrayWithObjects:DPLabel(member->title, 13, NSFontWeightRegular, NSColor.labelColor),
+                                           DPLabel(member->detail, 11, NSFontWeightRegular, NSColor.secondaryLabelColor), nil];
+        if (member->experimental) [lines addObject:DPExperimentalBadge()];
+        [lines addObject:note];
         DPPatchSwitch *toggle = [[DPPatchSwitch alloc] initWithPatch:member];
         __weak DPFolderView *weakSelf = self;
-        [rows addObject:DPLinkRow(DPRow(heading, DPDisclosure(toggle.withHiddenIcon)), member->title, ^{
+        [_rows addObject:DPLinkRow(DPRow(DPHeading(member->symbol, member->tint, lines), DPDisclosure(toggle.withHiddenIcon)), member->title, ^{
             if (weakSelf.open) weakSelf.open(member->title, [[DPPageView alloc] initWithPatch:member]);
         })];
         [_patches addObject:value];
         [_switches addObject:toggle];
         [_notes addObject:note];
     }
-    DPFillStack(self, @[ DPLabel(folder->detail, 12, NSFontWeightRegular, NSColor.secondaryLabelColor), DPGroup(rows) ]);
+    _group = DPGroup(_rows);
+    DPFillStack(self, @[ DPLabel(folder->detail, 12, NSFontWeightRegular, NSColor.secondaryLabelColor), _group ]);
     [self sync];
     return self;
 }
@@ -61,6 +66,8 @@ const DPFolderSpec *DPFolderSpecNamed(NSString *key) {
         NSTextField *note = _notes[i];
         note.stringValue = summary ?: @"";
         note.hidden = !note.stringValue.length;
+        _rows[i].hidden = !DPExperimentalShown(patch);
     }
+    DPTidyGroup(_group);
 }
 @end

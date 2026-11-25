@@ -4,7 +4,7 @@ static char DPChatKey, DPPendingRestyleKey, DPCheckChatKey;
 
 static void DPRestyleContainerBody(NSView *container, BOOL allowFrame) {
     DPApplySquareCorners(container);
-    if (!allowFrame || !DPChatCard(container)) return;
+    if (!allowFrame || !DPEdgeToEdgeActive() || !DPChatCard(container)) return;
     NSValue *requested = DPRequestedFrame(container);
     if (requested && !NSEqualRects(container.frame, requested.rectValue) && DPMayAdjust(container)) container.frame = requested.rectValue;
 }
@@ -19,7 +19,7 @@ static void DPQueueRestyle(NSView *container, BOOL checkChat) {
         BOOL check = [DPGet(container, &DPCheckChatKey) boolValue];
         DPSet(container, &DPPendingRestyleKey, nil);
         DPSet(container, &DPCheckChatKey, nil);
-        if (check) {
+        if (check && DPEdgeToEdgeActive()) {
             BOOL chat = DPChatCard(container) != nil;
             if ([DPGet(container, &DPChatKey) boolValue] != chat) {
                 DPSet(container, &DPChatKey, @(chat));
@@ -34,11 +34,12 @@ static void DPQueueRestyle(NSView *container, BOOL checkChat) {
 static void DPContainer_layoutOrUpdateLayer(NSView *self, SEL _cmd) {
     DPCallOriginal(DPContainer_layoutOrUpdateLayer, self);
     DPRestyleContainerBody(self, _cmd != @selector(updateLayer));
-    DPQueueRestyle(self, NO);
+    if (DPEdgeToEdgeActive()) DPQueueRestyle(self, NO);
 }
 
 static void DPShadow_layout(NSView *self, SEL _cmd) {
     DPCallOriginal(DPShadow_layout, self);
+    if (!DPEdgeToEdgeActive()) return;
     NSView *container = self;
     while (container && !DPIsKind(container, DPDiaContentContainer)) container = container.superview;
     if (container) DPQueueRestyle(container, YES);
@@ -53,6 +54,6 @@ void DPInstallRestyle(void) {
                                            NSWindowWillExitFullScreenNotification, NSWindowDidExitFullScreenNotification];
     for (NSNotificationName name in names)
         [NSNotificationCenter.defaultCenter addObserverForName:name object:nil queue:nil usingBlock:^(NSNotification *_) {
-            dispatch_async(dispatch_get_main_queue(), ^{ DPRelayoutContainers(); });
+            dispatch_async(dispatch_get_main_queue(), ^{ if (DPEdgeToEdgeActive()) DPRelayoutContainers(); });
         }];
 }

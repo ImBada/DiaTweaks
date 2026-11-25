@@ -27,7 +27,7 @@ static uint32_t *DPSidebarClamp(void) {
         uint32_t *text = (uint32_t *)getsectiondata(header, "__TEXT", "__text", &size);
         NSUInteger found = 0;
         for (NSUInteger i = 0; text && i + 4 <= size / 4; i++)
-            if (!memcmp(text + i, DPSidebarClampWide, sizeof DPSidebarClampWide)) found++, site = text + i;
+            if (text[i] == DPSidebarClampWide[0] && !memcmp(text + i, DPSidebarClampWide, sizeof DPSidebarClampWide)) found++, site = text + i;
         if (found != 1) site = NULL;
     });
     return site;

@@ -38,7 +38,22 @@ id DPScriptProfileHolding(id scriptWindow, NSString *tabID) {
     return nil;
 }
 
-NSString *DPTabID(id tab) { return DPValueForKey(tab, @"tabId"); }
+// 1 when the window lists the tab, 0 when it lists others, -1 when Dia isn't saying (no scripting window, or none listing a tab, as mid-swipe).
+NSInteger DPTabListing(id scriptWindow, NSString *tabID) {
+    id profiles = DPValueForKey(scriptWindow, @"appleScriptProfiles");
+    if (!tabID || ![profiles isKindOfClass:NSArray.class]) return -1;
+    NSUInteger listed = 0;
+    for (id profile in profiles) {
+        if (DPScriptTabIn(profile, tabID)) return 1;
+        listed += DPScriptTabs(profile).count;
+    }
+    return listed ? 0 : -1;
+}
+
+NSString *DPTabID(id tab) {
+    NSString *identifier = DPValueForKey(tab, @"tabId");
+    return [identifier isKindOfClass:NSString.class] && identifier.length ? identifier : nil;
+}
 NSString *DPActiveTabIDIn(id scriptWindow) { return DPTabID(DPValueForKey(scriptWindow, @"activeTab")); }
 NSString *DPActiveTabID(NSWindow *window) { return DPActiveTabIDIn(DPScriptWindow(window)); }
 void DPFocusTab(id tab) { if ([tab respondsToSelector:@selector(focus:)]) [tab performSelector:@selector(focus:) withObject:nil]; }

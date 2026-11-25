@@ -36,6 +36,17 @@ DPPeekCard *DPPeekCardIn(NSWindow *window) {
 
 #import "Patches/Peek/Cursor.m"
 
+static int hitTests;
+
+@interface CountingCover : NSView
+@end
+@implementation CountingCover
+- (NSView *)hitTest:(NSPoint)point {
+    hitTests++;
+    return [super hitTest:point];
+}
+@end
+
 static RenderWidgetHostViewCocoa *Page(NSView *parent, NSRect frame) {
     RenderWidgetHostViewCocoa *page = [[RenderWidgetHostViewCocoa alloc] initWithFrame:frame];
     page.allowed = YES;
@@ -69,6 +80,15 @@ int main(void) {
         NSCAssert(!peek.shouldChangeCurrentCursor, @"toolbar above Peek keeps its own cursor");
         pointer = NSMakePoint(50, 50);
         NSCAssert(under.shouldChangeCurrentCursor, @"uncovered panes retain cursor updates");
+        CountingCover *sidebar = [[CountingCover alloc] initWithFrame:NSMakeRect(0, 0, 90, 600)];
+        [window.contentView addSubview:sidebar];
+        hitTests = 0;
+        for (int i = 0; i < 20; i++) NSCAssert(under.shouldChangeCurrentCursor, @"outside the card the page keeps Chromium's answer");
+        NSCAssert(hitTests == 0, @"a pointer outside the card skips the window-wide hit test, got %d", hitTests);
+        pointer = NSMakePoint(300, 300);
+        NSCAssert(!under.shouldChangeCurrentCursor && peek.shouldChangeCurrentCursor && hitTests > 0, @"inside the card the front page still decides");
+        [sidebar removeFromSuperview];
+        pointer = NSMakePoint(50, 50);
         [under addCursorRect:under.bounds cursor:NSCursor.IBeamCursor];
         CGFloat area = 0;
         for (NSValue *value in under.rects) {
