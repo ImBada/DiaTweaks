@@ -7,7 +7,7 @@
 #import "Patches/CommandBar/CommandBarOverlay.h"
 
 extern DPPatch DPHideSleepingTabs, DPCollapsePinned, DPHideTabGroupBackground, DPUndoCloseTab, DPSavePageAs;
-extern DPPatch DPProfileEmoji, DPKeepFoldersOpen, DPUnloadTab, DPCompactSidebarHeader, DPCompactTabRows, DPTidyTabs;
+extern DPPatch DPProfileEmoji, DPProfileEmojiCurrentOnly, DPKeepFoldersOpen, DPUnloadTab, DPCompactSidebarHeader, DPCompactTabRows, DPTidyTabs;
 DPPatch DPCommandBar;
 
 static NSString *DPTestSuiteName(void) {
@@ -1106,16 +1106,28 @@ static void TestUndoCloseTabAndSavePageAs(void) {
 @end
 
 @interface _TtC8TabStripP33_B0CB782161153EFE9133A89C9E1DF5E27DotView : NSView
+@property NSInteger needsLayoutSets;
 @end
 @implementation _TtC8TabStripP33_B0CB782161153EFE9133A89C9E1DF5E27DotView
+- (void)setNeedsLayout:(BOOL)needsLayout {
+    if (needsLayout) self.needsLayoutSets++;
+    [super setNeedsLayout:needsLayout];
+}
 - (void)layout {}
+- (void)updateLayer {}
 @end
+
+static NSTextField *DPEmojiLabelIn(NSView *view) {
+    for (NSView *sub in view.subviews) if ([sub isKindOfClass:NSTextField.class]) return (NSTextField *)sub;
+    return nil;
+}
 
 static void TestProfileEmoji(void) {
     NSUserDefaults *defaults = [[NSUserDefaults alloc] initWithSuiteName:@"com.diapatches"];
     DPProfileEmoji.install();
     DPProfileEmoji.on = YES;
-    [defaults setObject:@{ @"SPACE-TEST-1" : @"🚀" } forKey:@"profileEmojis"];
+    DPProfileEmojiCurrentOnly.on = NO;
+    [defaults setObject:@{ @"SPACE-TEST-1" : @"🚀", @"SPACE-TEST-2" : @"🦊" } forKey:@"profileEmojis"];
 
     DPFakeIndicator *indicator = [[DPFakeIndicator alloc] initWithFrame:NSMakeRect(0, 0, 100, 20)];
     _TtC8TabStripP33_B0CB782161153EFE9133A89C9E1DF5E27DotView *dot = [[_TtC8TabStripP33_B0CB782161153EFE9133A89C9E1DF5E27DotView alloc] initWithFrame:NSMakeRect(0, 0, 16, 16)];
@@ -1125,9 +1137,98 @@ static void TestProfileEmoji(void) {
 
     [dot layout];
     [dot layout];
-    NSTextField *label = nil;
-    for (NSView *sub in dot.subviews) if ([sub isKindOfClass:NSTextField.class]) label = (NSTextField *)sub;
+    NSTextField *label = DPEmojiLabelIn(dot);
     Check(label != nil && !label.hidden && [label.stringValue isEqualToString:@"🚀"], @"ProfileEmoji: top dot without native subview does not hide its own emoji label");
+
+    NSView *nativeDot1 = [[NSView alloc] initWithFrame:NSMakeRect(5, 5, 6, 6)];
+    [dot addSubview:nativeDot1 positioned:NSWindowBelow relativeTo:nil];
+    _TtC8TabStripP33_B0CB782161153EFE9133A89C9E1DF5E27DotView *dot2 = [[_TtC8TabStripP33_B0CB782161153EFE9133A89C9E1DF5E27DotView alloc] initWithFrame:NSMakeRect(20, 0, 16, 16)];
+    NSView *nativeDot2 = [[NSView alloc] initWithFrame:NSMakeRect(5, 5, 6, 6)];
+    [dot2 addSubview:nativeDot2];
+    indicator.dotViews = @{ @"SPACE-TEST-1" : dot, @"SPACE-TEST-2" : dot2 };
+    [indicator addSubview:dot2];
+
+    DPProfileEmojiCurrentOnly.on = YES;
+    [dot layout];
+    [dot2 layout];
+    Check([DPEmojiLabelIn(dot).stringValue isEqualToString:@"🚀"] && nativeDot1.hidden,
+          @"ProfileEmojiCurrentOnly: focused top dot shows emoji");
+    Check(DPEmojiLabelIn(dot2) == nil && !nativeDot2.hidden,
+          @"ProfileEmojiCurrentOnly: unfocused top dot keeps its native dot");
+
+    indicator.focusedSpaceID = @"SPACE-TEST-2";
+    dot.needsLayoutSets = dot2.needsLayoutSets = 0;
+    [dot updateLayer];
+    [dot2 updateLayer];
+    Settle();
+    Check(dot.needsLayoutSets > 0 && dot2.needsLayoutSets > 0,
+          @"ProfileEmojiCurrentOnly: switching focusedSpaceID queues layout on both top dots");
+
+    [dot layout];
+    [dot2 layout];
+    Check(DPEmojiLabelIn(dot) == nil && !nativeDot1.hidden,
+          @"ProfileEmojiCurrentOnly: previously focused top dot restores native dot");
+    Check([DPEmojiLabelIn(dot2).stringValue isEqualToString:@"🦊"] && nativeDot2.hidden,
+          @"ProfileEmojiCurrentOnly: newly focused top dot shows its emoji");
+
+    DPProfileEmojiCurrentOnly.on = NO;
+    [dot layout];
+    [dot2 layout];
+    Check([DPEmojiLabelIn(dot).stringValue isEqualToString:@"🚀"] && [DPEmojiLabelIn(dot2).stringValue isEqualToString:@"🦊"],
+          @"ProfileEmojiCurrentOnly: turning off restores emojis on all top dots");
+
+    DPProfileEmojiCurrentOnly.on = YES;
+    indicator.focusedSpaceID = nil;
+    [dot layout];
+    [dot2 layout];
+    Check([DPEmojiLabelIn(dot).stringValue isEqualToString:@"🚀"] && [DPEmojiLabelIn(dot2).stringValue isEqualToString:@"🦊"],
+          @"ProfileEmojiCurrentOnly: top dots with no readable focus show every emoji instead of hiding them all");
+
+    indicator.focusedSpaceID = @"SPACE-TEST-1";
+    [dot layout];
+    [dot2 layout];
+    Check(DPEmojiLabelIn(dot) != nil && DPEmojiLabelIn(dot2) == nil && !nativeDot2.hidden,
+          @"ProfileEmojiCurrentOnly: a readable focus hides the emoji of the other top dot again");
+
+    DPProfileEmoji.on = NO;
+    dot.needsLayoutSets = 0;
+    [dot updateLayer];
+    Settle();
+    Check(dot.needsLayoutSets > 0, @"ProfileEmoji: turning off queues a layout on a top dot that still shows an emoji");
+    [dot layout];
+    [dot2 layout];
+    Check(DPEmojiLabelIn(dot) == nil && DPEmojiLabelIn(dot2) == nil && !nativeDot1.hidden && !nativeDot2.hidden,
+          @"ProfileEmoji: turning off restores every top dot's native dot and removes its emoji label");
+
+    dot.needsLayoutSets = 0;
+    DPProfileEmoji.on = YES;
+    [dot updateLayer];
+    DPProfileEmoji.on = NO;
+    Settle();
+    Check(dot.needsLayoutSets == 0, @"ProfileEmoji: a layout queued before turning off does not run once nothing is left to restore");
+    DPProfileEmoji.on = YES;
+    DPProfileEmojiCurrentOnly.on = NO;
+}
+
+@interface DPInheritedUpdateLayerView : NSView
+@end
+@implementation DPInheritedUpdateLayerView
+@end
+
+static int gInheritedUpdateLayerCalls;
+static void DPInheritedUpdateLayer_hook(NSView *self, SEL _cmd) {
+    gInheritedUpdateLayerCalls++;
+    DPCallOriginal(DPInheritedUpdateLayer_hook, self);
+}
+
+static void TestHookInheritedUpdateLayer(void) {
+    IMP base = method_getImplementation(class_getInstanceMethod(NSView.class, @selector(updateLayer)));
+    DPHook("DPNoSuchClassAnywhere", @selector(updateLayer), (IMP)DPInheritedUpdateLayer_hook);
+    DPHookClass(DPInheritedUpdateLayerView.class, @selector(updateLayer), (IMP)DPInheritedUpdateLayer_hook);
+    [[[DPInheritedUpdateLayerView alloc] initWithFrame:NSMakeRect(0, 0, 10, 10)] updateLayer];
+    [[[NSView alloc] initWithFrame:NSMakeRect(0, 0, 10, 10)] updateLayer];
+    Check(gInheritedUpdateLayerCalls == 1 && method_getImplementation(class_getInstanceMethod(NSView.class, @selector(updateLayer))) == base,
+          @"DPHook: a missing class is skipped and a class that inherits updateLayer hooks only itself and still calls NSView's");
 }
 
 @interface _TtC5ARCUI24FeatheredTruncatingLabel : NSTextField
@@ -1381,6 +1482,7 @@ int main(void) {
         TestCollapsePinned();
         TestUndoCloseTabAndSavePageAs();
         TestProfileEmoji();
+        TestHookInheritedUpdateLayer();
         TestPullRequestRepo();
         TestUnloadTab();
         TestCompactSidebarHeader();

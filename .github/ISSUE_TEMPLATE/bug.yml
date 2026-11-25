@@ -58,6 +58,7 @@ body:
         - Close Button on Pinned Tabs
         - Minus Button on Open Pinned Tabs
         - Profile Emoji
+        - Only on Current Profile
         - Profile Color Picker
         - Private Window Theme
         - Switch Profiles with ⌘1–9
