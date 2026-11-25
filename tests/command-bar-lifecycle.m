@@ -4,6 +4,9 @@
 #import "Patches/CommandBar/Tabs.h"
 #import "Patches/HideNewTabLogo/HideNewTabLogo.m"
 #import "Patches/KeepWindowsActive/KeepWindowsActive.m"
+NSInteger DPSafeMode;
+BOOL DPPaused, DPPausedAtLaunch;
+NSNotificationName const DPPatchesDidChangeNotification = @"DPPatchesDidChange";
 
 static NSString *DPTestSuiteName(void) { return [NSString stringWithFormat:@"com.diapatches.command-bar-lifecycle.%d", getpid()]; }
 
