@@ -49,3 +49,4 @@ BOOL DPProgressColorSlots(NSUInteger slots[2]);
 NSMenu *DPProgressColorChoices(void);
 void DPProgressColors(NSView *pane, NSString *choice, simd_float3 *primary, simd_float3 *secondary);
 void DPInstallProgressColors(void);
+extern BOOL DPSamplesProgressColors;

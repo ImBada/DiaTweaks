@@ -7,7 +7,7 @@
 
 extern DPPatch DPLittleDia, DPLittleDiaTabLinks, DPLittleDiaFollowRules, DPLittleDiaRemember, DPLittleDiaLauncher;
 
-BOOL DPLittleDiaTakesTabLink(id page, NSURL *url, BOOL leavesPinned);
+NSString *DPLittleDiaLinkKey(NSString *address);
 
 void DPInstallLittleDiaExtension(void);
 BOOL DPWriteLittleDiaExtension(BOOL on);

@@ -1,5 +1,4 @@
 #import "LittleDia.h"
-#import "Patches/Peek/Peek.h"
 
 static NSString *const DPWidthKey = @"littleDiaWidth", *const DPHeightKey = @"littleDiaHeight", *const DPFrameKey = @"littleDiaFrame";
 
@@ -85,12 +84,16 @@ static BOOL DPHasCommandBarOverlay(NSWindow *window) {
     return NO;
 }
 
+static BOOL DPHasPeekCard(NSWindow *window) {
+    return DPFindView(window.contentView, ^BOOL(NSView *view) { return DPIsKind(view, "DPPeekCard") && !view.isHiddenOrHasHiddenAncestor; }) != nil;
+}
+
 // Peek's and CommandBar's monitors take Escape too and may run first or second, so stand aside while either or a sheet is open.
 static BOOL DPEscapeCloses(NSEvent *event) {
     if (!DPLittleDia.on || !DPLittleDiaEscape.on || event.keyCode != 53 || event.isARepeat) return NO;
     NSEventModifierFlags mods = event.modifierFlags & (NSEventModifierFlagCommand | NSEventModifierFlagShift | NSEventModifierFlagOption | NSEventModifierFlagControl);
     NSWindow *window = event.window;
-    if (mods || !window.isKeyWindow || window.attachedSheet || !DPIsLittleDiaWindow(window) || (window.styleMask & NSWindowStyleMaskFullScreen) || DPPeekCardIn(window) || DPHasCommandBarOverlay(window)) return NO;
+    if (mods || !window.isKeyWindow || window.attachedSheet || !DPIsLittleDiaWindow(window) || (window.styleMask & NSWindowStyleMaskFullScreen) || DPHasPeekCard(window) || DPHasCommandBarOverlay(window)) return NO;
     NSResponder *responder = window.firstResponder;
     if ([responder isKindOfClass:NSText.class] && [(NSText *)responder isFieldEditor]) return NO;
     if ([responder conformsToProtocol:@protocol(NSTextInputClient)] && [(id<NSTextInputClient>)responder hasMarkedText]) return NO;

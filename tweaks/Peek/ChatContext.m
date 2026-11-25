@@ -1,4 +1,4 @@
-#import "Patches/Peek/Peek.h"
+#import "Peek.h"
 #import <objc/message.h>
 
 static char DPPeekChatKVOContext;

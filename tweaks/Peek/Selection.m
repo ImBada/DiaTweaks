@@ -1,4 +1,4 @@
-#import "Patches/Peek/Peek.h"
+#import "Peek.h"
 #import "Patches/CommandBar/Tabs.h"
 
 enum { DPPeekPageVisible = 2 };

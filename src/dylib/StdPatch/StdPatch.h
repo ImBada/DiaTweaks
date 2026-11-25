@@ -181,6 +181,14 @@ static inline BOOL DPSetValueForKey(id object, NSString *key, id value) {
     @try { [object setValue:value forKey:key]; return YES; } @catch (NSException *exception) { return NO; }
 }
 NSMenu *DPTabContextMenu(NSView *tab);
+id DPTabState(NSView *tab);
+BOOL DPStateSelected(id state);
+NSView *DPFindTabIn(NSWindow *window, BOOL (^match)(NSView *tab));
+NSString *DPPageID(id page);
+NSView *DPTabShowing(NSWindow *window, NSString *pageID, BOOL anyWindow);
+BOOL DPPageInPinnedRow(NSWindow *window, id page);
+BOOL DPIsWebURL(NSURL *url);
+id DPActionStayingInTab(id action);  // A navigation action as Dia would decide it for a click that stays in the tab.
 NSArray<NSString *> *DPUUIDsIn(NSString *text);
 NSWindowController *DPOpenTabSwitcher(void);
 

@@ -1,4 +1,4 @@
-#import "Patches/Peek/Peek.h"
+#import "Peek.h"
 #import "Patches/LittleDia/LittleDia.h"
 #import <objc/message.h>
 

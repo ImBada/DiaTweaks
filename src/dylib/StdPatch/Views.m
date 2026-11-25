@@ -149,6 +149,84 @@ NSMenu *DPTabContextMenu(NSView *tab) {
     return [tab menuForEvent:click];
 }
 
+id DPTabState(NSView *tab) {
+    return DPSwiftValue(DPSwiftValue(DPSwiftValue(tab, @"viewModel"), @"stateSubject"), @"currentValue");
+}
+
+// selectionStyle is nil on an unselected pinned tab, "none" on other unselected tabs, above/below beside the selection.
+BOOL DPStateSelected(id state) {
+    NSString *style = [[DPSwiftValue(state, @"selectionStyle") description] lowercaseString];
+    return style && ![style isEqualToString:@"nil"] && ![style containsString:@"none"] && ![style containsString:@"above"] && ![style containsString:@"below"];
+}
+
+NSView *DPFindTabIn(NSWindow *window, BOOL (^match)(NSView *tab)) {
+    const char *kinds[2] = {DPDiaTabView, DPDiaPinnedTab};
+    for (int i = 0; i < 2; i++)
+        for (NSView *tab in DPFindViews(kinds[i]))
+            if ((!window || tab.window == window) && !tab.isHiddenOrHasHiddenAncestor && match(tab)) return tab;
+    return nil;
+}
+
+NSString *DPPageID(id page) {
+    static NSString *const keys[] = {@"identifier", @"id", @"contentID", @"contentId", @"uuid"};
+    for (size_t i = 0; i < sizeof keys / sizeof *keys; i++) {
+        NSString *value = [DPSwiftValue(page, keys[i]) description];
+        if (value.length >= 32 && [value containsString:@"-"]) return value;
+    }
+    return nil;
+}
+
+NSView *DPTabShowing(NSWindow *window, NSString *pageID, BOOL anyWindow) {
+    __block NSView *selected = nil;
+    NSView *exact = DPFindTabIn(anyWindow ? nil : window, ^BOOL(NSView *tab) {
+        id state = DPTabState(tab);
+        if (pageID && [[state description] containsString:pageID]) return YES;
+        if (!selected && (!window || tab.window == window) && DPStateSelected(state)) selected = tab;
+        return NO;
+    });
+    return exact ?: selected;
+}
+
+static char DPPinnedRowKey;
+
+// Icon tiles' links already open new tabs; a pinned row's don't, and only its context menu says it is pinned.
+// Several hooks ask about the same click and the menu is costly to build, so an answer holds for half a second.
+BOOL DPPageInPinnedRow(NSWindow *window, id page) {
+    NSArray *memo = page ? DPGet(page, &DPPinnedRowKey) : nil;
+    CFTimeInterval now = NSProcessInfo.processInfo.systemUptime;
+    if (memo && [memo[2] nonretainedObjectValue] == window && now - [memo[1] doubleValue] < 0.5) return [memo[0] boolValue];
+    NSView *tab = DPTabShowing(window, DPPageID(page), YES);
+    NSMenuItem *unpin = tab && !DPIsKind(tab, DPDiaPinnedTab) ? [DPTabContextMenu(tab) itemWithTitle:@"Unpin"] : nil;
+    BOOL pinned = unpin && !unpin.hidden && unpin.enabled;
+    if (page) DPSet(page, &DPPinnedRowKey, @[ @(pinned), @(now), [NSValue valueWithNonretainedObject:window] ]);
+    return pinned;
+}
+
+BOOL DPIsWebURL(NSURL *url) {
+    if (![url isKindOfClass:NSURL.class]) return NO;
+    NSString *scheme = url.scheme;
+    return [scheme caseInsensitiveCompare:@"http"] == NSOrderedSame || [scheme caseInsensitiveCompare:@"https"] == NSOrderedSame;
+}
+
+@interface DPStayingAction : NSProxy
+@property (nonatomic, strong) id action;
+@end
+
+@implementation DPStayingAction
+- (NSInteger)navigationDisposition { return DPCurrentTab; }
+- (NSMethodSignature *)methodSignatureForSelector:(SEL)selector { return [self.action methodSignatureForSelector:selector]; }
+- (void)forwardInvocation:(NSInvocation *)invocation { [invocation invokeWithTarget:self.action]; }
+- (BOOL)respondsToSelector:(SEL)selector { return selector == @selector(navigationDisposition) || [self.action respondsToSelector:selector]; }
+- (BOOL)conformsToProtocol:(Protocol *)protocol { return [self.action conformsToProtocol:protocol]; }
+- (BOOL)isKindOfClass:(Class)cls { return [self.action isKindOfClass:cls]; }
+@end
+
+id DPActionStayingInTab(id action) {
+    DPStayingAction *staying = [DPStayingAction alloc];
+    staying.action = action;
+    return staying;
+}
+
 NSArray<NSString *> *DPUUIDsIn(NSString *text) {
     if (!text.length) return @[];
     static NSRegularExpression *uuid;

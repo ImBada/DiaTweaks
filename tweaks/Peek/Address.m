@@ -1,4 +1,4 @@
-#import "Patches/Peek/Peek.h"
+#import "Peek.h"
 
 @interface DPPeekAddress : NSView <NSTextFieldDelegate>
 @property (nonatomic, weak) id page;

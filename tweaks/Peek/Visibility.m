@@ -1,4 +1,4 @@
-#import "Patches/Peek/Peek.h"
+#import "Peek.h"
 
 @interface DPPeekCard (VisibilityState)
 @property (nonatomic, weak) NSResponder *savedResponder;

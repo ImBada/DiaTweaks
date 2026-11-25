@@ -5,9 +5,6 @@ extern DPPatch DPPeek, DPPeekPinnedLinks;
 typedef NS_ENUM(NSInteger, DPPeekExit) { DPPeekClose, DPPeekTab, DPPeekSplit };
 typedef NS_ENUM(NSInteger, DPPeekStep) { DPPeekBack, DPPeekForward, DPPeekReload };
 
-// Dia's ArcWebContentsNavigationDisposition, numbered differently from Chromium's.
-enum { DPIgnoreAction = 0, DPCurrentTab = 1, DPForegroundTab = 2, DPBackgroundTab = 3, DPNewWindow = 5, DPPopup = 6, DPSplitView = 9 };
-
 @protocol DPPeekPage <NSObject>
 - (NSView *)createPaneHostView;
 - (void)attachToPaneHostView:(NSView *)host;
@@ -91,7 +88,6 @@ void DPPeekLayoutHints(NSView *controls, CGFloat availableRight);
 CATransform3D DPPeekScaled(NSView *view, CGFloat scale);
 CASpringAnimation *DPPeekSpring(NSString *keyPath, CFTimeInterval response, CGFloat dampingRatio);
 
-BOOL DPPeekInPinnedRow(NSWindow *window, id page);
 void DPPeekShowTabBadge(DPPeekCard *peek, id source);
 void DPPeekHideTabBadge(DPPeekCard *peek);
 void DPPeekRefreshTabBadge(DPPeekCard *peek);
@@ -143,6 +139,3 @@ void DPPeekCoolIn(NSWindow *window);
 void DPPeekCloseAll(void);
 void DPPeekHideDragZone(void);
 void DPPeekOpenDragged(NSURL *url, NSPoint origin);
-BOOL DPPeekIsWeb(NSURL *url);
-BOOL DPPeekOverLink(id page, NSURL *url);
-NSString *DPPeekLinkKey(NSString *address);

@@ -176,7 +176,7 @@ static void DPStubWindow_close(NSWindow *self, SEL _cmd) {
     [gTestWindows removeObject:self];
 }
 
-static NSWindow *DPNewWindow(void) {
+static NSWindow *DPMakeWindow(void) {
     return [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 400, 260)
                                        styleMask:NSWindowStyleMaskBorderless
                                          backing:NSBackingStoreBuffered
@@ -210,7 +210,7 @@ static _TtC6Dialog15DialogPanelView *DPMakePanel(NSString *title, NSString *mess
 }
 
 static _TtC6Dialog27DialogPanelWindowController *DPMakePanelWC(_TtC6Dialog15DialogPanelView *panel) {
-    NSWindow *w = DPNewWindow();
+    NSWindow *w = DPMakeWindow();
     [w.contentView addSubview:panel];
     _TtC6Dialog27DialogPanelWindowController *wc = [[_TtC6Dialog27DialogPanelWindowController alloc] initWithWindow:w];
     w.windowController = wc;
@@ -256,7 +256,7 @@ int main(void) {
         DPInstallHides();
         DPHideConnectAppPrompts.install();
 
-        NSWindow *browserWindow = DPNewWindow();
+        NSWindow *browserWindow = DPMakeWindow();
         [gTestWindows addObject:browserWindow];
 
         {
@@ -523,7 +523,7 @@ int main(void) {
             _TtC6Dialog25DialogPanelViewController *sheetToggleVC = [_TtC6Dialog25DialogPanelViewController new];
             sheetToggleVC.dialogView = sheetTogglePanel;
             [sheetToggleVC view];
-            NSWindow *sheetWin = DPNewWindow();
+            NSWindow *sheetWin = DPMakeWindow();
             _TtC6Dialog27DialogPanelWindowController *sheetToggleWC = [[_TtC6Dialog27DialogPanelWindowController alloc] initWithWindow:sheetWin];
             sheetWin.windowController = sheetToggleWC;
             [sheetWin.contentView addSubview:sheetToggleVC.view];
@@ -534,7 +534,7 @@ int main(void) {
                   !sheetToggleVC.view.hidden && !sheetTogglePanel.hidden && sheetTogglePanel.totalClicks == 0);
 
             DPHideConnectAppPrompts.on = YES;
-            NSWindow *multiWin = DPNewWindow();
+            NSWindow *multiWin = DPMakeWindow();
             _TtC6Dialog15DialogPanelView *decoy = DPMakePanel(@"Connect Fake to Dia?", @"No decline", YES, @"OK", nil);
             _TtC6Dialog15DialogPanelView *realPrompt = DPMakePanel(@"Connect Slack to Dia?", @"Real", YES, @"OK", @"Don\u2019t connect Slack");
             [multiWin.contentView addSubview:decoy];

@@ -1,4 +1,4 @@
-#import "Patches/Peek/Peek.h"
+#import "Peek/Peek.h"
 #import "Patches/HideToolbar/HideToolbar.h"
 #import <objc/runtime.h>
 
@@ -132,25 +132,24 @@ NSString *DPActiveTabID(NSWindow *window) { return gActiveID; }
 void DPOnLaunch(void (^block)(void)) { block(); }
 float DPZoomStep(float now, int direction) { return direction > 0 ? now + 0.1f : now - 0.1f; }
 BOOL DPEventIsKey(NSEvent *event, NSString *key) { return NO; }
-BOOL DPPeekIsWeb(NSURL *url) { return [url.scheme isEqual:@"https"] || [url.scheme isEqual:@"http"]; }
 void DPPeekOpenDragged(NSURL *url, NSPoint origin) {}
 CAMetalLayer *DPProgressShaderLayer(void) { return nil; }
 void DPProgressColors(NSView *pane, NSString *choice, simd_float3 *primary, simd_float3 *secondary) {}
 void DPDrawProgressShader(CAMetalLayer *layer, CGFloat progress, CGFloat cycle, simd_float3 primary, simd_float3 secondary) {}
 
-#import "Patches/Peek/Glow.m"
-#import "Patches/Peek/Tab.m"
-#import "Patches/Peek/Selection.m"
-#import "Patches/Peek/Motion.m"
-#import "Patches/Peek/Keys.m"
-#import "Patches/Peek/Visibility.m"
-#import "Patches/Peek/Chat.m"
-#import "Patches/Peek/ChatContext.m"
-#import "Patches/Peek/Card.m"
-#import "Patches/Peek/Pages.m"
-#import "Patches/Peek/Handoff.m"
-#import "Patches/Peek/Zoom.m"
-#import "Patches/Peek/DragLinks.m"
+#import "Peek/Glow.m"
+#import "Peek/Tab.m"
+#import "Peek/Selection.m"
+#import "Peek/Motion.m"
+#import "Peek/Keys.m"
+#import "Peek/Visibility.m"
+#import "Peek/Chat.m"
+#import "Peek/ChatContext.m"
+#import "Peek/Card.m"
+#import "Peek/Pages.m"
+#import "Peek/Handoff.m"
+#import "Peek/Zoom.m"
+#import "Peek/DragLinks.m"
 
 static int failures;
 #define CHECK(cond, msg) do { if (!(cond)) { printf("FAIL: %s\n", msg); failures++; } } while (0)

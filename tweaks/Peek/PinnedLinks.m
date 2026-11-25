@@ -1,4 +1,4 @@
-#import "Patches/Peek/Peek.h"
+#import "Peek.h"
 
 static void DPApplyPeekPinnedLinks(DPPatch *patch) {}
 

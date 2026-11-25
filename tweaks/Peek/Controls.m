@@ -1,4 +1,4 @@
-#import "Patches/Peek/Peek.h"
+#import "Peek.h"
 
 static const CGFloat DPHintHeight = 26, DPHintPadX = 10, DPHintPadY = 5, DPHintLabelGap = 6, DPHintCapGap = 4, DPHintRightGap = 10;
 

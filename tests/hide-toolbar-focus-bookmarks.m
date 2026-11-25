@@ -2,7 +2,6 @@
 #import "Patches/HideToolbar/HideToolbar.h"
 
 NSNotificationName const DPPatchesDidChangeNotification = @"DPPatchesDidChange";
-DPPatch DPPeek;
 
 static BOOL gAppActive = YES, gLittleDiaOver;
 static NSWindow *gKeyWindow;

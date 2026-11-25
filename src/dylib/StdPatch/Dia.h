@@ -111,3 +111,6 @@
 #define DPDiaDialogPanelVC      "_TtC6Dialog25DialogPanelViewController"
 #define DPDiaDialogPanelWC      "_TtC6Dialog27DialogPanelWindowController"
 #define DPDiaAppsUpsellBar      "_TtC13AppsUpsellBar17AppsUpsellBarView"
+
+// Dia's ArcWebContentsNavigationDisposition, numbered differently from Chromium's.
+enum { DPIgnoreAction = 0, DPCurrentTab = 1, DPForegroundTab = 2, DPBackgroundTab = 3, DPNewWindow = 5, DPPopup = 6, DPSplitView = 9 };

@@ -3,7 +3,6 @@
 #import "Patches/HideToolbar/HideToolbar.h"
 
 NSNotificationName const DPPatchesDidChangeNotification = @"DPPatchesDidChange";
-DPPatch DPPeek;
 DPPatch DPRevealToolbarOnHover = { .on = YES }, DPShowToolbarWithSidebar = { .on = YES }, DPShowToolbarOnNewTab, DPShowToolbarWithTopTabs = { .on = YES };
 
 static BOOL gLittleDiaOver;

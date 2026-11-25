@@ -19,7 +19,7 @@ Each tweak changes one thing about Dia: it hides something you don't use, change
 | AI | Turning off Dia's AI, all at once or one part at a time |
 | Window | How the window looks and behaves |
 | Passwords | Password managers and passkeys |
-| Links | Opening links in Peek and the address shown on hover |
+| Links | Opening links in Little Dia and the address shown on hover |
 
 Turn them on and off in **Dia → Settings → Patches**, or with the `diatweaks` command. Each one's Settings page links to its wiki page, which says what it does and when you'd want it. Experimental tweaks stay out of the list until you switch them on in **Settings → Home** (or at the bottom of **Patches**), where you can also back up or import your settings.
 

@@ -129,8 +129,6 @@ static void DPPage_viewDidMoveToWindow(NSView *self, SEL _cmd) {
 }
 
 // Only plain new-tab links stay; sized popups keep their opener for sign-in flows.
-enum { DPCurrentTab = 1, DPForegroundTab = 2 };
-
 static BOOL DPStaysInLittleDia(id page, NSInteger disposition) {
     if (disposition != DPForegroundTab || (NSEvent.modifierFlags & (NSEventModifierFlagCommand | NSEventModifierFlagShift))) return NO;
     for (NSWindow *window in NSApp.windows)

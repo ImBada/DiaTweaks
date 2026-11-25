@@ -26,11 +26,6 @@ static NSRect DPLittleDiaFrame(void) {
     return NSMakeRect(round(NSMidX(visible) - size.width / 2), round(NSMidY(visible) - size.height / 2), size.width, size.height);
 }
 
-static BOOL DPIsWebURL(NSURL *url) {
-    NSString *scheme = url.scheme;
-    return scheme && ([scheme caseInsensitiveCompare:@"http"] == NSOrderedSame || [scheme caseInsensitiveCompare:@"https"] == NSOrderedSame);
-}
-
 static NSURL *DPWebURLFromString(NSString *string) {
     NSString *trimmed = [string stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
     if (!trimmed.length) return nil;

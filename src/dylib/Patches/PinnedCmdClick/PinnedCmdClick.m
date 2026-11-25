@@ -1,5 +1,4 @@
 #import "StdPatch/StdPatch.h"
-#import "Patches/Peek/Peek.h"
 #import "Commands/GroupTabs/GroupTabs.h"
 
 extern DPPatch DPPinnedCmdClick;
@@ -28,7 +27,7 @@ static BOOL DPPinnedCmdClickOnIcon(id page) {
 // The page's own window, not the key one: another window's selected pinned row would answer for it.
 static BOOL DPPinnedCmdClickSourcePinned(id page) {
     NSWindow *window = page ? DPBrowserWindow(DPBrowserOfContents(page)) : nil;
-    return page && ((window && DPPeekInPinnedRow(window, page)) || DPPinnedCmdClickOnIcon(page));
+    return page && ((window && DPPageInPinnedRow(window, page)) || DPPinnedCmdClickOnIcon(page));
 }
 
 static BOOL DPPinnedCmdClickWanted(NSInteger disposition) {
@@ -44,27 +43,10 @@ static BOOL DPPinnedCmdClickWanted(NSInteger disposition) {
     return (event.type == NSEventTypeOtherMouseDown || event.type == NSEventTypeOtherMouseUp) && event.buttonNumber == 2;
 }
 
-static NSString *DPPinnedCmdClickPageID(id page) {
-    static NSArray<NSString *> *keys;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{ keys = @[@"identifier", @"id", @"contentID", @"contentId", @"uuid"]; });
-    for (NSString *key in keys) {
-        NSString *value = [DPSwiftValue((NSObject *)page, key) description];
-        if (value.length >= 32 && [value containsString:@"-"]) return value;
-    }
-    return nil;
-}
-
 static NSView *DPPinnedCmdClickTabForPage(NSWindow *window, id page) {
-    NSString *pageID = DPPinnedCmdClickPageID(page);
+    NSString *pageID = DPPageID(page);
     if (!pageID) return nil;
-    const char *kinds[2] = {DPDiaTabView, DPDiaPinnedTab};
-    for (int i = 0; i < 2; i++)
-        for (NSView *tab in DPFindViews(kinds[i]))
-            if (tab.window == window && !tab.isHiddenOrHasHiddenAncestor
-                && [[DPSwiftValue(DPSwiftValue(DPSwiftValue(tab, @"viewModel"), @"stateSubject"), @"currentValue") description] containsString:pageID])
-                return tab;
-    return nil;
+    return DPFindTabIn(window, ^BOOL(NSView *tab) { return [[DPTabState(tab) description] containsString:pageID]; });
 }
 
 static NSView *DPPinnedCmdClickTabInAnyWindow(id page, NSWindow **owner) {
@@ -107,7 +89,7 @@ static void DPPinnedCmdClickUnpin(id page, int tries) {
 }
 
 static void DPWebContent_didCreate(id self, SEL _cmd, id webContents, id newWebContent, NSURL *url, NSInteger disposition) {
-    BOOL wanted = DPPinnedCmdClick.on && DPPinnedCmdClickWanted(disposition) && DPPeekIsWeb(url)
+    BOOL wanted = DPPinnedCmdClick.on && DPPinnedCmdClickWanted(disposition) && DPIsWebURL(url)
         && DPPinnedCmdClickSourcePinned(webContents);
     DPCallOriginal(DPWebContent_didCreate, self, webContents, newWebContent, url, disposition);
     if (!wanted) return;

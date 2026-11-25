@@ -1,4 +1,4 @@
-#import "Patches/Peek/Peek.h"
+#import "Peek.h"
 
 static BOOL DPPeekHiddenAncestor(NSView *view) {
     for (NSView *up = view.superview; up; up = up.superview)

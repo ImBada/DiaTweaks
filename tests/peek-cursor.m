@@ -1,4 +1,4 @@
-#import "Patches/Peek/Peek.h"
+#import "Peek/Peek.h"
 #import "StdPatch/Hook.m"
 
 DPPatch DPPeek = { .on = YES };
@@ -34,7 +34,7 @@ DPPeekCard *DPPeekCardIn(NSWindow *window) {
 - (void)addCursorRect:(NSRect)rect cursor:(NSCursor *)cursor { [self.rects addObject:[NSValue valueWithRect:rect]]; }
 @end
 
-#import "Patches/Peek/Cursor.m"
+#import "Peek/Cursor.m"
 
 static int hitTests;
 

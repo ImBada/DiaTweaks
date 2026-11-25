@@ -1,4 +1,4 @@
-#import "Patches/Peek/Peek.h"
+#import "Patches/LittleDia/LittleDia.h"
 #import <objc/runtime.h>
 
 static int failures;
@@ -10,15 +10,15 @@ static void expect(BOOL ok, NSString *what) {
 }
 
 static void same(NSString *clicked, NSString *shown) {
-    expect([DPPeekLinkKey(clicked) isEqual:DPPeekLinkKey(shown)], [NSString stringWithFormat:@"%@ should match %@", clicked, shown]);
+    expect([DPLittleDiaLinkKey(clicked) isEqual:DPLittleDiaLinkKey(shown)], [NSString stringWithFormat:@"%@ should match %@", clicked, shown]);
 }
 
 static void differ(NSString *one, NSString *other) {
-    expect(![DPPeekLinkKey(one) isEqual:DPPeekLinkKey(other)], [NSString stringWithFormat:@"%@ should not match %@", one, other]);
+    expect(![DPLittleDiaLinkKey(one) isEqual:DPLittleDiaLinkKey(other)], [NSString stringWithFormat:@"%@ should not match %@", one, other]);
 }
 
 static void key(NSString *address, NSString *want) {
-    NSString *got = DPPeekLinkKey(address);
+    NSString *got = DPLittleDiaLinkKey(address);
     expect([got isEqual:want], [NSString stringWithFormat:@"key of %@ is %@, want %@", address, got, want]);
 }
 

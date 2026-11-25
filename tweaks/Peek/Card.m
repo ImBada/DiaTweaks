@@ -1,4 +1,4 @@
-#import "Patches/Peek/Peek.h"
+#import "Peek.h"
 
 static const CGFloat DPPeekShadowRoom = 48, DPPeekEdgeAlpha = 0.12;
 static NSHashTable<DPPeekCard *> *DPPeekCards;

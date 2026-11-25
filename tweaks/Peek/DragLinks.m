@@ -1,4 +1,4 @@
-#import "Patches/Peek/Peek.h"
+#import "Peek.h"
 
 extern DPPatch DPPeekDragLinks;
 
@@ -205,7 +205,7 @@ static void DPShowZone(NSWindow *window, NSPoint pointer) {
 static NSDraggingSession *DPPage_beginDrag(NSView *self, SEL _cmd, NSArray<NSDraggingItem *> *items, NSEvent *event, id source) {
     NSDraggingSession *session = DPCallOriginal(DPPage_beginDrag, self, items, event, source);
     NSURL *url = DPPeek.on && DPPeekDragLinks.on ? [NSURL URLFromPasteboard:session.draggingPasteboard] : nil;
-    if (!DPPeekIsWeb(url)) return session;
+    if (!DPIsWebURL(url)) return session;
     DPShowZone(self.window, [self.window convertPointToScreen:event.locationInWindow]);
     return session;
 }

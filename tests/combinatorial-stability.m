@@ -21,7 +21,7 @@
 #import "Patches/CommandBar/HideTab.h"
 #import "Patches/CommandBar/Tabs.h"
 #import "Patches/CommandBar/AutoPip.h"
-#import "Patches/Peek/Peek.h"
+#import "Peek/Peek.h"
 #import "Patches/LittleDia/LittleDia.h"
 #import "Patches/UnloadTab/Pages.h"
 #import "Patches/UnloadTab/Recent.h"
@@ -117,7 +117,6 @@ static NSMutableArray<NSURL *> *gLittleDiaOpenedLinks;
 BOOL DPLittleDiaReady(void) { return YES; }
 void DPOpenLinkInLittleDia(NSURL *url) { if (url) [gLittleDiaOpenedLinks addObject:url]; }
 BOOL DPIsLittleDiaWindow(NSWindow *window) { return window && [gLittleDiaWindows containsObject:window]; }
-BOOL DPLittleDiaTakesTabLink(id page, NSURL *url, BOOL leavesPinned) { return NO; }
 
 // CommandBar spare/swap stubs (CommandBar.m + AutoPip.m + HideTabLayout.m + HideTabParked.m + Tabs.m are real)
 static BOOL gHideTabEnabled = YES;
@@ -212,9 +211,9 @@ void DPPeekHideDragZone(void) {}
 CATransform3D DPPeekScaled(NSView *view, CGFloat scale) { return CATransform3DMakeScale(scale, scale, 1); }
 NSString *DPDomainKey(NSString *address) { return address ? [NSURL URLWithString:address].host.lowercaseString : nil; }
 NSString *DPRegistrableDomain(NSString *host) { return host; }
-NSString *DPPeekLinkKey(NSString *address) { return address; }
 double DPPeekDarkness(void) { return 0.35; }
 double DPPeekResponse(void) { return 0.3; }
+BOOL DPSamplesProgressColors;
 BOOL DPPeekGenie(void) { return NO; }
 BOOL DPPeekShowsToolbar(void) { return YES; }
 NSArray<NSView *> *DPPeekSettingsRows(void) { return @[]; }

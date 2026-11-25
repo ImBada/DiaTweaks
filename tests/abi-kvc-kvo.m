@@ -7,7 +7,7 @@
 #import "StdPatch/StdPatch.h"
 #import "Patches/CommandBar/Tabs.h"
 #import "Patches/LittleDia/LittleDia.h"
-#import "Patches/Peek/Peek.h"
+#import "Peek/Peek.h"
 #import "Patches/HideToolbar/HideToolbar.h"
 #import "Patches/SkipAccount/Startup.h"
 #import "Settings/Settings.h"
@@ -26,6 +26,7 @@ DPPatch DPHideToolbar, DPRevealToolbarOnHover, DPShowLoadingProgress;
 DPPatch *const *DPPatches;
 NSUInteger DPPatchCount;
 BOOL DPPeekGiving;
+BOOL DPSamplesProgressColors;
 BOOL DPPeekFindingLink;
 
 DPPatch *DPRequired(DPPatch *patch) { return nil; }
@@ -36,7 +37,6 @@ BOOL DPEventIsKey(NSEvent *event, NSString *key) { return [event.charactersIgnor
 NSMenuItem *DPMenuItem(NSString *title, void (^action)(void)) { return [[NSMenuItem alloc] initWithTitle:title ?: @"" action:nil keyEquivalent:@""]; }
 NSString *DPDomainKey(NSString *url) { return nil; }
 NSString *DPRegistrableDomain(NSString *host) { return host; }
-NSString *DPPeekLinkKey(NSString *raw) { return raw; }
 BOOL DPPeekShows(id page) { return NO; }
 BOOL DPPeekCanOpen(id source) { return NO; }
 void DPPeekLoad(id page, NSURL *url) {}
@@ -46,8 +46,6 @@ void DPPeekWarm(NSWindow *window, id source, NSURL *url) {}
 void DPPeekCool(void) {}
 void DPPeekCloseAll(void) {}
 NSArray<DPPeekCard *> *DPPeekAllCards(NSWindow *window) { return @[]; }
-BOOL DPPeekInPinnedRow(NSWindow *window, id page) { return NO; }
-BOOL DPLittleDiaTakesTabLink(id page, NSURL *url, BOOL leavesPinned) { return NO; }
 void DPPeekInstallPages(void) {}
 void DPPeekInstallSelection(void) {}
 void DPPeekInstallZoom(void) {}

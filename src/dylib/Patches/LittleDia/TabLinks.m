@@ -1,6 +1,5 @@
 #import "LittleDia.h"
 #import "Commands/GroupTabs/GroupTabs.h"
-#import "Patches/Peek/Peek.h"
 
 static NSString *const DPFromAllTabs = @"all", *const DPFromPinnedTabs = @"pinned";
 
@@ -30,7 +29,7 @@ static BOOL DPOnPinnedIcon(id page) {
 }
 
 // Scripting calls only the icons pinned; a pinned row says so in its menu. Ask the page's own window, not the key one.
-static BOOL DPFromPinnedTab(id page, NSWindow *window) { return (window && DPPeekInPinnedRow(window, page)) || DPOnPinnedIcon(page); }
+static BOOL DPFromPinnedTab(id page, NSWindow *window) { return (window && DPPageInPinnedRow(window, page)) || DPOnPinnedIcon(page); }
 
 static BOOL DPInLittleDia(id page) {
     for (NSWindow *window in NSApp.windows)
@@ -50,15 +49,84 @@ static BOOL DPOpensInOwnProfile(id browser) {
     return browser && browser == DPCommandBrowser() && [contextID respondsToSelector:@selector(isIncognito)] && !DPMsgBool(contextID, @selector(isIncognito));
 }
 
-BOOL DPLittleDiaTakesTabLink(id page, NSURL *url, BOOL leavesPinned) {
-    if (!DPLittleDia.on || !DPLittleDiaTabLinks.on || !DPPeekIsWeb(url) || !DPPlainClick() || !DPLittleDiaReady()) return NO;
-    if (!page || DPInLittleDia(page) || DPPeekShows(page) || !DPPeekIsWeb(DPPageURL(page))) return NO;
+static BOOL DPInPeek(id page) {
+    for (NSView *card in DPFindViews("DPPeekCard"))
+        if (DPValueForKey(card, @"page") == page) return YES;
+    return NO;
+}
+
+static BOOL DPTakesTabLink(id page, NSURL *url, BOOL leavesPinned) {
+    if (!DPIsWebURL(url) || !DPLittleDiaReady() || !page || DPInLittleDia(page) || DPInPeek(page) || !DPIsWebURL(DPPageURL(page))) return NO;
     id browser = DPBrowserOfContents(page);
     if (!DPOpensInOwnProfile(browser)) return NO;
     NSWindow *source = DPBrowserWindow(browser);
     if (!leavesPinned && ![DPChoice(&DPLittleDiaTabLinks) isEqual:DPFromAllTabs] && !DPFromPinnedTab(page, source)) return NO;
     dispatch_async(dispatch_get_main_queue(), ^{ DPOpenTabLinkInLittleDia(url, source); });  // Not from inside Chromium's callback.
     return YES;
+}
+
+static NSString *DPHovered, *DPPressed;
+static __weak id DPHoveredPage, DPPressedPage;
+static NSTimeInterval DPPressedAt;
+static id DPPressMonitor;
+
+// Pages clear status text on mouse-down before decidePolicy runs, so the link hovered at mouse-down stands in.
+static BOOL DPOverLink(id page, NSURL *url) {
+    NSString *key = url ? DPLittleDiaLinkKey(url.absoluteString) : nil;
+    if (!page || !key) return NO;
+    if (page == DPHoveredPage && [key isEqual:DPHovered]) return YES;
+    return page == DPPressedPage && [key isEqual:DPPressed] && NSProcessInfo.processInfo.systemUptime - DPPressedAt < 2;
+}
+
+static BOOL DPLeavesPinnedSite(id page, id action, NSInteger disposition) {
+    NSInteger type = [DPValueForKey(action, @"navigationType") integerValue];
+    // navigationType 0 is a link activation; 4 is how Dia reports target=_blank clicks.
+    BOOL stays = disposition == DPCurrentTab || disposition == DPForegroundTab;
+    if (!stays || (type != 0 && !(type == 4 && disposition == DPForegroundTab))) return NO;
+    NSString *from = DPDomainKey([DPValueForKey(page, @"url") absoluteString]), *to = DPDomainKey([DPValueForKey(action, @"url") absoluteString]);
+    if (!from || !to || [DPRegistrableDomain(from) isEqual:DPRegistrableDomain(to)]) return NO;
+    NSWindow *window = DPBrowserWindow(DPBrowserOfContents(page));
+    return window && DPPageInPinnedRow(window, page);
+}
+
+static NSInteger DPTabLinks_decidePolicy(id self, SEL _cmd, id webContents, id action) {
+    NSInteger policy = DPCallOriginal(DPTabLinks_decidePolicy, self, webContents, action);
+    if (!DPLittleDia.on || !DPLittleDiaTabLinks.on || !DPPlainClick()) return policy;
+    NSURL *url = DPValueForKey(action, @"url");
+    NSInteger disposition = [DPValueForKey(action, @"navigationDisposition") integerValue];
+    // Script-opened tabs have no link under the pointer and would lose their opener in Little Dia.
+    BOOL clicked = disposition != DPForegroundTab || DPOverLink(webContents, url);
+    BOOL leaves = clicked && policy == DPCurrentTab && DPLeavesPinnedSite(webContents, action, disposition);
+    if (!leaves && policy == DPForegroundTab) {
+        // Ask Dia as if the link stayed in the tab: only an icon-only pinned tab turns that into a new tab.
+        leaves = disposition == DPCurrentTab;
+        if (disposition == DPForegroundTab) leaves = DPCallOriginal(DPTabLinks_decidePolicy, self, webContents, DPActionStayingInTab(action)) == DPForegroundTab;
+    }
+    return (policy == DPForegroundTab || leaves) && clicked && DPTakesTabLink(webContents, url, leaves) ? DPIgnoreAction : policy;
+}
+
+static void DPTabLinks_status(id self, SEL _cmd, id webContents, NSString *text) {
+    DPCallOriginal(DPTabLinks_status, self, webContents, text);
+    if (!DPLittleDia.on || !DPLittleDiaTabLinks.on) return;
+    DPHovered = text.length ? DPLittleDiaLinkKey(text) : nil;
+    DPHoveredPage = webContents;
+}
+
+static void DPApplyTabLinks(DPPatch *patch) {
+    DPSyncMonitor(&DPPressMonitor, patch->on, NSEventMaskLeftMouseDown, ^NSEvent *(NSEvent *event) {
+        DPPressed = DPHovered;
+        DPPressedPage = DPHoveredPage;
+        DPPressedAt = event.timestamp;
+        return event;
+    });
+}
+
+static void DPInstallTabLinks(void) {
+    DPApplyTabLinks(&DPLittleDiaTabLinks);
+    DPOnLaunch(^{
+        DPHook(DPDiaWebContent, @selector(webContents:decidePolicyForNavigationAction:), (IMP)DPTabLinks_decidePolicy);
+        DPHook(DPDiaWebContent, @selector(webContents:didChangeStatusText:), (IMP)DPTabLinks_status);
+    });
 }
 
 static NSMenu *DPTabLinksChoices(void) {
@@ -68,13 +136,10 @@ static NSMenu *DPTabLinksChoices(void) {
     return menu;
 }
 
-// Peek owns the link hooks and asks Little Dia first, so check those are in place rather than adding a second hook.
 static NSString *DPVerifyTabLinks(DPPatch *patch) {
     Class delegate = objc_getClass(DPDiaWebContent);
-    SEL decide = @selector(webContents:decidePolicyForNavigationAction:);
-    SEL created = @selector(webContents:didCreateNewWebContent:targetURL:disposition:);
-    if (class_getMethodImplementation(delegate, decide) == DPDiaIMP(delegate, decide)) return @"link clicks don't reach Little Dia";
-    if (class_getMethodImplementation(delegate, created) == DPDiaIMP(delegate, created)) return @"new tabs don't reach Little Dia";
+    if (!DPIsHooked(delegate, @selector(webContents:decidePolicyForNavigationAction:), (IMP)DPTabLinks_decidePolicy)) return @"link clicks don’t reach Little Dia";
+    if (!DPIsHooked(delegate, @selector(webContents:didChangeStatusText:), (IMP)DPTabLinks_status)) return @"hovered links don’t reach Little Dia";
     return nil;
 }
 
@@ -92,5 +157,7 @@ DP_PATCH(DPLittleDiaTabLinks) {
     .defaultChoice = @"pinned",
     .choices = DPTabLinksChoices,
     .classes = DPClasses(DPDiaBrowserContext, DPDiaWebContents, DPDiaWebContentsConfiguration, DPDiaContentPane),
+    .install = DPInstallTabLinks,
+    .apply = DPApplyTabLinks,
     .verify = DPVerifyTabLinks,
 };

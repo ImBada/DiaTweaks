@@ -1,4 +1,4 @@
-#import "Patches/Peek/Peek.h"
+#import "Peek.h"
 #import "Patches/HideToolbar/HideToolbar.h"
 
 static const NSTimeInterval DPGlowCycle = 2;

@@ -1,63 +1,8 @@
-#import "Patches/Peek/Peek.h"
-
-static id DPTabState(NSView *tab) {
-    return DPSwiftValue(DPSwiftValue(DPSwiftValue(tab, @"viewModel"), @"stateSubject"), @"currentValue");
-}
-
-// selectionStyle is nil on an unselected pinned tab, "none" on other unselected tabs, above/below beside the selection.
-static BOOL DPStateSelected(id state) {
-    NSString *style = [[DPSwiftValue(state, @"selectionStyle") description] lowercaseString];
-    return style && ![style isEqualToString:@"nil"] && ![style containsString:@"none"] && ![style containsString:@"above"] && ![style containsString:@"below"];
-}
+#import "Peek.h"
 
 static BOOL DPTabSelected(NSView *tab) { return DPStateSelected(DPTabState(tab)); }
 
-static NSView *DPFindTabIn(NSWindow *window, BOOL (^match)(NSView *tab)) {
-    const char *kinds[2] = {DPDiaTabView, DPDiaPinnedTab};
-    for (int i = 0; i < 2; i++)
-        for (NSView *tab in DPFindViews(kinds[i]))
-            if ((!window || tab.window == window) && !tab.isHiddenOrHasHiddenAncestor && match(tab)) return tab;
-    return nil;
-}
-
-static NSString *DPPeekPageID(id page) {
-    static NSArray<NSString *> *keys;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{ keys = @[@"identifier", @"id", @"contentID", @"contentId", @"uuid"]; });
-    for (NSString *key in keys) {
-        NSString *value = [DPSwiftValue((NSObject *)page, key) description];
-        if (value.length >= 32 && [value containsString:@"-"]) return value;
-    }
-    return nil;
-}
-
-static NSView *DPTabShowing(NSWindow *window, NSString *pageID, BOOL anyWindow) {
-    __block NSView *selected = nil;
-    NSView *exact = DPFindTabIn(anyWindow ? nil : window, ^BOOL(NSView *tab) {
-        id state = DPTabState(tab);
-        if (pageID && [[state description] containsString:pageID]) return YES;
-        if (!selected && (!window || tab.window == window) && DPStateSelected(state)) selected = tab;
-        return NO;
-    });
-    return exact ?: selected;
-}
-
-static NSView *DPPeekOriginTab(NSWindow *window, id source) { return DPTabShowing(window, DPPeekPageID(source), NO); }
-
-static char DPPinnedRowKey;
-
-// Icon tiles' links already open new tabs; a pinned row's don't, and only its context menu says it is pinned.
-// Several hooks ask about the same click and the menu is costly to build, so an answer holds for half a second.
-BOOL DPPeekInPinnedRow(NSWindow *window, id page) {
-    NSArray *memo = page ? DPGet(page, &DPPinnedRowKey) : nil;
-    CFTimeInterval now = CACurrentMediaTime();
-    if (memo && [memo[2] nonretainedObjectValue] == window && now - [memo[1] doubleValue] < 0.5) return [memo[0] boolValue];
-    NSView *tab = DPTabShowing(window, DPPeekPageID(page), YES);
-    NSMenuItem *unpin = tab && !DPIsKind(tab, DPDiaPinnedTab) ? [DPTabContextMenu(tab) itemWithTitle:@"Unpin"] : nil;
-    BOOL pinned = unpin && !unpin.hidden && unpin.enabled;
-    if (page) DPSet(page, &DPPinnedRowKey, @[ @(pinned), @(now), [NSValue valueWithNonretainedObject:window] ]);
-    return pinned;
-}
+static NSView *DPPeekOriginTab(NSWindow *window, id source) { return DPTabShowing(window, DPPageID(source), NO); }
 
 static NSString *DPPeekTabContentKey(NSView *tab) {
     NSString *state = [DPTabState(tab) description];

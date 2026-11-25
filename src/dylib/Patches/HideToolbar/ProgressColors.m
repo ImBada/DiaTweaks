@@ -1,7 +1,7 @@
 #import "HideToolbar.h"
 #import <Metal/Metal.h>
 
-extern DPPatch DPPeek;
+BOOL DPSamplesProgressColors;
 static char DPDiaColorsKey;
 // TLS so Chromium/Skia background Metal encoders never race on or misattribute the main thread's indicator draw.
 static _Thread_local void *DPDrawing;
@@ -71,7 +71,7 @@ void DPProgressColors(NSView *pane, NSString *choice, simd_float3 *primary, simd
 }
 
 static void DPIndicator_drawInMTKView(id self, SEL _cmd, id view) {
-    if (!(DPHideToolbar.on && DPShowLoadingProgress.on) && !DPPeek.on) return DPCallOriginal(DPIndicator_drawInMTKView, self, view);
+    if (!(DPHideToolbar.on && DPShowLoadingProgress.on) && !DPSamplesProgressColors) return DPCallOriginal(DPIndicator_drawInMTKView, self, view);
     void *prev = DPDrawing;
     DPDrawing = (__bridge void *)self;
     DPCallOriginal(DPIndicator_drawInMTKView, self, view);

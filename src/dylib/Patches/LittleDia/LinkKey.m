@@ -1,7 +1,7 @@
-#import "Patches/Peek/Peek.h"
+#import "Patches/LittleDia/LittleDia.h"
 
 // Normalize status text and click URLs identically without handing paths to NSURL, whose double-escaping varies across macOS versions.
-NSString *DPPeekLinkKey(NSString *address) {
+NSString *DPLittleDiaLinkKey(NSString *address) {
     static NSCharacterSet *legal, *delims;
     static NSRegularExpression *barePercent;
     static dispatch_once_t once;

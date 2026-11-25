@@ -1,4 +1,4 @@
-#import "Patches/Peek/Peek.h"
+#import "Peek.h"
 #import "Commands/GroupTabs/GroupTabs.h"
 #import "Patches/CommandBar/Tabs.h"
 #import <objc/message.h>
