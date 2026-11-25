@@ -344,12 +344,12 @@ int main(void) {
         CHECK(DPZonePanel == firstZone && firstZone.parentWindow == dragWindow && zones(dragWindow) == 1,
               "the fade-out's pending removal leaves the reused panel in place");
         DPPeekHideDragZone();
-        DPDrainMainQueue(0.08);
-        CHECK(zones(dragWindow) == 0 && firstZone.parentWindow == nil, "a hidden zone is taken off its window once the fade-out ends");
+        CHECK(DPPumpUntil(^BOOL { return zones(dragWindow) == 0 && firstZone.parentWindow == nil; }),
+              "a hidden zone is taken off its window once the fade-out ends");
         DPShowZone(dragWindow, NSMakePoint(100, 100));
         CHECK(DPZonePanel != firstZone && zones(dragWindow) == 1, "a drag after the fade-out gets a fresh panel");
         DPPeekHideDragZone();
-        DPDrainMainQueue(0.08);
+        CHECK(DPPumpUntil(^BOOL { return zones(dragWindow) == 0 && DPZoneLeaving == nil; }), "the last hidden zone leaves its window too");
         DPPeekDragZoneFade = 0.35;
         [dragWindow close];
 
