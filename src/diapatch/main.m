@@ -824,6 +824,7 @@ static BOOL apply(void) {
         return unstage() && say(@"kept the official Dia %@ at %@; run `diapatch install` to patch it", versionOf(gApp), gApp);
     NSString *signature = signatureOf(gApp);
     if (!(moveBundle(gStaged, gApp) && removeTree(gReady))) return NO;
+    DPRegisterApp(gApp);
     forgetScreenRecordingIfResigned(signature);
     return say(@"installed patched Dia %@ at %@", versionOf(gApp), gApp);
 }
@@ -985,6 +986,7 @@ static BOOL uninstall(BOOL purgeFiles) {
             removeTree(copy);
             return NO;
         }
+        DPRegisterApp(gApp);
     }
     forgetScreenRecordingIfResigned(signature);
     say(@"%@ is the official Dia %@", gApp, versionOf(gApp));
@@ -1084,7 +1086,7 @@ static const char kUsage[] =
     "                   list, compile or check the tweaks in DiaPatches/local\n"
     "environment: DIAPATCH_IDENTITY (codesigning identity, remembered by install), DIAPATCH_HOME,\n"
     "  DIAPATCH_APP (remembered by install), DIAPATCH_CACHE, DIAPATCH_FEED, DIAPATCH_RELEASES, DIAPATCH_COMMIT (the source commit installed), DIAPATCH_COMPARE, DIATWEAKS_LINK_DIR, DIAPATCH_NO_RELAUNCH (ignore --relaunch)\n"
-    "  DIAPATCH_HOME (also keeps apply and uninstall from clearing Dia's Screen Recording permission)\n"
+    "  DIAPATCH_HOME (also keeps install, apply and uninstall from clearing Dia's Screen Recording permission or changing Launch Services)\n"
     "  DIAPATCH_ALLOW_ROOT (lets root run commands that change files)\n";
 
 static NSString *findDia(void) {

@@ -325,6 +325,59 @@ static void testUninstallPreservesStateWhenPristineMissing(NSString *dir) {
     expect(exists(helper), @"failed uninstall does not tear down relay/files before pristine check");
 }
 
+static BOOL makeFakeDia(NSString *app, NSString *executable) {
+    NSString *macOS = [app stringByAppendingPathComponent:@"Contents/MacOS"];
+    return makeDir(macOS)
+        && [@{ @"CFBundleExecutable" : @"Dia", @"CFBundleIdentifier" : @"company.thebrowser.dia", @"CFBundleShortVersionString" : @"1.0", @"CFBundleVersion" : @"1" }
+               writeToFile:[app stringByAppendingPathComponent:@"Contents/Info.plist"] atomically:YES]
+        && [NSFileManager.defaultManager copyItemAtPath:executable toPath:[macOS stringByAppendingPathComponent:@"Dia"] error:NULL];
+}
+
+static NSArray<NSString *> *lsregisterCalls(NSString *log) {
+    NSString *text = [NSString stringWithContentsOfFile:log encoding:NSUTF8StringEncoding error:NULL];
+    return [[text componentsSeparatedByString:@"\n"] filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"length > 0"]];
+}
+
+static void testRegistersAfterSwap(NSString *dir) {
+    NSString *log = [dir stringByAppendingPathComponent:@"lsregister.log"], *source = [dir stringByAppendingPathComponent:@"fake-dia.c"];
+    NSString *executable = [dir stringByAppendingPathComponent:@"fake-dia"], *domain = [dir stringByAppendingPathComponent:@"register-prefs"];
+    gHome = [dir stringByAppendingPathComponent:@"register-home"];
+    gCache = [dir stringByAppendingPathComponent:@"register-cache"];
+    gApp = [dir stringByAppendingPathComponent:@"Registered/Dia.app"];
+    gPristine = inHome(@"pristine/Dia.app");
+    gStaged = inHome(@"staged/Dia.app");
+    gReady = inHome(@"staged/ready");
+    [@"int main(void) { return 0; }\n" writeToFile:source atomically:YES encoding:NSUTF8StringEncoding error:NULL];
+    BOOL ready = run(@[ @"/usr/bin/clang", @"-Wl,-headerpad,0x4000", @"-o", executable, source ], NULL) == 0 && makeDir(gHome)
+        && makeFakeDia(gApp, executable) && makeFakeDia(gPristine, executable)
+        && [@"dylib" writeToFile:inHome(@DYLIB) atomically:YES encoding:NSUTF8StringEncoding error:NULL];
+    expect(ready, @"a stand-in Dia and its pristine copy are made");
+    if (!ready) return;
+
+    setenv("DIATWEAKS_DOMAIN", domain.fileSystemRepresentation, 1);
+    setenv("DIAPATCH_IDENTITY", "-", 1);
+    setenv("DIAPATCH_LSREGISTER_LOG", log.fileSystemRepresentation, 1);
+    gFailure = nil;
+    expect(install(NO) && isPatched(gApp), @"install builds and applies a patched Dia");
+    NSArray<NSString *> *expected = @[ [@"-u " stringByAppendingString:gPristine], [@"-u " stringByAppendingString:gStaged], [@"-f " stringByAppendingString:gApp] ];
+    expect([lsregisterCalls(log) isEqual:expected], @"install forgets the pristine and staged copies, then registers the installed Dia last");
+
+    removeTree(log);
+    expect(build(gPristine) && exists(gStaged), @"a staged update is built");
+    expect([lsregisterCalls(log) isEqual:@[ [@"-u " stringByAppendingString:gStaged] ]], @"building forgets the staged copy");
+    removeTree(log);
+    expect(apply() && !exists(gStaged), @"apply installs the staged update");
+    expect([lsregisterCalls(log) isEqual:@[ [@"-f " stringByAppendingString:gApp] ]], @"apply registers the installed Dia after the swap");
+
+    removeTree(log);
+    expect(uninstall(NO) && !isPatched(gApp), @"uninstall puts the official Dia back");
+    expect([lsregisterCalls(log) isEqual:@[ [@"-f " stringByAppendingString:gApp] ]], @"uninstall registers the restored Dia");
+
+    unsetenv("DIAPATCH_LSREGISTER_LOG");
+    unsetenv("DIAPATCH_IDENTITY");
+    unsetenv("DIATWEAKS_DOMAIN");
+}
+
 static void testRootGuard(void) {
     unsetenv("DIAPATCH_ALLOW_ROOT");
     expect(refusesRoot(@"install", 0) && refusesRoot(@"apply", 0) && refusesRoot(@"local", 0), @"root can't change Dia or local tweaks");
@@ -445,6 +498,7 @@ int main(void) {
         gCommand = "test";
         NSString *dir = [NSTemporaryDirectory() stringByAppendingPathComponent:[NSString stringWithFormat:@"diapatch-test-%@", NSUUID.UUID.UUIDString]];
         makeDir(dir);
+        setenv("DIAPATCH_HOME", dir.fileSystemRepresentation, 1);
         testMachO(dir);
         testMoveAndResumeApplyTweaks(dir);
         testNewer();
@@ -461,6 +515,7 @@ int main(void) {
         testMoveDiagnosis(dir);
         testShield();
         testRememberedDia(dir);
+        testRegistersAfterSwap(dir);
         removeTree(dir);
     }
     if (!gFailures) puts("all diapatch checks passed");

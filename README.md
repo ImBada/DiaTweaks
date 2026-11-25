@@ -164,7 +164,7 @@ Dia shows a QR code or asks for a USB security key because it can't reach the pa
 <details>
 <summary><strong>Why don't website notifications show a banner?</strong></summary>
 
-After DiaTweaks signs Dia locally, website notification banners have been reported missing on macOS 27.2.1 even with **Dia** switched on under **System Settings → Notifications** (with the page reporting an error while site sound still plays). We haven't reproduced it on macOS 27.0.1 yet, and we're still tracking down which check macOS 27.2.1 fails on. Until we have a fix, run `diatweaks restore` to go back to the original Dia: banners come back, and the tweaks turn off. [What we found →](https://github.com/JaceThings/DiaTweaks/wiki/Discoveries-Notifications)
+Website notifications work in a locally signed Dia on macOS 27: the system services that show them all accept DiaTweaks' signature. If a banner is missing, check two things first. The site needs permission to send notifications (click the site button in the address bar if you missed the prompt), and **Dia** needs to be switched on with **Banners** or **Alerts** under **System Settings → Notifications**. If you updated from DiaTweaks 1.1.9 or earlier and banners stay hidden while the site's sound still plays, Notification Center may be holding a stale entry from before DiaTweaks registered Dia again after swapping it in. Run `diatweaks update`, then run `killall NotificationCenter` once in Terminal so Notification Center loads Dia again. [What we found →](https://github.com/JaceThings/DiaTweaks/wiki/Discoveries-Notifications)
 
 </details>
 
