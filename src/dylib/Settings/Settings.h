@@ -70,8 +70,16 @@ NSColor *DPTintColor(NSString *tint);
 @property (nonatomic, readonly) NSArray<NSString *> *unknownKeys, *warnings, *relaunchTitles;
 @end
 
+@interface DPConfigPreview : NSObject
+@property (nonatomic, readonly) NSUInteger changes, resets;
+@property (nonatomic, readonly) NSArray<NSString *> *unknownKeys, *warnings;
+@property (nonatomic, readonly) BOOL setsLaunchFlags;
+- (BOOL)isEmpty;
+@end
+
 NSData *DPExportConfigJSON(NSError **error);
 DPConfigImport *DPImportConfigData(NSData *data, BOOL replace, NSError **error);
+DPConfigPreview *DPPreviewConfigData(NSData *data, BOOL replace, NSError **error);
 
 @interface DPPreviewView : DPFillView
 - (instancetype)initWithKey:(NSString *)key;

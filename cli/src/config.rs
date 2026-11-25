@@ -9,6 +9,7 @@ use std::{
 
 use anyhow::{anyhow, bail, Result};
 use core_foundation::{
+    array::CFArray,
     base::{CFType, TCFType},
     boolean::CFBoolean,
     dictionary::CFDictionary,
@@ -59,6 +60,19 @@ struct Plan {
     settings: BTreeMap<String, Value>,
     unknown: Vec<String>,
     warnings: Vec<String>,
+}
+
+/// What an import would change, worked out before anything is written.
+#[derive(Default)]
+struct Prepared {
+    changes: Vec<usize>,
+    wanted: Vec<bool>,
+    sets: Vec<(usize, bool)>,
+    clears: Vec<usize>,
+    settings: Vec<(String, CFType)>,
+    cleared_settings: Vec<String>,
+    resets: Vec<String>,
+    affected: Vec<usize>,
 }
 
 fn portable_patch(patch: &Patch) -> bool {
@@ -174,6 +188,19 @@ fn write_atomically(path: &Path, text: &str) -> Result<()> {
 }
 
 pub fn import(env: &Env, ui: &Ui, path: Option<PathBuf>, replace: bool) -> Result<()> {
+    let (manifest, name, plan) = load(env, ui, path)?;
+    let _lock = lock::acquire(env, ui)?;
+    let prefs = Prefs::new(&env.domain);
+    announce(ui, &manifest, &plan);
+    let prepared = Prepared::new(&manifest, &prefs, &plan, replace);
+    if prepared.is_empty() {
+        ui.done(format!("Already matches {name}: nothing to change."));
+        return Ok(());
+    }
+    commit(env, ui, &manifest, &prefs, &prepared, &name)
+}
+
+fn load(env: &Env, ui: &Ui, path: Option<PathBuf>) -> Result<(Manifest, String, Plan)> {
     let manifest = Manifest::load(env)?;
     let path = match path {
         Some(path) => path,
@@ -186,80 +213,129 @@ pub fn import(env: &Env, ui: &Ui, path: Option<PathBuf>, replace: bool) -> Resul
         path.display().to_string()
     };
     let plan = Plan::parse(&manifest, &read_text(&path, &name)?, &name)?;
+    Ok((manifest, name, plan))
+}
 
-    let _lock = lock::acquire(env, ui)?;
-    let prefs = Prefs::new(&env.domain);
-    let before = manifest.state(&prefs);
-    let mut wanted = before.clone();
-    let mut reset = Vec::new();
-    for (index, patch) in manifest.patches.iter().enumerate() {
-        if let Some(&on) = plan.tweaks.get(&index) {
-            if on != before[index] {
-                prefs.set(&patch.key, on);
-            }
-            wanted[index] = on;
-        } else if replace && portable_patch(patch) && prefs.raw(&patch.key).is_some() {
-            prefs.clear(&patch.key);
-            wanted[index] = patch.default_on;
-            reset.push(patch.key.as_str());
-        }
-    }
-    let changes: Vec<usize> = (0..wanted.len())
-        .filter(|&index| wanted[index] != before[index])
-        .collect();
-    let mut affected = changes.clone();
-
-    let mut updated = Vec::new();
-    for (key, setting) in portable(&manifest) {
-        match plan.settings.get(key) {
-            Some(value) if read(&prefs, key, &setting.kind).as_ref() != Some(value) => {
-                if let Some(value) = cf(value) {
-                    prefs.set_value(key, &value);
-                }
-                updated.push(key);
-                if wanted[setting.index] && !affected.contains(&setting.index) {
-                    affected.push(setting.index);
-                }
-            }
-            None if replace && prefs.raw(key).is_some() => {
-                prefs.clear(key);
-                reset.push(key);
-            }
-            _ => {}
-        }
-    }
-
+fn announce(ui: &Ui, manifest: &Manifest, plan: &Plan) {
     for warning in &plan.warnings {
         ui.warn(warning);
     }
     if !plan.unknown.is_empty() {
         ui.warn(format!("Skipped unknown keys: {}", plan.unknown.join(", ")));
     }
-    if changes.len() + updated.len() + reset.len() == 0 {
-        ui.done(format!(
-            "Nothing to change: this Mac already matches {name}."
-        ));
-        return Ok(());
+    if plan.sets_launch_flags(manifest) {
+        ui.warn("This file sets Launch Flags, which open Dia with extra options. Only import launch flags from someone you trust.");
     }
+}
+
+impl Prepared {
+    fn new(manifest: &Manifest, prefs: &Prefs, plan: &Plan, replace: bool) -> Self {
+        let before = manifest.state(prefs);
+        let mut wanted = before.clone();
+        let mut prepared = Self {
+            wanted: wanted.clone(),
+            ..Self::default()
+        };
+        for (index, patch) in manifest.patches.iter().enumerate() {
+            if let Some(&on) = plan.tweaks.get(&index) {
+                if on != before[index] {
+                    prepared.sets.push((index, on));
+                }
+                wanted[index] = on;
+            } else if replace && portable_patch(patch) && prefs.raw(&patch.key).is_some() {
+                prepared.clears.push(index);
+                prepared.resets.push(patch.key.clone());
+                wanted[index] = patch.default_on;
+            }
+        }
+        prepared.changes = (0..wanted.len())
+            .filter(|&index| wanted[index] != before[index])
+            .collect();
+        prepared.wanted = wanted;
+
+        let mut tuned = Vec::new();
+        for (key, setting) in portable(manifest) {
+            match plan.settings.get(key) {
+                Some(value) if read(prefs, key, &setting.kind).as_ref() != Some(value) => {
+                    if let Some(value) = cf(value) {
+                        prepared.settings.push((key.to_string(), value));
+                        tuned.push(setting.index);
+                    }
+                }
+                None if replace && prefs.raw(key).is_some() => {
+                    prepared.cleared_settings.push(key.to_string());
+                    prepared.resets.push(key.to_string());
+                }
+                _ => {}
+            }
+        }
+        prepared.affected = prepared.changes.clone();
+        for index in tuned {
+            if prepared.wanted[index] && !prepared.affected.contains(&index) {
+                prepared.affected.push(index);
+            }
+        }
+        prepared
+    }
+
+    fn is_empty(&self) -> bool {
+        self.tweaks() == 0 && self.settings.is_empty() && self.cleared_settings.is_empty()
+    }
+
+    fn tweaks(&self) -> usize {
+        self.changes.len()
+    }
+
+    fn apply(&self, manifest: &Manifest, prefs: &Prefs) {
+        for &index in &self.clears {
+            prefs.clear(&manifest.patches[index].key);
+        }
+        for &(index, on) in &self.sets {
+            prefs.set(&manifest.patches[index].key, on);
+        }
+        for (key, value) in &self.settings {
+            prefs.set_value(key, value);
+        }
+        for key in &self.cleared_settings {
+            prefs.clear(key);
+        }
+    }
+}
+
+fn commit(
+    env: &Env,
+    ui: &Ui,
+    manifest: &Manifest,
+    prefs: &Prefs,
+    prepared: &Prepared,
+    name: &str,
+) -> Result<()> {
+    prepared.apply(manifest, prefs);
     prefs.save()?;
-    for &index in &changes {
+    for &index in &prepared.changes {
         ui.success(format!(
             "Turned {} {}.",
-            on_off(wanted[index]),
+            on_off(prepared.wanted[index]),
             manifest.title(index)
         ));
     }
-    if !updated.is_empty() {
+    if !prepared.settings.is_empty() {
+        let updated: Vec<&str> = prepared
+            .settings
+            .iter()
+            .map(|(key, _)| key.as_str())
+            .collect();
         ui.success(format!("Updated {}.", updated.join(", ")));
     }
-    if !reset.is_empty() {
+    if !prepared.resets.is_empty() {
         ui.info(format!(
             "Reset to defaults ({}): {}.",
-            reset.len(),
-            reset.join(", ")
+            prepared.resets.len(),
+            prepared.resets.join(", ")
         ));
     }
-    if affected
+    if prepared
+        .affected
         .iter()
         .any(|&index| manifest.patches[index].key == "appIcon")
     {
@@ -267,10 +343,17 @@ pub fn import(env: &Env, ui: &Ui, path: Option<PathBuf>, replace: bool) -> Resul
     }
     ui.success(format!(
         "Imported {name}: {} and {} changed.",
-        count(changes.len(), "tweak"),
-        count(updated.len(), "setting")
+        count(prepared.tweaks(), "tweak"),
+        count(prepared.settings.len(), "setting")
     ));
-    tweaks::finish_changes(env, ui, &manifest, &affected, &wanted, false);
+    tweaks::finish_changes(
+        env,
+        ui,
+        manifest,
+        &prepared.affected,
+        &prepared.wanted,
+        false,
+    );
     Ok(())
 }
 
@@ -304,9 +387,33 @@ pub fn menu(env: &Env, ui: &Ui) -> Result<()> {
         Choice::Export => export(env, ui, Some(ask_path(env, "Save to")?)),
         Choice::Merge | Choice::Replace => {
             let path = ask_path(env, "Settings file to import")?;
-            import(env, ui, Some(path), choice == Choice::Replace)
+            preview(env, ui, path, choice == Choice::Replace)
         }
     }
+}
+
+/// The menu's import: show what would change, then apply it once the person agrees.
+fn preview(env: &Env, ui: &Ui, path: PathBuf, replace: bool) -> Result<()> {
+    let (manifest, name, plan) = load(env, ui, Some(path))?;
+    let _lock = lock::acquire(env, ui)?;
+    let prefs = Prefs::new(&env.domain);
+    announce(ui, &manifest, &plan);
+    let prepared = Prepared::new(&manifest, &prefs, &plan, replace);
+    if prepared.is_empty() {
+        ui.done(format!("Already matches {name}: nothing to change."));
+        return Ok(());
+    }
+    let mut summary = vec![count(prepared.tweaks(), "tweak")];
+    let settings = prepared.settings.len() + prepared.cleared_settings.len();
+    if settings > 0 {
+        summary.push(count(settings, "setting"));
+    }
+    ui.info(format!("{name} changes {}.", summary.join(" and ")));
+    if !ui.proceed(format!("Import these changes from {name}?"))? {
+        ui.info("Nothing changed.");
+        return Ok(());
+    }
+    commit(env, ui, &manifest, &prefs, &prepared, &name)
 }
 
 fn ask_path(env: &Env, question: &str) -> Result<PathBuf> {
@@ -344,6 +451,24 @@ fn read_text(path: &Path, name: &str) -> Result<String> {
 }
 
 impl Plan {
+    /// Launch Flags run an arbitrary-args path, so an import that sets them needs a warning.
+    fn sets_launch_flags(&self, manifest: &Manifest) -> bool {
+        let on = manifest
+            .index("launchFlags")
+            .is_some_and(|index| self.tweaks.get(&index) == Some(&true));
+        let args = self
+            .settings
+            .get("launchFlagsArgs")
+            .and_then(Value::as_str)
+            .is_some_and(|text| {
+                text.lines().any(|line| {
+                    let line = line.trim();
+                    !line.is_empty() && !line.starts_with('#')
+                })
+            });
+        on || args
+    }
+
     fn parse(manifest: &Manifest, text: &str, name: &str) -> Result<Self> {
         let top = match serde_json::from_str(text) {
             Ok(Value::Object(top)) => top,
@@ -568,11 +693,44 @@ fn read(prefs: &Prefs, key: &str, kind: &Kind<'_>) -> Option<Value> {
     match kind {
         Kind::Bool => as_bool(&value).map(Value::Bool),
         Kind::Number(..) => json_number(value.downcast::<CFNumber>()?.to_f64()?),
+        Kind::Text if key == "launchFlagsArgs" => Some(Value::String(launch_flags_text(&value)?)),
         Kind::Text | Kind::Choice(_) => {
             Some(Value::String(value.downcast::<CFString>()?.to_string()))
         }
         Kind::Shortcut => read_shortcut(&value),
     }
+}
+
+// Older versions saved launch flags as an array of flags, which Launch Flags still reads.
+fn launch_flags_text(value: &CFType) -> Option<String> {
+    if let Some(text) = value.downcast::<CFString>() {
+        return Some(text.to_string());
+    }
+    let mut flags = Vec::new();
+    for item in value.downcast::<CFArray>()?.iter() {
+        let item = unsafe { CFType::wrap_under_get_rule(*item) };
+        let Some(text) = item.downcast::<CFString>() else {
+            continue;
+        };
+        let text = text.to_string();
+        if !text.is_empty() {
+            flags.push(quote_flag(&text));
+        }
+    }
+    Some(flags.join("\n"))
+}
+
+// Mirrors DPFormatLaunchFlagsArray, so a legacy array exports the text the tweak reads.
+fn quote_flag(text: &str) -> String {
+    let quote = text.starts_with('#')
+        || text
+            .chars()
+            .any(|c| c.is_whitespace() || matches!(c, '"' | '\'' | '\\'));
+    if !quote {
+        return text.to_string();
+    }
+    let escaped = text.replace('\\', "\\\\").replace('"', "\\\"");
+    format!("\"{escaped}\"")
 }
 
 fn read_shortcut(value: &CFType) -> Option<Value> {

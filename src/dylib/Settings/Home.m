@@ -152,9 +152,23 @@ static NSString *DPUpdateSummary(DPUpdates *updates) {
 }
 
 - (void)confirmImport:(NSData *)data {
+    NSError *error = nil;
+    DPConfigPreview *merge = DPPreviewConfigData(data, NO, &error);
+    DPConfigPreview *replace = merge ? DPPreviewConfigData(data, YES, &error) : nil;
+    if (!replace) return [self report:@"Couldn’t import settings" text:error.localizedDescription];
+    if (merge.isEmpty && replace.isEmpty) return [self alreadyMatches:merge];
+
+    NSMutableArray<NSString *> *lines = [NSMutableArray new];
+    NSString *merged = merge.changes ? [NSString stringWithFormat:@"Merge changes %@.", DPTally(merge.changes, @"value")] : @"Merge changes nothing.";
+    NSString *replaced = [NSString stringWithFormat:@"Replace All changes %@.", DPTally(replace.changes, @"value")];
+    if (replace.resets) replaced = [replaced stringByAppendingFormat:@" It also resets %@ to defaults.", DPTally(replace.resets, @"value")];
+    [lines addObject:merged];
+    [lines addObject:[replaced stringByAppendingString:@" Your local tweaks aren’t touched."]];
+    [self addNotes:merge to:lines];
+
     NSAlert *alert = [NSAlert new];
     alert.messageText = @"Import settings?";
-    alert.informativeText = @"Merge changes only what the file mentions. Replace All also puts every other tweak and setting back to its default.";
+    alert.informativeText = [lines componentsJoinedByString:@"\n"];
     for (NSString *title in @[ @"Merge", @"Replace All", @"Cancel" ]) [alert addButtonWithTitle:title];
     DPPresentAlert(alert, self.window, ^(NSModalResponse response) {
         if (response == NSAlertThirdButtonReturn) return;
@@ -163,6 +177,26 @@ static NSString *DPUpdateSummary(DPUpdates *updates) {
         if (result) [self summarize:result];
         else [self report:@"Couldn’t import settings" text:error.localizedDescription];
     });
+}
+
+static NSString *DPTally(NSUInteger count, NSString *noun) {
+    return [NSString stringWithFormat:@"%lu %@%@", count, noun, count == 1 ? @"" : @"s"];
+}
+
+- (void)addNotes:(DPConfigPreview *)preview to:(NSMutableArray<NSString *> *)lines {
+    [lines addObjectsFromArray:preview.warnings];
+    if (preview.unknownKeys.count) [lines addObject:[@"Skipped what this version doesn’t know: " stringByAppendingFormat:@"%@.", [preview.unknownKeys componentsJoinedByString:@", "]]];
+    if (preview.setsLaunchFlags) [lines addObject:@"Launch Flags opens Dia with extra options. Only import launch flags from someone you trust."];
+}
+
+- (void)alreadyMatches:(DPConfigPreview *)preview {
+    NSMutableArray<NSString *> *lines = [NSMutableArray arrayWithObject:@"Nothing in the file differs from this Mac, so nothing needs to change."];
+    [self addNotes:preview to:lines];
+    NSAlert *alert = [NSAlert new];
+    alert.messageText = @"Already matches";
+    alert.informativeText = [lines componentsJoinedByString:@"\n"];
+    [alert addButtonWithTitle:@"OK"];
+    DPPresentAlert(alert, self.window, ^(NSModalResponse response) {});
 }
 
 - (void)summarize:(DPConfigImport *)result {

@@ -1,5 +1,6 @@
 #import <AppKit/AppKit.h>
 #import <objc/runtime.h>
+#include <notify.h>
 #import "SafeMode/SafeMode.h"
 #import "StdPatch/StdPatch.h"
 #import "Settings/Settings.h"
@@ -142,8 +143,50 @@ static const DPSetting *DPDeclared(DPPatch *patch, NSString *key) {
     return NULL;
 }
 
-static int gApplied;
+static int gApplied, gPatchesChanged;
 static void DPCountApply(DPPatch *patch) { gApplied++; }
+
+@interface DPConfigSpy : NSObject
+@end
+@implementation DPConfigSpy
+- (void)patchesChanged:(NSNotification *)note { gPatchesChanged++; }
+@end
+
+static void DPPumpNotifications(double seconds) {
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:seconds];
+    while ([deadline timeIntervalSinceNow] > 0) [[NSRunLoop mainRunLoop] runMode:NSDefaultRunLoopMode beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
+}
+
+static void DPCheckSingleApply(void) {
+    DPConfigSpy *spy = [DPConfigSpy new];
+    [NSNotificationCenter.defaultCenter addObserver:spy selector:@selector(patchesChanged:) name:DPPatchesDidChangeNotification object:nil];
+    DPWatchSavedSettings();
+
+    DPPatch *corners = DPPatchNamed(@"windowCorners");
+    void (*cornersApply)(DPPatch *) = corners->apply;
+    DPSaveOn(@"windowCorners", YES);
+    corners->apply = DPCountApply;
+    DPSafeMode = 0;
+    gApplied = 0;
+    gPatchesChanged = 0;
+    DPImport(@"{\"version\": 1, \"settings\": {\"windowCornerRadius\": 9}}", NO);
+    DPSafeMode = 1;
+    expectEqual(@(gApplied), @1, @"importing applies each changed tweak once");
+    expectEqual(@(gPatchesChanged), @1, @"and tells the rows once");
+    DPPumpNotifications(0.5);
+    expectEqual(@(gApplied), @1, @"and the import isn't applied a second time later");
+    expectEqual(@(gPatchesChanged), @1, @"or announced twice");
+
+    notify_post([DPSettingsDomain() stringByAppendingString:@".changed"].UTF8String);
+    for (NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:2]; gPatchesChanged < 2 && [deadline timeIntervalSinceNow] > 0;)
+        DPPumpNotifications(0.05);
+    expectEqual(@(gPatchesChanged), @2, @"so a notification from elsewhere still reaches Dia's watcher");
+
+    corners->apply = cornersApply;
+    DPSaveOn(@"windowCorners", NO);
+    [NSNotificationCenter.defaultCenter removeObserver:spy];
+    DPPumpNotifications(0.2);
+}
 
 static void DPCheckExperimentalData(void) {
     NSMutableArray<NSString *> *flagged = [NSMutableArray new];
@@ -415,6 +458,65 @@ static void DPCheckImport(NSUserDefaults *defaults) {
     expect(!DPImportConfigData([NSMutableData dataWithLength:2 << 20], NO, &tooBig) && tooBig, @"a file far bigger than any settings file is rejected");
 }
 
+static void DPCheckPreview(NSUserDefaults *defaults) {
+    [defaults removePersistentDomainForName:gDomain];
+    DPApplySavedSettings();
+
+    NSData *clean = DPExportConfigJSON(NULL);
+    DPConfigPreview *merge = DPPreviewConfigData(clean, NO, NULL);
+    DPConfigPreview *replace = DPPreviewConfigData(clean, YES, NULL);
+    expect(merge && replace, @"an export can be previewed");
+    expect([merge isEmpty] && [replace isEmpty], @"and already matches the Mac it came from");
+    expectEqual(@(merge.unknownKeys.count), @0, @"with nothing to skip");
+    expect(!merge.setsLaunchFlags, @"and no launch flags to warn about");
+
+    [defaults setObject:@"small" forKey:@"compactTabRowsSize"];
+    [defaults setObject:@"window" forKey:@"commandBarPosition"];
+    NSString *file = @"{\"version\": 1, \"tweaks\": {\"commandBar\": true}, \"settings\": {\"compactTabRowsSize\": \"compact\"}}";
+    NSDictionary *before = DPSaved();
+    merge = DPPreviewConfigData(DPData(file), NO, NULL);
+    replace = DPPreviewConfigData(DPData(file), YES, NULL);
+    expectEqual(@(merge.changes), @2, @"Merge counts the tweak and the choice it would change");
+    expectEqual(@(merge.resets), @0, @"and resets nothing");
+    expectEqual(@(replace.changes), @2, @"Replace All counts the same changes");
+    expectEqual(@(replace.resets), @1, @"plus each saved value it would put back to its default");
+    expectEqual(DPSaved(), before, @"a preview changes nothing");
+
+    for (NSString *flagsFile in @[ @"{\"version\": 1, \"tweaks\": {\"launchFlags\": true}}",
+                                   @"{\"version\": 1, \"settings\": {\"launchFlagsArgs\": \"--disable-gpu\"}}" ])
+        expect(DPPreviewConfigData(DPData(flagsFile), NO, NULL).setsLaunchFlags, [flagsFile stringByAppendingString:@" is flagged for the trust warning"]);
+    DPConfigPreview *note = DPPreviewConfigData(DPData(@"{\"version\": 1, \"settings\": {\"launchFlagsArgs\": \"# only a note\"}}"), NO, NULL);
+    expect(note && !note.setsLaunchFlags, @"a comment-only launch flags value sets nothing");
+
+    DPConfigPreview *skipped = DPPreviewConfigData(DPData(@"{\"version\": 1, \"settings\": {\"oldKnob\": 3}}"), NO, NULL);
+    expect(skipped && [skipped isEmpty] && [skipped.unknownKeys isEqual:@[ @"oldKnob" ]], @"a file that only names unknown keys is a no-op that says what it skipped");
+
+    [defaults setObject:@[ @"--disable-gpu", @"--foo=a b" ] forKey:@"launchFlagsArgs"];
+    NSDictionary *exported = DPParse(DPExportConfigJSON(NULL));
+    expectEqual(exported[@"settings"][@"launchFlagsArgs"], @"--disable-gpu\n\"--foo=a b\"", @"a launch flags array saved by an older version exports as the text the tweak reads");
+    DPConfigPreview *roundTrip = DPPreviewConfigData([NSJSONSerialization dataWithJSONObject:exported options:0 error:NULL], NO, NULL);
+    expect(roundTrip && [roundTrip isEmpty], @"and importing that text changes nothing");
+
+    [defaults setObject:@"maybe" forKey:@"commandBar"];
+    [defaults setObject:@{ @"a" : @"b" } forKey:@"windowCornerRadius"];
+    [defaults setObject:@[ @"not a shortcut" ] forKey:@"pinTabShortcutKey"];
+    exported = DPParse(DPExportConfigJSON(NULL));
+    expectEqual(exported[@"tweaks"][@"commandBar"], @NO, @"a switch saved as text exports what boolValue gives it");
+    expect(!exported[@"settings"][@"windowCornerRadius"] && !exported[@"settings"][@"pinTabShortcutKey"], @"a number saved as a dictionary and a shortcut saved as a list are left out");
+    NSString *oddFile = @"{\"version\": 1, \"tweaks\": {\"commandBar\": true}, \"settings\": {\"windowCornerRadius\": 8, \"pinTabShortcutKey\": {}}}";
+    DPConfigPreview *odd = DPPreviewConfigData(DPData(oddFile), NO, NULL);
+    expect(odd && odd.changes == 3, @"odd saved values still preview as changes");
+    DPConfigImport *fixed = DPImportConfigData(DPData(oddFile), NO, NULL);
+    expect(fixed && fixed.appliedCount == 3, @"and import over them");
+    exported = DPParse(DPExportConfigJSON(NULL));
+    expectEqual(exported[@"tweaks"][@"commandBar"], @YES, @"the switch takes the file's value");
+    expectEqual(exported[@"settings"][@"windowCornerRadius"], @8, @"the number does too");
+    expectEqual(exported[@"settings"][@"pinTabShortcutKey"], @{}, @"and so does the cleared shortcut");
+
+    [defaults removePersistentDomainForName:gDomain];
+    DPApplySavedSettings();
+}
+
 int main(void) {
     @autoreleasepool {
         [NSApplication sharedApplication];
@@ -494,6 +596,8 @@ int main(void) {
         expectEqual(DPExportConfigJSON(NULL), populated, @"an export of the import is the same bytes");
 
         DPCheckImport(defaults);
+        DPCheckSingleApply();
+        DPCheckPreview(defaults);
 
         [NSFileManager.defaultManager removeItemAtPath:home error:NULL];
         if (failures) {

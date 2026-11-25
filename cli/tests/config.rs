@@ -428,7 +428,7 @@ fn shortcuts_round_trip_including_a_cleared_one() {
     let saved = sandbox.run(&["export", "-"]);
     let rerun = sandbox.run_with_stdin(&["import", "-"], &out(&saved));
     assert!(rerun.status.success(), "{}", err(&rerun));
-    assert!(out(&rerun).contains("Nothing to change"));
+    assert!(out(&rerun).contains("Already matches standard input"));
 }
 
 #[test]
@@ -644,7 +644,7 @@ fn import_reads_standard_input_and_is_idempotent() {
 
     let second = sandbox.run_with_stdin(&["import", "-"], config);
     assert!(second.status.success());
-    assert!(out(&second).contains("Nothing to change: this Mac already matches standard input."));
+    assert!(out(&second).contains("Already matches standard input: nothing to change."));
 }
 
 #[test]
@@ -655,7 +655,7 @@ fn import_does_not_pin_tweaks_that_already_follow_their_default() {
         &[],
     );
     assert!(output.status.success());
-    assert!(out(&output).contains("Nothing to change"));
+    assert!(out(&output).contains("Already matches"));
     assert_eq!(sandbox.saved("windowMaterial"), None);
     assert_eq!(sandbox.saved("hideToolbar"), None);
 }
@@ -670,6 +670,110 @@ fn import_says_when_flags_or_relaunch_tweaks_need_dia_restarted() {
     assert!(output.status.success(), "{}", err(&output));
     assert!(out(&output).contains("Turned on Launch Flags."));
     assert!(out(&output).contains("Updated launchFlagsArgs."));
+}
+
+#[test]
+fn legacy_launch_flag_arrays_export_as_the_text_the_tweak_reads() {
+    let sandbox = Sandbox::new("legacy-flags");
+    let written = sandbox.defaults(&[
+        "write",
+        "launchFlagsArgs",
+        "-array",
+        "--disable-gpu",
+        "--foo=a b",
+        "--bar=1",
+    ]);
+    assert!(written.status.success(), "{}", err(&written));
+
+    let exported = sandbox.exported();
+    assert_eq!(
+        exported["settings"]["launchFlagsArgs"],
+        json!("--disable-gpu\n\"--foo=a b\"\n--bar=1")
+    );
+
+    let file = sandbox.write("legacy.json", &exported);
+    let imported = sandbox.run(&["import", file.to_str().unwrap()]);
+    assert!(imported.status.success(), "{}", err(&imported));
+    assert!(
+        out(&imported).contains("Already matches"),
+        "{}",
+        out(&imported)
+    );
+    assert_eq!(
+        sandbox.exported()["settings"]["launchFlagsArgs"],
+        exported["settings"]["launchFlagsArgs"]
+    );
+
+    let broken = Sandbox::new("legacy-flags-broken");
+    assert!(broken
+        .defaults(&["write", "launchFlagsArgs", "-array", "--ok", "broken"])
+        .status
+        .success());
+    let refused = broken.run(&["export", "-"]);
+    assert!(refused.status.success());
+    assert!(
+        err(&refused).contains("Left out launchFlagsArgs"),
+        "{}",
+        err(&refused)
+    );
+}
+
+#[test]
+fn imports_that_set_launch_flags_warn_about_trust() {
+    let sandbox = Sandbox::new("trust");
+    let on = sandbox.import(&json!({"version": 1, "tweaks": {"launchFlags": true}}), &[]);
+    assert!(on.status.success(), "{}", err(&on));
+    assert!(
+        err(&on).contains("Only import launch flags from someone you trust"),
+        "{}",
+        err(&on)
+    );
+
+    let args = sandbox.import(
+        &json!({"version": 1, "settings": {"launchFlagsArgs": "--disable-gpu"}}),
+        &[],
+    );
+    assert!(args.status.success(), "{}", err(&args));
+    assert!(err(&args).contains("Only import launch flags from someone you trust"));
+
+    let note = sandbox.import(
+        &json!({"version": 1, "settings": {"launchFlagsArgs": "# only a note"}}),
+        &[],
+    );
+    assert!(note.status.success(), "{}", err(&note));
+    assert!(!err(&note).contains("trust"), "{}", err(&note));
+
+    let off = sandbox.import(
+        &json!({"version": 1, "tweaks": {"launchFlags": false}}),
+        &[],
+    );
+    assert!(off.status.success(), "{}", err(&off));
+    assert!(!err(&off).contains("trust"), "{}", err(&off));
+}
+
+#[test]
+fn odd_saved_values_never_block_export_or_import() {
+    let sandbox = Sandbox::new("odd-values");
+    for args in [
+        &["write", "windowCornerRadius", "-dict", "a", "b"][..],
+        &["write", "pinTabShortcutKey", "-string", "D"],
+        &["write", "hideToolbar", "-dict", "a", "b"],
+    ] {
+        assert!(sandbox.defaults(args).status.success());
+    }
+    let output = sandbox.run(&["export", "-"]);
+    assert!(output.status.success(), "{}", err(&output));
+    let exported: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(exported["settings"], json!({}));
+    assert_eq!(exported["tweaks"]["hideToolbar"], false);
+
+    let fixed = sandbox.import(
+        &json!({"version": 1, "tweaks": {"hideToolbar": true}, "settings": {"windowCornerRadius": 8, "windowShadow": true}}),
+        &[],
+    );
+    assert!(fixed.status.success(), "{}", err(&fixed));
+    assert_eq!(sandbox.saved("windowCornerRadius").as_deref(), Some("8"));
+    assert_eq!(sandbox.saved("hideToolbar").as_deref(), Some("1"));
 }
 
 #[test]

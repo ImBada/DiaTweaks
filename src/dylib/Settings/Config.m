@@ -1,5 +1,4 @@
 #import "Settings.h"
-#include <notify.h>
 
 typedef enum { DPKeyChoice, DPKeyShortcut, DPKeySetting } DPKeyType;
 
@@ -20,11 +19,64 @@ typedef enum { DPKeyChoice, DPKeyShortcut, DPKeySetting } DPKeyType;
 @implementation DPConfigImport
 @end
 
+@interface DPConfigPreview ()
+@property (nonatomic) NSUInteger changes, resets;
+@property (nonatomic) NSArray<NSString *> *unknownKeys, *warnings;
+@property (nonatomic) BOOL setsLaunchFlags;
+@end
+
+@implementation DPConfigPreview
+- (BOOL)isEmpty { return !_changes && !_resets; }
+@end
+
+@interface DPConfigChanges : NSObject
+@property (nonatomic) NSMutableDictionary<NSString *, id> *writes;
+@property (nonatomic) NSMutableArray<NSString *> *unknownKeys, *warnings;
+@property (nonatomic) BOOL setsLaunchFlags;
+@end
+
+@implementation DPConfigChanges
+@end
+
 static const NSUInteger DPConfigMaxBytes = 1 << 20;
 static const NSEventModifierFlags DPShortcutFlags = NSEventModifierFlagControl | NSEventModifierFlagOption | NSEventModifierFlagShift | NSEventModifierFlagCommand;
 static NSString *const DPLaunchFlagsArgs = @"launchFlagsArgs";
 
 static BOOL DPIsPortable(DPPatch *patch) { return !DPIsLocalPatch(patch) && ![patch->key isEqualToString:@"localTweaks"]; }
+
+// A switch saved as something odd still has to read as off or on, not raise.
+static BOOL DPFlagValue(id value, BOOL fallback) {
+    return [value respondsToSelector:@selector(boolValue)] ? [value boolValue] : fallback;
+}
+
+// Mirrors DPFormatLaunchFlagsArray in LaunchFlags/Parse.m, which this file can't link against.
+static NSString *DPFlagsText(id value) {
+    if ([value isKindOfClass:NSString.class]) return value;
+    if (![value isKindOfClass:NSArray.class]) return nil;
+    NSMutableArray<NSString *> *lines = [NSMutableArray new];
+    for (id item in (NSArray *)value) {
+        if (![item isKindOfClass:NSString.class] || ![item length]) continue;
+        BOOL quote = [item hasPrefix:@"#"] || [item rangeOfCharacterFromSet:NSCharacterSet.whitespaceAndNewlineCharacterSet].location != NSNotFound
+            || [item containsString:@"\""] || [item containsString:@"'"] || [item containsString:@"\\"];
+        if (!quote) {
+            [lines addObject:item];
+            continue;
+        }
+        NSString *escaped = [[item stringByReplacingOccurrencesOfString:@"\\" withString:@"\\\\"]
+            stringByReplacingOccurrencesOfString:@"\"" withString:@"\\\""];
+        [lines addObject:[NSString stringWithFormat:@"\"%@\"", escaped]];
+    }
+    return [lines componentsJoinedByString:@"\n"];
+}
+
+// Comment-only text sets nothing, so it needs no trust warning.
+static BOOL DPMentionsFlags(NSString *text) {
+    for (NSString *line in [text componentsSeparatedByCharactersInSet:NSCharacterSet.newlineCharacterSet]) {
+        NSString *trimmed = [line stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+        if (trimmed.length && ![trimmed hasPrefix:@"#"]) return YES;
+    }
+    return NO;
+}
 
 static NSDictionary<NSString *, DPPortableKey *> *DPPortableKeys(void) {
     NSMutableDictionary<NSString *, DPPortableKey *> *keys = [NSMutableDictionary new];
@@ -55,7 +107,7 @@ static NSDictionary<NSString *, NSValue *> *DPPortablePatches(void) {
 
 static BOOL DPStoredOn(DPPatch *patch) {
     id value = [DPSettingsDefaults() objectForKey:patch->key];
-    return value ? [value boolValue] : patch->defaultOn;
+    return DPFlagValue(value, patch->defaultOn);
 }
 
 static BOOL DPIsBool(id value) { return [value isKindOfClass:NSNumber.class] && CFGetTypeID((__bridge CFTypeRef)value) == CFBooleanGetTypeID(); }
@@ -119,6 +171,11 @@ static id DPExportedValue(DPPortableKey *entry, id value) {
     if (entry.type == DPKeyShortcut) return [value isKindOfClass:NSDictionary.class] && DPValidShortcut(value) ? value : nil;
     if (entry.setting->kind == DPSettingBool) return [value isKindOfClass:NSNumber.class] ? @([value boolValue]) : nil;
     if (entry.setting->kind == DPSettingNumber) return DPIsNumber(value) && isfinite([value doubleValue]) ? DPCleanNumber([value doubleValue]) : nil;
+    // Older versions saved launch flags as an array, which Launch Flags still reads.
+    if ([entry.setting->key isEqualToString:DPLaunchFlagsArgs] && [value isKindOfClass:NSArray.class]) {
+        NSString *text = DPFlagsText(value);
+        return text.length ? text : nil;
+    }
     return [value isKindOfClass:NSString.class] ? value : nil;
 }
 
@@ -135,13 +192,13 @@ NSData *DPExportConfigJSON(NSError **error) {
     return json.length > 1 ? json : nil;
 }
 
-static DPConfigImport *DPRejectConfig(NSError **error, NSArray<NSString *> *problems) {
-    if (!error) return nil;
+static BOOL DPRejectConfig(NSError **error, NSArray<NSString *> *problems) {
+    if (!error) return NO;
     NSArray<NSString *> *shown = [problems subarrayWithRange:NSMakeRange(0, MIN(problems.count, 5))];
     NSString *more = problems.count > shown.count ? [NSString stringWithFormat:@"\nAnd %lu more.", problems.count - shown.count] : @"";
     *error = [NSError errorWithDomain:@"DiaTweaksConfig" code:1
                              userInfo:@{NSLocalizedDescriptionKey: [[shown componentsJoinedByString:@"\n"] stringByAppendingString:more]}];
-    return nil;
+    return NO;
 }
 
 static NSArray<NSString *> *DPSortedKeys(NSDictionary *dictionary) { return [dictionary.allKeys sortedArrayUsingSelector:@selector(compare:)]; }
@@ -153,9 +210,20 @@ static NSDictionary *DPSection(NSDictionary *root, NSString *name, NSMutableArra
     return @{};
 }
 
-DPConfigImport *DPImportConfigData(NSData *data, BOOL replace, NSError **error) {
+static BOOL DPSetsLaunchFlags(NSDictionary<NSString *, id> *writes) {
+    DPPatch *flags = DPPatchNamed(@"launchFlags");
+    if (flags && DPFlagValue(writes[flags->key], NO)) return YES;
+    NSString *text = DPFlagsText(writes[DPLaunchFlagsArgs]);
+    return text.length ? DPMentionsFlags(text) : NO;
+}
+
+// Reads and checks a file once, so the preview and the import can't disagree about it.
+static DPConfigChanges *DPReadConfig(NSData *data, NSError **error) {
     id root = data.length && data.length <= DPConfigMaxBytes ? [NSJSONSerialization JSONObjectWithData:data options:0 error:NULL] : nil;
-    if (![root isKindOfClass:NSDictionary.class]) return DPRejectConfig(error, @[@"This isn’t a DiaTweaks settings file."]);
+    if (![root isKindOfClass:NSDictionary.class]) {
+        DPRejectConfig(error, @[@"This isn’t a DiaTweaks settings file."]);
+        return nil;
+    }
 
     NSMutableArray<NSString *> *problems = [NSMutableArray new], *warnings = [NSMutableArray new], *unknown = [NSMutableArray new];
     NSMutableDictionary<NSString *, id> *writes = [NSMutableDictionary new];
@@ -181,13 +249,76 @@ DPConfigImport *DPImportConfigData(NSData *data, BOOL replace, NSError **error) 
         if (checked) writes[key] = checked;
         else [problems addObject:[NSString stringWithFormat:@"settings.%@ %@.", key, problem]];
     }
-    if (problems.count) return DPRejectConfig(error, problems);
+    if (problems.count) {
+        DPRejectConfig(error, problems);
+        return nil;
+    }
+
+    DPConfigChanges *changes = [DPConfigChanges new];
+    changes.writes = writes;
+    changes.unknownKeys = unknown;
+    changes.warnings = warnings;
+    changes.setsLaunchFlags = DPSetsLaunchFlags(writes);
+    return changes;
+}
+
+static NSString *DPKeyFor(DPPortableKey *entry) {
+    if (!entry) return nil;
+    if (entry.type == DPKeyChoice) return entry.patch->choice;
+    if (entry.type == DPKeyShortcut) return entry.patch->shortcut;
+    return entry.setting->key;
+}
+
+static id DPDefaultValue(DPPortableKey *entry) {
+    if (entry.type == DPKeyChoice) return entry.patch->defaultChoice;
+    if (entry.type == DPKeyShortcut) return entry.patch->defaultShortcut ? entry.patch->defaultShortcut() : @{};
+    if (entry.setting->kind == DPSettingBool) return @(entry.setting->defaultBool);
+    if (entry.setting->kind == DPSettingNumber) return @(entry.setting->defaultNumber);
+    return entry.setting->defaultString ?: @"";
+}
+
+static BOOL DPStoredValueMatches(DPPortableKey *entry, id wanted) {
+    NSString *key = DPKeyFor(entry);
+    id current = key ? [DPSettingsDefaults() objectForKey:key] : nil;
+    if (!current) return [wanted isEqual:DPDefaultValue(entry)];
+    if (entry.type == DPKeySetting && entry.setting->kind == DPSettingNumber)
+        return DPIsNumber(current) && DPIsNumber(wanted) && [current doubleValue] == [wanted doubleValue];
+    if (entry.type == DPKeySetting && entry.setting->kind == DPSettingString)
+        return [DPFlagsText(current) isEqual:DPFlagsText(wanted)];
+    return [current isEqual:wanted];
+}
+
+DPConfigPreview *DPPreviewConfigData(NSData *data, BOOL replace, NSError **error) {
+    DPConfigChanges *changes = DPReadConfig(data, error);
+    if (!changes) return nil;
+    NSDictionary<NSString *, NSValue *> *patches = DPPortablePatches();
+    NSDictionary<NSString *, DPPortableKey *> *keys = DPPortableKeys();
+    DPConfigPreview *preview = [DPConfigPreview new];
+    preview.unknownKeys = changes.unknownKeys;
+    preview.warnings = changes.warnings;
+    preview.setsLaunchFlags = changes.setsLaunchFlags;
+    [changes.writes enumerateKeysAndObjectsUsingBlock:^(NSString *key, id wanted, BOOL *stop) {
+        BOOL matches = patches[key] ? DPStoredOn(patches[key].pointerValue) == [wanted boolValue] : DPStoredValueMatches(keys[key], wanted);
+        preview.changes += !matches;
+    }];
+    if (replace)
+        for (NSString *key in [patches.allKeys arrayByAddingObjectsFromArray:keys.allKeys])
+            preview.resets += !changes.writes[key] && [DPSettingsDefaults() objectForKey:key] != nil;
+    return preview;
+}
+
+DPConfigImport *DPImportConfigData(NSData *data, BOOL replace, NSError **error) {
+    DPConfigChanges *changes = DPReadConfig(data, error);
+    if (!changes) return nil;
+    NSDictionary<NSString *, id> *writes = changes.writes;
+    NSDictionary<NSString *, NSValue *> *patches = DPPortablePatches();
+    NSDictionary<NSString *, DPPortableKey *> *keys = DPPortableKeys();
 
     NSUserDefaults *defaults = DPSettingsDefaults();
     NSMutableDictionary<NSString *, NSNumber *> *wasOn = [NSMutableDictionary new];
     for (NSString *key in patches)
         if (((DPPatch *)patches[key].pointerValue)->relaunch) wasOn[key] = @(DPStoredOn(patches[key].pointerValue));
-    NSString *argsBefore = [defaults stringForKey:DPLaunchFlagsArgs] ?: @"";
+    NSString *argsBefore = DPFlagsText([defaults objectForKey:DPLaunchFlagsArgs]) ?: @"";
 
     DPConfigImport *result = [DPConfigImport new];
     NSMutableSet<NSValue *> *tuned = [NSMutableSet new];
@@ -212,7 +343,7 @@ DPConfigImport *DPImportConfigData(NSData *data, BOOL replace, NSError **error) 
         DPPatch *patch = value.pointerValue;
         if (patch->on && patch->apply && !patch->relaunch && !DPSafeMode && !DPPausedAtLaunch) patch->apply(patch);
     }
-    notify_post([DPSettingsDomain() stringByAppendingString:@".changed"].UTF8String);
+    // No notify_post here: our own DPWatchSavedSettings would run the whole apply loop again.
 
     NSMutableArray<NSString *> *relaunch = [NSMutableArray new];
     for (NSString *key in DPSortedKeys(wasOn)) {
@@ -220,11 +351,12 @@ DPConfigImport *DPImportConfigData(NSData *data, BOOL replace, NSError **error) 
         if (DPStoredOn(patch) != wasOn[key].boolValue) [relaunch addObject:patch->title];
     }
     DPPatch *flags = DPPatchNamed(@"launchFlags");
-    NSString *argsAfter = [defaults stringForKey:DPLaunchFlagsArgs] ?: @"";
+    NSString *argsAfter = DPFlagsText([defaults objectForKey:DPLaunchFlagsArgs]) ?: @"";
     if (flags && DPStoredOn(flags) && ![argsAfter isEqual:argsBefore] && ![relaunch containsObject:flags->title]) [relaunch addObject:flags->title];
     result.appliedCount = writes.count;
-    result.unknownKeys = unknown;
-    result.warnings = warnings;
+    result.unknownKeys = changes.unknownKeys;
+    result.warnings = changes.warnings;
     result.relaunchTitles = relaunch;
     return result;
 }
+
