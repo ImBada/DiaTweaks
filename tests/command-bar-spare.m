@@ -95,6 +95,7 @@ static BOOL gAppActive = YES, gSendActionResult = YES;
 static int gSendActionCalls;
 static NSMutableDictionary<NSString *, NSTextView *> *gBarTexts;
 static NSMutableArray<NSNumber *> *gDismissedHiddenStates;
+static NSMutableArray<NSString *> *gClosedBarTabs;
 static NSMutableDictionary<NSString *, NSMutableSet<NSString *> *> *gBlanks, *gSplits;
 
 static NSString *gSuiteAsked;
@@ -109,6 +110,7 @@ void DPShowShade(DPCommandBarOverlay *overlay) {}
 id DPWatchKeys(DPCommandBarOverlay *overlay) { return nil; }
 void DPWatch(DPCommandBarOverlay *overlay) {}
 void DPCancelCommandBar(DPCommandBarOverlay *overlay) {}
+void DPCloseBarTab(NSWindow *window, id tab) { [gClosedBarTabs addObject:DPTabID(tab) ?: @""]; DPCloseTab(tab); }
 void DPShowHiddenBars(void) {}
 BOOL DPHasStrip(NSWindow *window) { return NO; }
 NSView *DPBlankPage(NSWindow *window) { return nil; }
@@ -224,6 +226,7 @@ int main(void) {
         gDelegate.appleScriptWindows = [NSMutableArray array];
         gBarTexts = [NSMutableDictionary dictionary];
         gDismissedHiddenStates = [NSMutableArray array];
+        gClosedBarTabs = [NSMutableArray array];
         gBlanks = [NSMutableDictionary dictionary];
         gSplits = [NSMutableDictionary dictionary];
         NSApp.delegate = (id)gDelegate;
@@ -328,7 +331,7 @@ int main(void) {
         swA.activeTab = spareA3;
         CHECK(DPAdoptSpare(winA, pageView), "adopts spareA3");
         DPPumpUntil(^BOOL { return spareA3.closed; });
-        CHECK(spareA3.closed, "adopt timer closes an unused empty spare in a multi-tab space");
+        CHECK(spareA3.closed && [gClosedBarTabs containsObject:@"spare-A3"], "adopt timer closes an unused empty spare in a multi-tab space as a bar tab");
         [profA.appleScriptTabs removeObject:spareA2];
         [profA.appleScriptTabs removeObject:spareA3];
         swA.activeTab = pageA;
@@ -495,6 +498,7 @@ int main(void) {
         swA.activeTab = otherSpaceTab;
         CHECK(!DPShowSpare(winA) && !DPSpareIn(winA), "a spare left in another space isn't shown when the bar opens there");
         CHECK(leftSpare.closed && !otherSpaceTab.closed && !pageA.closed, "dropping the left spare closes only the spare, not the new space's tabs");
+        CHECK([gClosedBarTabs containsObject:@"left-space-spare"] && ![gClosedBarTabs containsObject:@"other-space"], "a dropped spare closes as a bar tab, so it leaves the recent tabs");
         CHECK(![gDefaults.store[DPSparesKey] containsObject:@"left-space-spare"], "a dropped spare is no longer noted");
 
         swA.appleScriptProfiles = [NSMutableArray arrayWithObject:profA];

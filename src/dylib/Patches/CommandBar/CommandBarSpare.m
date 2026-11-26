@@ -113,7 +113,7 @@ void DPDropSpare(NSWindow *window) {
     for (id profile in profiles) {
         id tab = DPScriptTabIn(profile, tabID);
         if (!tab) continue;
-        if (DPClosableBlank(tab, profile)) DPCloseTab(tab);
+        if (DPClosableBlank(tab, profile)) DPCloseBarTab(window, tab);
         return;
     }
 }
@@ -223,7 +223,7 @@ BOOL DPAdoptSpare(NSWindow *window, NSView *page) {
             return;
         }
         [DPBlanks(weakWindow) removeObject:tabID];
-        DPCloseTab(tab);
+        DPCloseBarTab(weakWindow, tab);
     });
     return YES;
 }

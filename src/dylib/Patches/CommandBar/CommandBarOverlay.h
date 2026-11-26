@@ -58,6 +58,7 @@ void DPFocusBar(DPCommandBarOverlay *overlay);
 void DPShowShade(DPCommandBarOverlay *overlay);
 id DPDismiss(DPCommandBarOverlay *overlay, BOOL closing);
 void DPCancelCommandBar(DPCommandBarOverlay *overlay);
+void DPCloseBarTab(NSWindow *window, id tab);
 id DPWatchKeys(DPCommandBarOverlay *overlay);
 void DPWatch(DPCommandBarOverlay *overlay);
 NSMutableSet<NSString *> *DPSplits(NSWindow *window);

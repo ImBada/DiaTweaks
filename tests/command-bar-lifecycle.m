@@ -246,6 +246,7 @@ static BOOL DPHas(NSArray<NSArray *> *rows, NSString *tabID, BOOL flag) { return
         [scripts addObject:_script];
         gDelegate.appleScriptWindows = scripts;
         _overlay = DPBarFor(window, _bar, _back);
+        DPSet(window, &DPRecentKey, @[ _back.tabId, _bar.tabId ]);
     }
     return self;
 }
@@ -299,6 +300,67 @@ static DPCommandBarOverlay *DPOpenBar(Class pageCls, NSString *name, BOOL panelF
     return DPGet(window, &DPOverlayKey);
 }
 
+static BOOL DPRecentHas(NSWindow *window, NSString *tabID) { return [(NSArray *)DPGet(window, &DPRecentKey) containsObject:tabID]; }
+
+// #623: a bar tab that was closed must not stay the tab the next new tab is said to have come from.
+static void DPCheckRepeatedNewTab(Class pageCls, Class stripCls, BOOL hiding, BOOL stripped, BOOL byKey) {
+    gHiding = hiding;
+    NSString *name = [NSString stringWithFormat:@"window-repeat-%d%d%d", hiding, stripped, byKey];
+    NSString *mode = [NSString stringWithFormat:@"%@, %@, %@", hiding ? @"Hide New Tab on" : @"Hide New Tab off", stripped ? @"tabs at top" : @"sidebar", byKey ? @"Cmd+T" : @"Esc"];
+    _TtC6Window14PlatformWindow *window = [[_TtC6Window14PlatformWindow alloc] initWithContentRect:NSMakeRect(-30000, -30000, 600, 400)
+                                                                                        styleMask:NSWindowStyleMaskTitled
+                                                                                          backing:NSBackingStoreBuffered defer:NO];
+    window.identifier = name;
+    gWindows = @[ window ];
+    if (stripped) [window.contentView addSubview:[[stripCls alloc] initWithFrame:NSMakeRect(0, 0, 600, 40)]];
+    DPFakeTab *site = DPTab([name stringByAppendingString:@"-site"], @"https://google.com");
+    DPFakeScriptWindow *script = [DPFakeScriptWindow new];
+    script.windowId = name;
+    script.front = DPSpace(@[ DPTab([name stringByAppendingString:@"-other"], @"https://example.org"), site ]);
+    script.appleScriptProfiles = @[ script.front ];
+    script.activeTab = site;
+    gDelegate.appleScriptWindows = @[ script ];
+    DPNoteActiveTab(window, script, NULL);
+    for (int round = 1; round <= 3; round++) {
+        NSString *what = [NSString stringWithFormat:@"%@, open %d", mode, round];
+        DPFakeTab *tab = DPTab([NSString stringWithFormat:@"%@-new%d", name, round], @"");
+        [script.front.appleScriptTabs addObject:tab];
+        script.activeTab = tab;
+        NSView *page = [[pageCls alloc] initWithFrame:window.contentView.bounds];
+        [page addSubview:[[_TtC20AssistantPanelUIBase22AssistantPanelRootView alloc] initWithFrame:NSMakeRect(0, 0, 400, 60)]];
+        [window.contentView addSubview:page];
+        DPSpin(0.15);
+        DPCommandBarOverlay *bar = DPGet(window, &DPOverlayKey);
+        CHECK(bar && bar.openedTab == tab && bar.returnTab == site && !DPGet(page, &DPOwnBarKey) && ![DPBlanks(window) containsObject:tab.tabId],
+              [@"Cmd+T opens the floating bar over the page, not Dia's own New Tab page: " stringByAppendingString:what].UTF8String);
+        if (!bar) break;
+        script.activeTab = site;
+        if (byKey) DPCommandBarKey(DPKey(window, @"t", 17));
+        else DPCancelCommandBar(bar);
+        CHECK(!bar.host && tab.closed && !site.closed, [@"cancelling the bar closes only its own tab: " stringByAppendingString:what].UTF8String);
+        CHECK(!DPRecentHas(window, tab.tabId), [@"a closed bar tab leaves the recent tabs: " stringByAppendingString:what].UTF8String);
+        [script.front.appleScriptTabs removeObject:tab];
+        [page removeFromSuperview];
+    }
+    [script.front.appleScriptTabs removeObjectAtIndex:0];
+    _TtC5TabUI14TabContentView *row = [[_TtC5TabUI14TabContentView alloc] initWithFrame:NSMakeRect(0, 0, 200, 37)];
+    [window.contentView addSubview:row];
+    [row closeButtonClicked];
+    DPFakeTab *replacement = DPTab([name stringByAppendingString:@"-replacement"], @"");
+    [script.front.appleScriptTabs addObject:replacement];
+    [script.front.appleScriptTabs removeObject:site];
+    script.activeTab = replacement;
+    NSView *page = [[pageCls alloc] initWithFrame:window.contentView.bounds];
+    [page addSubview:[[_TtC20AssistantPanelUIBase22AssistantPanelRootView alloc] initWithFrame:NSMakeRect(0, 0, 400, 60)]];
+    [window.contentView addSubview:page];
+    DPSpin(0.05);
+    CHECK(!DPGet(window, &DPOverlayKey) && page.hidden && [DPBlanks(window) containsObject:replacement.tabId],
+          [@"closing the last tab afterwards still leaves a blank, not a bar: " stringByAppendingString:mode].UTF8String);
+    [page removeFromSuperview];
+    [row removeFromSuperview];
+    DPSet(window, &DPBlankKey, nil);
+}
+
 int main(void) {
     @autoreleasepool {
         unsetenv("DIATWEAKS_DOMAIN");
@@ -319,6 +381,8 @@ int main(void) {
         objc_registerClassPair(paneCls);
         Class tabListCls = objc_allocateClassPair(NSView.class, DPDiaTabList, 0);
         objc_registerClassPair(tabListCls);
+        Class stripCls = objc_allocateClassPair(NSView.class, DPDiaTabStripTabs, 0);
+        objc_registerClassPair(stripCls);
 
         NSMenu *mainMenu = [[DPCountingMenu alloc] initWithTitle:@"Main"];
         NSMenuItem *fileRoot = [[NSMenuItem alloc] initWithTitle:@"File" action:nil keyEquivalent:@""];
@@ -535,6 +599,7 @@ int main(void) {
         CHECK(!scene.overlay.host && DPGet(browser, &DPOverlayKey) == nil, "the bar closes when another space comes forward");
         CHECK(scene.bar.closed, "the bar's unused new tab closes, even if the space in front has a single tab");
         CHECK(!scene.back.closed, "the tab the bar was opened from stays");
+        CHECK(!DPRecentHas(browser, scene.bar.tabId), "a bar tab closed for another space leaves the recent tabs");
         CHECK(DPLast(gShownRows, scene.bar.tabId, YES), "the closing tab's row stays hidden on its way out");
         CHECK(DPHas(gNotedSpares, scene.bar.tabId, NO) && !DPHas(gNotedSpares, scene.bar.tabId, YES),
               "a tab left behind in another space is no longer noted as a spare");
@@ -634,6 +699,15 @@ int main(void) {
         scene.overlay.page = barPage;
         DPCancelCommandBar(scene.overlay);
         CHECK(!scene.overlay.host && scene.bar.closed, "cancelling a bar in the space in front still closes its tab");
+        CHECK(!DPRecentHas(browser, scene.bar.tabId), "a cancelled bar's closed tab leaves the recent tabs");
+        scene = [[DPScene alloc] initIn:browser];
+        scene.overlay.page = barPage;
+        DPFakeTab *elsewhere = DPTab(@"window-a-elsewhere", @"https://example.net");
+        [scene.old.appleScriptTabs addObject:elsewhere];
+        scene.script.activeTab = elsewhere;
+        [scene watch];
+        CHECK(!scene.overlay.host && scene.bar.closed && !scene.back.closed && !elsewhere.closed && !DPRecentHas(browser, scene.bar.tabId),
+              "a bar left behind by a tab switch closes its tab and drops it from the recent tabs");
         [barPage removeFromSuperview];
         gHiding = NO;
 
@@ -721,6 +795,12 @@ int main(void) {
         CHECK(DPGet(closer, &DPOverlayKey) == nil && replacementPage.hidden && [DPBlanks(closer) containsObject:@"replacement-tab"] && !DPGet(replacementPage, &DPOwnBarKey),
               "closing the last tab with the sidebar's X leaves its replacement blank, not a bar going back to the closed tab or Dia's own page");
         [replacementPage removeFromSuperview];
+
+        DPCheckRepeatedNewTab(ntpCls, stripCls, NO, NO, YES);
+        DPCheckRepeatedNewTab(ntpCls, stripCls, NO, YES, NO);
+        DPCheckRepeatedNewTab(ntpCls, stripCls, YES, NO, NO);
+        DPCheckRepeatedNewTab(ntpCls, stripCls, YES, YES, YES);
+        gHiding = YES;
 
         _TtC6Window14PlatformWindow *gone = [[_TtC6Window14PlatformWindow alloc] initWithContentRect:NSMakeRect(-30000, -30000, 600, 400)
                                                                                            styleMask:NSWindowStyleMaskTitled
@@ -988,8 +1068,6 @@ int main(void) {
                                                                                                 backing:NSBackingStoreBuffered defer:NO];
         clicks.identifier = @"window-clicks";
         gWindows = @[ clicks ];
-        Class stripCls = objc_allocateClassPair(NSView.class, DPDiaTabStripTabs, 0);
-        objc_registerClassPair(stripCls);
         NSView *strip = [[stripCls alloc] initWithFrame:NSMakeRect(0, 0, 600, 40)], *plus = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 28, 28)];
         [strip addSubview:plus];
         [clicks.contentView addSubview:strip];

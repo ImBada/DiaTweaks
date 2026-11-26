@@ -112,6 +112,17 @@ static NSString *DPPreviousTabID(NSWindow *window) {
     return recent.count > 1 ? recent.firstObject : nil;
 }
 
+// Left in the recent tabs, a closed bar tab would be the next new tab's previous one and read as a closed last tab.
+void DPCloseBarTab(NSWindow *window, id tab) {
+    NSString *tabID = DPTabID(tab);
+    NSMutableArray *recent = [DPGet(window, &DPRecentKey) mutableCopy];
+    if (tabID && [recent containsObject:tabID]) {
+        [recent removeObject:tabID];
+        DPSet(window, &DPRecentKey, recent.count ? recent : nil);
+    }
+    DPCloseTab(tab);
+}
+
 static NSMutableSet<NSString *> *DPWindowSet(NSWindow *window, const void *key) {
     NSMutableSet *set = DPGet(window, key);
     if (!set && window) DPSet(window, key, set = [NSMutableSet set]);
@@ -466,14 +477,15 @@ void DPCancelCommandBar(DPCommandBarOverlay *overlay) {
     if (DPParkSpare(overlay)) return;
     NSView *page = overlay.page;
     BOOL overBlank = overlay.overBlank;
+    NSWindow *window = overlay.host;
     if (DPIsKind(page, DPDiaPopover)) [DPBarText(overlay) doCommandBySelector:@selector(cancelOperation:)];
-    else if (DPCommandBarKeepText.on) DPSet(overlay.host, &DPLeftTextKey, DPBarText(overlay).string.copy);
+    else if (DPCommandBarKeepText.on) DPSet(window, &DPLeftTextKey, DPBarText(overlay).string.copy);
     BOOL nowhereToGo = DPNowhereToGo(overlay);
     id tab = DPDismiss(overlay, !overBlank && !nowhereToGo);
     if (!tab) return;
     // Closing a window's only tab would close the window, and Dia with it.
     if (overBlank || nowhereToGo) DPMakeBlank(page, DPTabID(tab), nil);
-    else DPCloseTab(tab);
+    else DPCloseBarTab(window, tab);
 }
 
 static void DPCloseOnNewLayout(NSWindow *window) {
@@ -505,8 +517,9 @@ static void DPLeaveSpace(DPCommandBarOverlay *overlay, id scriptWindow) {
     NSString *openedID = DPTabID(overlay.openedTab);
     id space = DPScriptProfileHolding(scriptWindow, openedID), left = DPScriptTabIn(space, openedID);
     BOOL close = left && DPHiding() && !overlay.overBlank && !overlay.picked && !DPTaken(overlay, left) && DPScriptTabs(space).count > 1;
+    NSWindow *window = overlay.host;
     DPDismiss(overlay, close);
-    if (close) DPCloseTab(left);
+    if (close) DPCloseBarTab(window, left);
 }
 
 static void DPWatchNewTab(DPCommandBarOverlay *overlay, id scriptWindow) {
@@ -530,7 +543,7 @@ static void DPWatchNewTab(DPCommandBarOverlay *overlay, id scriptWindow) {
         if (DPParkSpare(overlay)) return DPStandInWhileSwitching(window, DPTabID(tab), left);
         DPDismiss(overlay, YES);
         DPStandInWhileSwitching(window, DPTabID(tab), left);
-        return DPCloseTab(tab);
+        return DPCloseBarTab(window, tab);
     }
     if (overlay.returnTab && !DPScriptTabIn(scriptWindow, DPTabID(overlay.returnTab))) {
         DPDismissCommandBar(overlay);
