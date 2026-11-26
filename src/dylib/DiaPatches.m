@@ -17,6 +17,7 @@ __attribute__((constructor)) static void DPInit(void) {
     if (![NSBundle.mainBundle.bundleIdentifier isEqualToString:@"company.thebrowser.dia"] && !getenv("DIAPATCH_FORCE_INIT")) return;
     DPBeginLaunch();
     if (DPSafeMode == 2) return;
+    DPMigrateSettings(DPSettingsDefaults());
     DPLoadPatches();
     DPWatchSavedSettings();
     if (!DPSafeMode && !DPPaused) DPInstallPatches();

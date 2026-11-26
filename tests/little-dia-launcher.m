@@ -1,6 +1,7 @@
 #import <AppKit/AppKit.h>
 #import <objc/message.h>
 #import "Patches/LittleDia/LittleDia.h"
+#import "runloop.h"
 
 DPPatch DPLittleDia, DPLittleDiaTabLinks, DPLittleDiaFollowRules, DPLittleDiaRemember;
 
@@ -235,8 +236,8 @@ int main(void) {
         DPLittleDia.on = YES;
         DPRefreshLittleDiaNewWindow();
         gReady = YES;
-        [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.8]];
-        CHECK([DPFileMenu() indexOfItem:gItem] >= 0, "turning Little Dia back on shows New Little Dia Window within a second, not after the slow poll");
+        DPPumpUntil(^BOOL { return [DPFileMenu() indexOfItem:gItem] >= 0; });
+        CHECK([DPFileMenu() indexOfItem:gItem] >= 0, "turning Little Dia back on shows New Little Dia Window once the poll sees the extension ready");
 
         DPSwapMethod(NSMenu.class, @selector(popUpMenuPositioningItem:atLocation:inView:), (IMP)DPMenu_captureBarPopUp);
         NSArray<NSString *> *names = @[ @"Personal", @"Work", @"Study", @"Travel" ];

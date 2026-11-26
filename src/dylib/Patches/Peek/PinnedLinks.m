@@ -1,4 +1,4 @@
-#import "Peek.h"
+#import "Patches/Peek/Peek.h"
 
 static void DPApplyPeekPinnedLinks(DPPatch *patch) {}
 static NSString *DPVerifyPeekPinnedLinks(DPPatch *patch) { return DPPeekPinnedLinksProblem(); }

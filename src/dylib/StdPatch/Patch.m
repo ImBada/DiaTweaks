@@ -248,6 +248,12 @@ static void DPReadPatches(BOOL includeLocal) {
     qsort(sorted, total, sizeof *sorted, DPCompareOrder);
 }
 
+void DPMigrateSettings(NSUserDefaults *defaults) {
+    if (!defaults || [defaults boolForKey:@"peekTurnedOffForNative"]) return;
+    [defaults setBool:YES forKey:@"peekTurnedOffForNative"];
+    if ([defaults boolForKey:@"peek"]) [defaults setBool:NO forKey:@"peek"];
+}
+
 void DPLoadPatches(void) {
     DPReadPatches(YES);
 

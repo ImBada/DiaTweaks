@@ -1,4 +1,4 @@
-#import "Peek.h"
+#import "Patches/Peek/Peek.h"
 
 extern DPPatch DPPeekDragLinks;
 

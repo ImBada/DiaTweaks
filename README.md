@@ -21,7 +21,7 @@ Each tweak changes one thing about Dia: it hides something you don't use, change
 | Window | How the window looks and behaves |
 | App | Launch flags, the Dock icon and the tweaks you write yourself |
 | Passwords | Password managers and passkeys |
-| Links | Opening links in Little Dia and the address shown on hover |
+| Links | Opening links in Little Dia or Peek, and the address shown on hover |
 | Network | Getting past networks that block sites by name |
 
 Turn them on and off in **Dia → Settings → Patches**, or with the `diatweaks` command. Each one's Settings page links to its wiki page, which says what it does and when you'd want it. Experimental tweaks stay out of the list until you switch on **Show Experimental Tweaks** in **Settings → Home** (or click **Show** at the bottom of **Patches**). Home is also where you back up or import your settings.

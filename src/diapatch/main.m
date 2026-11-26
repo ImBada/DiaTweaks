@@ -825,6 +825,7 @@ static BOOL apply(void) {
     NSString *signature = signatureOf(gApp);
     if (!(moveBundle(gStaged, gApp) && removeTree(gReady))) return NO;
     DPRegisterApp(gApp);
+    if (!env("DIAPATCH_HOME")) DPMigratePrefs();
     forgetScreenRecordingIfResigned(signature);
     return say(@"installed patched Dia %@ at %@", versionOf(gApp), gApp);
 }

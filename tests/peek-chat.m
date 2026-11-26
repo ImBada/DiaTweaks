@@ -1,4 +1,4 @@
-#import "Peek/Peek.h"
+#import "Patches/Peek/Peek.h"
 #import <Carbon/Carbon.h>
 #import <objc/runtime.h>
 
@@ -249,12 +249,12 @@ BOOL DPPeekIsShortcut(NSEvent *event, NSMenuItem *item) {
            (event.modifierFlags & mask) == (item.keyEquivalentModifierMask & mask);
 }
 
-#import "Peek/Tab.m"
-#import "Peek/Selection.m"
-#import "Peek/Motion.m"
-#import "Peek/Keys.m"
-#import "Peek/Visibility.m"
-#import "Peek/Chat.m"
+#import "Patches/Peek/Tab.m"
+#import "Patches/Peek/Selection.m"
+#import "Patches/Peek/Motion.m"
+#import "Patches/Peek/Keys.m"
+#import "Patches/Peek/Visibility.m"
+#import "Patches/Peek/Chat.m"
 // Dia's composer chip is an AppKit AttachmentCellView whose title/subtitle/icon live in lazily
 // created subviews; the patch reaches them by ivar name, so the mock mirrors those names.
 @interface _TtC11Attachments18AttachmentCellView : NSView {
@@ -269,10 +269,10 @@ BOOL DPPeekIsShortcut(NSEvent *event, NSMenuItem *item) {
 - (void)prepareForReuse {}
 @end
 
-#import "Peek/ChatContext.m"
-#import "Peek/Card.m"
-#import "Peek/Pages.m"
-#import "Peek/Handoff.m"
+#import "Patches/Peek/ChatContext.m"
+#import "Patches/Peek/Card.m"
+#import "Patches/Peek/Pages.m"
+#import "Patches/Peek/Handoff.m"
 
 static int failures;
 #define CHECK(cond, msg) do { if (!(cond)) { printf("FAIL: %s\n", msg); failures++; } } while (0)

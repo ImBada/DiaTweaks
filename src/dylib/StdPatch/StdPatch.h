@@ -114,6 +114,7 @@ BOOL DPAnimating(void);
 BOOL DPSavedOn(DPPatch *patch);
 NSString *DPChoice(DPPatch *patch);
 void DPSetChoice(DPPatch *patch, NSString *value);
+void DPMigrateSettings(NSUserDefaults *defaults);
 void DPLoadPatches(void);
 void DPWatchSavedSettings(void);
 void DPInstallPatches(void);

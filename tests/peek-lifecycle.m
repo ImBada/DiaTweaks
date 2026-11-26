@@ -1,4 +1,4 @@
-#import "Peek/Peek.h"
+#import "Patches/Peek/Peek.h"
 #import "runloop.h"
 #import "Patches/HideToolbar/HideToolbar.h"
 #import <objc/runtime.h>
@@ -138,19 +138,19 @@ CAMetalLayer *DPProgressShaderLayer(void) { return nil; }
 void DPProgressColors(NSView *pane, NSString *choice, simd_float3 *primary, simd_float3 *secondary) {}
 void DPDrawProgressShader(CAMetalLayer *layer, CGFloat progress, CGFloat cycle, simd_float3 primary, simd_float3 secondary) {}
 
-#import "Peek/Glow.m"
-#import "Peek/Tab.m"
-#import "Peek/Selection.m"
-#import "Peek/Motion.m"
-#import "Peek/Keys.m"
-#import "Peek/Visibility.m"
-#import "Peek/Chat.m"
-#import "Peek/ChatContext.m"
-#import "Peek/Card.m"
-#import "Peek/Pages.m"
-#import "Peek/Handoff.m"
-#import "Peek/Zoom.m"
-#import "Peek/DragLinks.m"
+#import "Patches/Peek/Glow.m"
+#import "Patches/Peek/Tab.m"
+#import "Patches/Peek/Selection.m"
+#import "Patches/Peek/Motion.m"
+#import "Patches/Peek/Keys.m"
+#import "Patches/Peek/Visibility.m"
+#import "Patches/Peek/Chat.m"
+#import "Patches/Peek/ChatContext.m"
+#import "Patches/Peek/Card.m"
+#import "Patches/Peek/Pages.m"
+#import "Patches/Peek/Handoff.m"
+#import "Patches/Peek/Zoom.m"
+#import "Patches/Peek/DragLinks.m"
 
 @interface DPOrderProbeCover : DPPeekCover
 @property BOOL attachedAtOrderOut;

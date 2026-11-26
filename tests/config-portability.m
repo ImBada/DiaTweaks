@@ -5,7 +5,11 @@
 #import "StdPatch/StdPatch.h"
 #import "Settings/Settings.h"
 
-extern DPPatch DPLittleDia;
+extern DPPatch DPPeek, DPLittleDia;
+double DPPeekDarkness(void);
+double DPPeekResponse(void);
+BOOL DPPeekGenie(void);
+BOOL DPPeekShowsToolbar(void);
 NSSize DPLittleDiaSize(void);
 
 static NSString *gDomain;
@@ -40,13 +44,13 @@ static NSArray<NSString *> *DPExperimentalKeys(void) {
 
 static NSArray<NSString *> *DPExcludedKeys(void) {
     return @[ @"profileColors", @"profileEmojis", @"sidebarGrainProfiles", @"collapsedPinned", @"localTweaks", @"launchFlagsApplied",
-              @"commandBarChatLocked", @"littleDiaFrame", @"autoUpdateDia", @"autoUpdateTweaks", @"showExperimentalTweaks" ];
+              @"commandBarChatLocked", @"littleDiaFrame", @"autoUpdateDia", @"autoUpdateTweaks", @"showExperimentalTweaks", @"peekTurnedOffForNative" ];
 }
 
 static NSDictionary *DPExcludedValues(void) {
     return @{ @"profileColors" : @{ @"space-1" : @"#FF0000" }, @"profileEmojis" : @{ @"space-1" : @"🙂" }, @"sidebarGrainProfiles" : @{ @"space-1" : @{ @"sidebarGrainAmount" : @0.5 } },
               @"collapsedPinned" : @[ @"space-1" ], @"localTweaks" : @NO, @"launchFlagsApplied" : @[ @"--applied" ], @"commandBarChatLocked" : @YES,
-              @"littleDiaFrame" : @"{{1, 2}, {3, 4}}", @"autoUpdateDia" : @2, @"autoUpdateTweaks" : @3, @"showExperimentalTweaks" : @YES };
+              @"littleDiaFrame" : @"{{1, 2}, {3, 4}}", @"autoUpdateDia" : @2, @"autoUpdateTweaks" : @3, @"showExperimentalTweaks" : @YES, @"peekTurnedOffForNative" : @YES };
 }
 
 static NSArray<NSView *> *DPGroups(NSView *root) {
@@ -200,7 +204,7 @@ static void DPCheckExperimentalData(void) {
 static void DPCheckVisibility(void) {
     expect(!DPShowsExperimental(), @"experimental tweaks start hidden");
     for (NSString *key in DPExperimentalKeys()) expect(!DPExperimentalShown(DPPatchNamed(key)), [key stringByAppendingString:@" is hidden while off"]);
-    expect(DPExperimentalShown(DPPatchNamed(@"commandBar")) && DPExperimentalShown(DPPatchNamed(@"littleDia")), @"ordinary tweaks are always shown");
+    expect(DPExperimentalShown(DPPatchNamed(@"commandBar")) && DPExperimentalShown(DPPatchNamed(@"peek")), @"ordinary tweaks are always shown");
     for (NSString *key in @[ @"bitwarden", @"icloudPasswords", @"onePassword", @"passkeys", @"protonPass" ])
         expect(DPExperimentalShown(DPPatchNamed(key)), [key stringByAppendingString:@" is shown without Show Experimental Tweaks"]);
     expectEqual(@(DPHiddenExperimentalCount()), @12, @"12 experimental tweaks are hidden");
@@ -351,13 +355,19 @@ static void DPCheckManifest(void) {
     expectEqual(byKey[@"windowCorners"][@"settings"], (@[ @{ @"key" : @"windowCornerRadius", @"type" : @"number", @"default" : @26, @"min" : @0, @"max" : @26 } ]), @"Window Corners declares its radius");
     expectEqual(byKey[@"launchFlags"][@"settings"], (@[ @{ @"key" : @"launchFlagsArgs", @"type" : @"string", @"default" : @"", @"min" : NSNull.null, @"max" : NSNull.null } ]), @"Launch Flags declares its text");
     expectEqual(byKey[@"commandBarBlur"][@"settings"][1], (@{ @"key" : @"commandBarBlurWindow", @"type" : @"bool", @"default" : @NO, @"min" : NSNull.null, @"max" : NSNull.null }), @"a bool setting has no range");
-    expect(!byKey[@"peek"] && !byKey[@"peekPinnedLinks"] && !byKey[@"peekDragLinks"], @"Peek is an optional tweak, so the built-in manifest leaves it out");
+    expect(byKey[@"peek"] && byKey[@"peekPinnedLinks"] && byKey[@"peekDragLinks"], @"Peek and its two companions are built in, so the manifest lists them");
+    expect(byKey[@"peek"] && ![byKey[@"peek"][@"defaultOn"] boolValue], @"Peek is off by default");
+    expectEqual([byKey[@"peek"][@"settings"] valueForKey:@"key"], (@[ @"peekToolbar", @"peekGenie", @"peekDarkness", @"peekSpeed" ]), @"Peek declares four settings");
+    expectEqual(byKey[@"peek"][@"settings"][0], (@{ @"key" : @"peekToolbar", @"type" : @"bool", @"default" : @YES, @"min" : NSNull.null, @"max" : NSNull.null }), @"Peek's switch has no range");
     expectEqual([byKey[@"littleDia"][@"settings"] valueForKey:@"key"], (@[ @"littleDiaWidth", @"littleDiaHeight" ]), @"Little Dia declares its size");
     NSMutableArray<NSString *> *commandBarKeys = [NSMutableArray new];
     for (NSString *key in @[ @"commandBar", @"commandBarBlur", @"commandBarDarken", @"commandBarShadow" ])
         for (NSDictionary *setting in byKey[key][@"settings"]) [commandBarKeys addObject:setting[@"key"]];
     expectEqual(commandBarKeys, (@[ @"commandBarHeight", @"commandBarBlurRadius", @"commandBarBlurWindow", @"commandBarDarkness", @"commandBarShadowIntensity" ]), @"the command bar declares its five");
 
+    expect(DPPeekDarkness() == DPDeclared(&DPPeek, @"peekDarkness")->defaultNumber, @"Peek's declared darkness is what it uses");
+    expect(fabs(DPPeekResponse() - 0.24 / DPDeclared(&DPPeek, @"peekSpeed")->defaultNumber) < 1e-9, @"and its declared speed");
+    expect(DPPeekGenie() == DPDeclared(&DPPeek, @"peekGenie")->defaultBool && DPPeekShowsToolbar() == DPDeclared(&DPPeek, @"peekToolbar")->defaultBool, @"and its two switches");
     expect(DPLittleDiaSize().width == DPDeclared(&DPLittleDia, @"littleDiaWidth")->defaultNumber && DPLittleDiaSize().height == DPDeclared(&DPLittleDia, @"littleDiaHeight")->defaultNumber,
            @"and Little Dia's declared size");
 }
@@ -402,10 +412,6 @@ static void DPCheckImport(NSUserDefaults *defaults) {
     expectEqual([defaults objectForKey:@"extensionsMenuShortcut"], (@{ @"key" : @"F5", @"keyCode" : @96, @"modifiers" : @0 }), @"a function key needs no modifier");
     expectEqual([defaults objectForKey:@"launchFlagsArgs"], @"--a=b --c=\"d e\"", @"flags keep their quotes");
     expect([[defaults objectForKey:@"commandBarBlurWindow"] isKindOfClass:NSNumber.class] && ![defaults boolForKey:@"commandBarBlurWindow"], @"a switch is saved");
-
-    DPConfigImport *retired = DPImport(@"{\"version\": 1, \"tweaks\": {\"peek\": true, \"peekPinnedLinks\": true}, \"settings\": {\"peekDarkness\": 0.5, \"peekGenie\": false}}", NO);
-    expect(retired && !retired.appliedCount && ![defaults objectForKey:@"peek"] && ![defaults objectForKey:@"peekDarkness"], @"a file's Peek switches aren't applied when Peek isn't installed");
-    expectEqual(retired.unknownKeys, (@[ @"peek", @"peekPinnedLinks", @"peekDarkness", @"peekGenie" ]), @"and are skipped and reported, not rejected");
 
     expectEqual([DPImport(@"{\"version\": 1}", NO) relaunchTitles], @[], @"an empty file changes nothing");
     expectEqual([DPImport(@"{\"version\": 1, \"tweaks\": {\"launchFlags\": true, \"littleDia\": true, \"commandBar\": true}}", NO) relaunchTitles],
@@ -519,6 +525,25 @@ static void DPCheckPreview(NSUserDefaults *defaults) {
     DPApplySavedSettings();
 }
 
+static void DPCheckMigration(NSUserDefaults *defaults) {
+    [defaults removePersistentDomainForName:gDomain];
+    [defaults setBool:YES forKey:@"peek"];
+    [defaults setBool:YES forKey:@"peekPinnedLinks"];
+    [defaults setBool:YES forKey:@"peekDragLinks"];
+    DPMigrateSettings(defaults);
+    expect(![defaults boolForKey:@"peek"] && [defaults boolForKey:@"peekTurnedOffForNative"], @"the migration turns Peek off once and records it");
+    expect([defaults boolForKey:@"peekPinnedLinks"] && [defaults boolForKey:@"peekDragLinks"], @"and leaves Peek's other switches alone");
+
+    [defaults setBool:YES forKey:@"peek"];
+    DPMigrateSettings(defaults);
+    expect([defaults boolForKey:@"peek"], @"a Peek switched back on afterwards stays on");
+
+    [defaults removePersistentDomainForName:gDomain];
+    DPMigrateSettings(defaults);
+    expect([defaults boolForKey:@"peekTurnedOffForNative"] && ![defaults objectForKey:@"peek"], @"a clean domain is marked without gaining a Peek switch");
+    DPMigrateSettings(nil);
+}
+
 int main(void) {
     @autoreleasepool {
         [NSApplication sharedApplication];
@@ -570,6 +595,7 @@ int main(void) {
         [defaults setObject:custom forKey:@"undoCloseTabShortcut"];
         [defaults setDouble:24.0 / 100 forKey:@"commandBarDarkness"];
         [defaults setDouble:12 forKey:@"windowCornerRadius"];
+        [defaults setDouble:0 forKey:@"peekGenie"];
         [defaults setBool:YES forKey:@"commandBarBlurWindow"];
         [defaults setObject:@"--foo=bar --baz" forKey:@"launchFlagsArgs"];
         [defaults setObject:@7 forKey:@"savePageAsShortcut"];
@@ -578,7 +604,7 @@ int main(void) {
         exported = DPParse(populated);
         NSDictionary *settings = exported[@"settings"];
         expectEqual(settings, (@{ @"commandBarPosition" : @"window", @"compactTabRowsSize" : @"small", @"pinTabShortcutKey" : @{}, @"undoCloseTabShortcut" : custom,
-                                  @"commandBarDarkness" : @0.24, @"windowCornerRadius" : @12, @"commandBarBlurWindow" : @YES,
+                                  @"commandBarDarkness" : @0.24, @"windowCornerRadius" : @12, @"peekGenie" : @NO, @"commandBarBlurWindow" : @YES,
                                   @"launchFlagsArgs" : @"--foo=bar --baz" }), @"settings export what was saved, a cleared shortcut as {}, and skip what is malformed");
         for (NSString *key in DPExcludedKeys()) expect(!settings[key] && !exported[@"tweaks"][key], [key stringByAppendingString:@" isn't exported"]);
         expect([[[NSString alloc] initWithData:populated encoding:NSUTF8StringEncoding] containsString:@"\"commandBarDarkness\" : 0.24,"], @"a saved fraction exports without float noise");
@@ -586,7 +612,7 @@ int main(void) {
         [defaults removeObjectForKey:@"savePageAsShortcut"];
         [defaults removeObjectForKey:@"littleDiaWidth"];
         for (NSString *key in @[ @"commandBar", @"windowCorners", @"commandBarPosition", @"compactTabRowsSize", @"pinTabShortcutKey", @"undoCloseTabShortcut", @"commandBarDarkness",
-                                 @"windowCornerRadius", @"commandBarBlurWindow", @"launchFlagsArgs" ])
+                                 @"windowCornerRadius", @"peekGenie", @"commandBarBlurWindow", @"launchFlagsArgs" ])
             [defaults removeObjectForKey:key];
         DPConfigImport *restored = DPImportConfigData(populated, NO, NULL);
         expect(restored && restored.appliedCount == DPPatchCount - 1 + settings.count, @"importing an export applies every tweak and setting");
@@ -600,6 +626,7 @@ int main(void) {
         DPCheckImport(defaults);
         DPCheckSingleApply();
         DPCheckPreview(defaults);
+        DPCheckMigration(defaults);
 
         [NSFileManager.defaultManager removeItemAtPath:home error:NULL];
         if (failures) {

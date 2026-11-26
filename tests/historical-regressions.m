@@ -1,5 +1,5 @@
 #import "StdPatch/StdPatch.h"
-#import "Peek/Peek.h"
+#import "Patches/Peek/Peek.h"
 #import "Patches/LittleDia/LittleDia.h"
 #import "Patches/HideToolbar/HideToolbar.h"
 #import "Patches/CompactTabRows/CompactTabRows.h"
@@ -179,8 +179,8 @@ static NSArray<NSWindow *> *gTestWindows;
 static NSArray<NSWindow *> *DPApp_windows(NSApplication *self, SEL _cmd) { return gTestWindows ?: @[]; }
 static NSArray<NSWindow *> *DPApp_orderedWindows(NSApplication *self, SEL _cmd) { return gTestWindows ?: @[]; }
 
-#import "Peek/Toolbar.m"
-#import "Peek/ToolbarRules.m"
+#import "Patches/Peek/Toolbar.m"
+#import "Patches/Peek/ToolbarRules.m"
 #import "Patches/LittleDia/Over.m"
 #import "Patches/LittleDia/Stack.m"
 

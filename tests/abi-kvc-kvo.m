@@ -7,7 +7,7 @@
 #import "StdPatch/StdPatch.h"
 #import "Patches/CommandBar/Tabs.h"
 #import "Patches/LittleDia/LittleDia.h"
-#import "Peek/Peek.h"
+#import "Patches/Peek/Peek.h"
 #import "Patches/HideToolbar/HideToolbar.h"
 #import "Patches/SkipAccount/Startup.h"
 #import "Settings/Settings.h"

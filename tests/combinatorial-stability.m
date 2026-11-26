@@ -21,7 +21,7 @@
 #import "Patches/CommandBar/HideTab.h"
 #import "Patches/CommandBar/Tabs.h"
 #import "Patches/CommandBar/AutoPip.h"
-#import "Peek/Peek.h"
+#import "Patches/Peek/Peek.h"
 #import "Patches/LittleDia/LittleDia.h"
 #import "Patches/UnloadTab/Pages.h"
 #import "Patches/UnloadTab/Recent.h"

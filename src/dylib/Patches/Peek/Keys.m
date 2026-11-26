@@ -1,4 +1,4 @@
-#import "Peek.h"
+#import "Patches/Peek/Peek.h"
 #import <Carbon/Carbon.h>
 
 static BOOL DPIsDigitKey(NSEvent *event) {

@@ -1,4 +1,4 @@
-#import "Peek.h"
+#import "Patches/Peek/Peek.h"
 
 static BOOL DPTabSelected(NSView *tab) { return DPStateSelected(DPTabState(tab)); }
 

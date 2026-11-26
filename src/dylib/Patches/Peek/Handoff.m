@@ -1,4 +1,4 @@
-#import "Peek.h"
+#import "Patches/Peek/Peek.h"
 #import "Patches/CommandBar/Tabs.h"
 #import <dlfcn.h>
 

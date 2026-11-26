@@ -1,4 +1,4 @@
-#import "Peek.h"
+#import "Patches/Peek/Peek.h"
 #import "Commands/GroupTabs/GroupTabs.h"
 #import "Patches/CommandBar/Tabs.h"
 #import "Patches/HideToolbar/HideToolbar.h"
@@ -113,6 +113,17 @@ void DPPeekOpenDragged(NSURL *url, NSPoint origin) {
     if (DPPeekCanOpen(page)) DPPeekOpen(window, DPActiveTabID(window), url, origin, DPPeekHoveredDelegate, page);
 }
 
+static id DPPeekMonitor;
+
+static void DPPeekSyncMonitor(BOOL on) {
+    DPSyncMonitor(&DPPeekMonitor, on, NSEventMaskFlagsChanged | NSEventMaskKeyDown, ^NSEvent *(NSEvent *event) {
+        if (!DPPeek.on) return event;
+        if (event.type == NSEventTypeKeyDown) DPPeekLookAheadTurn++;
+        else DPPeekLookAhead();
+        return event;
+    });
+}
+
 static void DPInstallPeek(void) {
     DPSamplesProgressColors = DPPeek.on;
     DPPeekInstallPages();
@@ -125,16 +136,12 @@ static void DPInstallPeek(void) {
         DPHook(DPDiaWebContent, @selector(webContents:decidePolicyForNavigationAction:), (IMP)DPWebContent_decidePolicy);
         DPHook(DPDiaWebContent, @selector(webContents:didChangeStatusText:), (IMP)DPWebContent_status);
     });
-    [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskFlagsChanged | NSEventMaskKeyDown handler:^NSEvent *(NSEvent *event) {
-        if (!DPPeek.on) return event;
-        if (event.type == NSEventTypeKeyDown) DPPeekLookAheadTurn++;
-        else DPPeekLookAhead();
-        return event;
-    }];
+    DPPeekSyncMonitor(DPPeek.on);
 }
 
 static void DPApplyPeek(DPPatch *patch) {
     DPSamplesProgressColors = patch->on;
+    DPPeekSyncMonitor(patch->on);
     if (patch->on) DPPeekEnableChatContext();
     else DPPeekCloseAll();
 }
@@ -168,7 +175,7 @@ DP_PATCH(DPPeek) {
     .key = @"peek",
     .order = 104,
     .title = @"Peek on Shift-Click",
-    .detail = @"Deprecated: Dia now includes its own Peek. Shift-click a link to preview it in DiaTweaks’ card over the page, with Escape or ⌘W to close, ⌘O to open as a tab, Genie animation, and drag-to-Peek.",
+    .detail = @"Deprecated: turned off in 1.2 so Dia’s built-in Shift-Click Peek takes over. Switch it back on to use DiaTweaks’ card over the page instead.",
     .symbol = @"eye.fill",
     .tint = @"systemMintColor",
     .section = @"Links",
@@ -180,5 +187,5 @@ DP_PATCH(DPPeek) {
                               {DPSettingNumber, @"peekDarkness", .defaultNumber = 0.45, .min = 0, .max = 1},
                               {DPSettingNumber, @"peekSpeed", .defaultNumber = 0.9, .min = 0.25, .max = 3}),
     .rows = DPPeekSettingsRows,
-    .hint = @"Tip: right after Dia starts, open or switch to any tab once to start Peek.",
+    .hint = @"Dia now includes its own Peek, so DiaTweaks won’t keep maintaining a separate one from scratch. Future tweaks like the Genie animation and AI Side Chat support will build on Dia’s Peek instead.",
 };

@@ -32,7 +32,7 @@ diatweaks local add ~/Downloads/MyTweak.m
 
 ```sh
 diatweaks local available
-diatweaks local install Peek
+diatweaks local install exampleTweak
 ```
 
 `install` takes a tweak's name, key or title, and needs the network once; after that it's an ordinary local tweak. Nothing is listed when there are no optional tweaks yet, and a tweak your DiaTweaks already has built in is never offered.

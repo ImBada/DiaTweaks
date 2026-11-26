@@ -1,4 +1,4 @@
-#import "Peek.h"
+#import "Patches/Peek/Peek.h"
 #import "Patches/HideToolbar/HideToolbar.h"
 
 static NSMenuItem *DPPeekMenuItem(NSMenu *menu, NSString *title) {

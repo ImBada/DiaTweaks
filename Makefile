@@ -102,7 +102,7 @@ build/split-client-hello: tests/split-client-hello.m $(wildcard $(SPLIT)/Split.[
 build/vertical-tab-glow: tests/vertical-tab-glow.m $(wildcard src/dylib/Patches/HideVerticalTabGlow/*.[hm]) | build
 	clang $(CFLAGS) -Isrc/dylib -framework AppKit -framework QuartzCore -o $@ $<
 
-build/peek-cursor: tests/peek-cursor.m tweaks/Peek/Cursor.m tweaks/Peek/Peek.h src/dylib/StdPatch/Hook.m $(wildcard src/dylib/StdPatch/*.h) | build
+build/peek-cursor: tests/peek-cursor.m src/dylib/Patches/Peek/Cursor.m src/dylib/Patches/Peek/Peek.h src/dylib/StdPatch/Hook.m $(wildcard src/dylib/StdPatch/*.h) | build
 	clang $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -Isrc/dylib -framework AppKit -o $@ $<
 
 build/link-key: tests/link-key.m src/dylib/Patches/LittleDia/LinkKey.m src/dylib/Patches/LittleDia/LittleDia.h $(wildcard src/dylib/StdPatch/*.h) | build
@@ -145,10 +145,10 @@ build/little-dia-stack: tests/little-dia-stack.m src/dylib/Patches/LittleDia/Sta
 build/little-dia-profile: tests/little-dia-profile.m src/dylib/Patches/LittleDia/Profile.m $(wildcard src/dylib/StdPatch/*.h) | build
 	clang $(CFLAGS) -Isrc/dylib -framework AppKit -o $@ $<
 
-build/little-dia-launcher: tests/little-dia-launcher.m src/dylib/Patches/LittleDia/Launcher.m src/dylib/Patches/LittleDia/NewWindow.m src/dylib/Patches/LittleDia/LittleDia.h $(wildcard src/dylib/StdPatch/*.h) | build
+build/little-dia-launcher: tests/little-dia-launcher.m tests/runloop.h src/dylib/Patches/LittleDia/Launcher.m src/dylib/Patches/LittleDia/NewWindow.m src/dylib/Patches/LittleDia/LittleDia.h $(wildcard src/dylib/StdPatch/*.h) | build
 	clang $(CFLAGS) -Isrc/dylib -framework AppKit -framework QuartzCore -o $@ tests/little-dia-launcher.m
 
-build/tracking: tests/tracking.m src/dylib/Commands/GroupTabs/Tracking.m $(O_MESSAGES) $(O_HOOK) $(O_VIEWS) $(wildcard src/dylib/StdPatch/*.h) | build
+build/tracking: tests/tracking.m tests/runloop.h src/dylib/Commands/GroupTabs/Tracking.m $(O_MESSAGES) $(O_HOOK) $(O_VIEWS) $(wildcard src/dylib/StdPatch/*.h) | build
 	clang $(CFLAGS) -Isrc/dylib -framework AppKit -o $@ tests/tracking.m $(O_HOOK) $(O_VIEWS) $(O_MESSAGES)
 
 build/little-dia-tab-links: tests/little-dia-tab-links.m src/dylib/Patches/LittleDia/TabLinks.m src/dylib/Patches/LittleDia/LinkKey.m src/dylib/Patches/LittleDia/LittleDia.h $(S_HOOK) $(S_VIEWS) $(wildcard src/dylib/StdPatch/*.h) | build
@@ -313,15 +313,15 @@ check: check-passkeys-managers
 build/app-icon-signing: tests/app-icon-signing.m $(addprefix src/diapatch/,AppIcon.m IconCatalog.m TweakPrefs.m AppIcon.h IconCatalog.h TweakPrefs.h) | build
 	clang $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -Isrc -framework Foundation -framework CoreGraphics -framework Security -o $@ tests/app-icon-signing.m $(addprefix src/diapatch/,AppIcon.m IconCatalog.m TweakPrefs.m)
 
-PEEK_LIFE := $(addprefix tweaks/Peek/,Peek.h Glow.m Tab.m Selection.m Motion.m Keys.m Visibility.m Chat.m ChatContext.m Card.m Pages.m Handoff.m Zoom.m DragLinks.m)
+PEEK_LIFE := $(addprefix src/dylib/Patches/Peek/,Peek.h Glow.m Tab.m Selection.m Motion.m Keys.m Visibility.m Chat.m ChatContext.m Card.m Pages.m Handoff.m Zoom.m DragLinks.m)
 build/peek-lifecycle: tests/peek-lifecycle.m $(PEEK_LIFE) $(S_HOOK) $(S_VIEWS) $(wildcard src/dylib/StdPatch/*.h) | build
 	clang $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -Isrc/dylib -framework AppKit -framework QuartzCore -o $@ tests/peek-lifecycle.m $(S_HOOK) $(S_VIEWS)
 
-PEEK_TABS := $(addprefix tweaks/Peek/,Peek.h Controls.m Address.m Find.m Tab.m Selection.m Motion.m Keys.m Visibility.m Chat.m ChatContext.m Card.m Pages.m Handoff.m Zoom.m)
+PEEK_TABS := $(addprefix src/dylib/Patches/Peek/,Peek.h Controls.m Address.m Find.m Tab.m Selection.m Motion.m Keys.m Visibility.m Chat.m ChatContext.m Card.m Pages.m Handoff.m Zoom.m)
 build/peek-tabs: tests/peek-tabs.m $(PEEK_TABS) $(S_HOOK) $(S_VIEWS) $(wildcard src/dylib/StdPatch/*.h) | build
 	clang $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -Isrc/dylib -framework AppKit -framework QuartzCore -o $@ tests/peek-tabs.m $(S_HOOK) $(S_VIEWS)
 
-PEEK_CHAT := $(addprefix tweaks/Peek/,Peek.h Chat.m ChatContext.m Keys.m Visibility.m Selection.m Card.m Pages.m Handoff.m Motion.m Tab.m)
+PEEK_CHAT := $(addprefix src/dylib/Patches/Peek/,Peek.h Chat.m ChatContext.m Keys.m Visibility.m Selection.m Card.m Pages.m Handoff.m Motion.m Tab.m)
 build/peek-chat: tests/peek-chat.m $(PEEK_CHAT) $(S_HOOK) $(S_VIEWS) $(wildcard src/dylib/StdPatch/*.h) | build
 	clang $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -Isrc/dylib -framework AppKit -framework QuartzCore -o $@ tests/peek-chat.m $(S_HOOK) $(S_VIEWS)
 
@@ -386,7 +386,7 @@ HISTORICAL_REGRESSIONS := $(call OBJSAN,src/dylib/Patches/CompactTabRows/Compact
 	src/dylib/Patches/PullRequestRepo/PullRequestRepo.m src/dylib/Patches/PullRequestRepo/Subtitle.m src/dylib/Patches/PullRequestRepo/Rows.m) \
 	$(S_HOOK) $(S_VIEWS)
 
-build/historical-regressions: tests/historical-regressions.m tests/watchdog.h tests/runloop.h tweaks/Peek/Toolbar.m tweaks/Peek/ToolbarRules.m src/dylib/Patches/LittleDia/Over.m src/dylib/Patches/LittleDia/Stack.m $(HISTORICAL_REGRESSIONS) $(wildcard src/dylib/StdPatch/*.h tweaks/Peek/Peek.h src/dylib/Patches/LittleDia/LittleDia.h src/dylib/Patches/HideToolbar/HideToolbar.h src/dylib/Patches/CompactTabRows/CompactTabRows.h src/dylib/Patches/PullRequestRepo/PullRequestRepo.h) | build
+build/historical-regressions: tests/historical-regressions.m tests/watchdog.h tests/runloop.h src/dylib/Patches/Peek/Toolbar.m src/dylib/Patches/Peek/ToolbarRules.m src/dylib/Patches/LittleDia/Over.m src/dylib/Patches/LittleDia/Stack.m $(HISTORICAL_REGRESSIONS) $(wildcard src/dylib/StdPatch/*.h src/dylib/Patches/Peek/Peek.h src/dylib/Patches/LittleDia/LittleDia.h src/dylib/Patches/HideToolbar/HideToolbar.h src/dylib/Patches/CompactTabRows/CompactTabRows.h src/dylib/Patches/PullRequestRepo/PullRequestRepo.h) | build
 	clang $(CFLAGS) $(SANITIZE) -Isrc/dylib -framework AppKit -framework QuartzCore -o $@ tests/historical-regressions.m $(HISTORICAL_REGRESSIONS)
 
 # DiaPatches' constructor skips helper processes, so the suite runs as one and loads the patch table itself.
@@ -404,11 +404,11 @@ build/abi-kvc-kvo-swift.o: src/dylib/Commands/GroupTabs/Selection.swift tests/ab
 
 ABI_KVC_KVO := $(S_HOOK) $(S_VIEWS) $(S_BARTABS) \
 	$(call OBJSAN,src/dylib/Patches/LittleDia/Profile.m src/dylib/Patches/SkipAccount/Code.m \
-	tweaks/Peek/Address.m tweaks/Peek/CopyURL.m tweaks/Peek/Toolbar.m \
-	tweaks/Peek/ToolbarRules.m tweaks/Peek/ChatContext.m tweaks/Peek/Peek.m tweaks/Peek/PinnedLinks.m \
+	src/dylib/Patches/Peek/Address.m src/dylib/Patches/Peek/CopyURL.m src/dylib/Patches/Peek/Toolbar.m \
+	src/dylib/Patches/Peek/ToolbarRules.m src/dylib/Patches/Peek/ChatContext.m src/dylib/Patches/Peek/Peek.m src/dylib/Patches/Peek/PinnedLinks.m \
 	src/dylib/Settings/Preview.m)
 
-build/abi-kvc-kvo: tests/abi-kvc-kvo.m tests/watchdog.h tests/runloop.h build/abi-kvc-kvo-swift.o $(ABI_KVC_KVO) src/dylib/Patches/ExtensionsShortcut/ExtensionsShortcut.m src/dylib/Patches/HideHistorySuggestions/HideHistorySuggestions.m $(wildcard src/dylib/StdPatch/*.h tweaks/Peek/*.h src/dylib/Patches/LittleDia/*.h src/dylib/Patches/CommandBar/*.h src/dylib/Patches/SkipAccount/*.h src/dylib/Settings/*.h) | build
+build/abi-kvc-kvo: tests/abi-kvc-kvo.m tests/watchdog.h tests/runloop.h build/abi-kvc-kvo-swift.o $(ABI_KVC_KVO) src/dylib/Patches/ExtensionsShortcut/ExtensionsShortcut.m src/dylib/Patches/HideHistorySuggestions/HideHistorySuggestions.m $(wildcard src/dylib/StdPatch/*.h src/dylib/Patches/Peek/*.h src/dylib/Patches/LittleDia/*.h src/dylib/Patches/CommandBar/*.h src/dylib/Patches/SkipAccount/*.h src/dylib/Settings/*.h) | build
 	clang $(CFLAGS) $(SANITIZE) -Isrc/dylib -framework AppKit -framework QuartzCore -framework AVFoundation -framework VideoToolbox -framework CoreMedia -framework CoreVideo \
 		-L$(SWIFT_LIB) -Wl,-rpath,/usr/lib/swift -o $@ tests/abi-kvc-kvo.m $(ABI_KVC_KVO) build/abi-kvc-kvo-swift.o
 
@@ -459,11 +459,11 @@ COMBINATORIAL := $(S_HOOK) $(S_VIEWS) $(S_APP) $(S_MESSAGES) $(S_BARTABS) \
 	src/dylib/Patches/CommandBar/HideTabLayout.m \
 	src/dylib/Patches/LittleDia/LinkMenu.m src/dylib/Patches/LittleDia/Options.m src/dylib/Patches/LittleDia/Launcher.m \
 	src/dylib/Patches/PinnedCmdClick/PinnedCmdClick.m \
-	tweaks/Peek/Peek.m tweaks/Peek/Card.m tweaks/Peek/Pages.m \
-	tweaks/Peek/Keys.m tweaks/Peek/Chat.m tweaks/Peek/ChatContext.m \
-	tweaks/Peek/Visibility.m tweaks/Peek/Motion.m tweaks/Peek/Selection.m \
-	tweaks/Peek/Handoff.m \
-	tweaks/Peek/Tab.m tweaks/Peek/Zoom.m \
+	src/dylib/Patches/Peek/Peek.m src/dylib/Patches/Peek/Card.m src/dylib/Patches/Peek/Pages.m \
+	src/dylib/Patches/Peek/Keys.m src/dylib/Patches/Peek/Chat.m src/dylib/Patches/Peek/ChatContext.m \
+	src/dylib/Patches/Peek/Visibility.m src/dylib/Patches/Peek/Motion.m src/dylib/Patches/Peek/Selection.m \
+	src/dylib/Patches/Peek/Handoff.m \
+	src/dylib/Patches/Peek/Tab.m src/dylib/Patches/Peek/Zoom.m \
 	$(LAUNCH_FLAGS) src/dylib/Patches/SplitClientHello/SplitClientHello.m \
 	src/dylib/Patches/SplitClientHello/Split.m src/dylib/Patches/SplitClientHello/Write.m src/dylib/Patches/SplitClientHello/Send.m \
 	$(LOCAL_CORE))

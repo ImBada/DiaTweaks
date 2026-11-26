@@ -1,4 +1,5 @@
 #import "Commands/GroupTabs/Tracking.m"
+#import "runloop.h"
 #import "Patches/UndoCloseTab/UndoCloseTab.m"
 
 CFTimeInterval DPFoldedAt;
@@ -234,7 +235,7 @@ static void checkKeepFoldersOpen(void) {
     header.headerClicks = 0;
     folder->shouldDisplayExpandedContainer = NO;
     [folder layout];
-    [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.2]];
+    DPPumpUntil(^BOOL { return header.headerClicks == 1; });
     expect(header.headerClicks == 1, @"dragging a folder header does not suppress reopening when it collapses");
 
     folder->shouldDisplayExpandedContainer = YES;
@@ -246,7 +247,7 @@ static void checkKeepFoldersOpen(void) {
     header.headerClicks = 0;
     folder->shouldDisplayExpandedContainer = NO;
     [folder layout];
-    [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.2]];
+    DPDrainMainQueue(0.2);
     expect(header.headerClicks == 0, @"clicking the folder header lets the user collapse it");
 
     DPStateOf(folder)->clicked = 0;
@@ -258,7 +259,7 @@ static void checkKeepFoldersOpen(void) {
     [folder layout];
     win.liveVisible = NO;
     [win close];
-    [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.2]];
+    DPDrainMainQueue(0.2);
     expect(header.headerClicks == 0, @"closing the window before DPReopenFolders fires posts no events to a dead window");
 
     DPKeepFoldersOpen.on = NO;
@@ -431,7 +432,11 @@ static void checkCloseFromTabSwitcher(void) {
     expect(DPCloseFocusedTab(wc) && t1.closed, @"closing focused tab from switcher closes the tab");
     sw.appleScriptTabs = @[ t2, t3 ];
     // Switcher never reopens: DPFocus must stop after <= 9 lookups instead of polling 100 times for 2s.
-    [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.45]];
+    DPPumpUntil(^BOOL { return cycleTarget.cycles == 1; });
+    for (int seen = -1; seen != gSwitcherLookups;) {
+        seen = gSwitcherLookups;
+        DPDrainMainQueue(0.1);
+    }
     expect(cycleTarget.cycles == 1, @"cycle menu item fires once after tab closes");
     expect(gSwitcherLookups >= 2 && gSwitcherLookups <= 12, @"switcher focus polling stops within bounded retries when switcher stays closed");
 

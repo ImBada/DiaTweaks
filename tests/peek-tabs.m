@@ -1,4 +1,4 @@
-#import "Peek/Peek.h"
+#import "Patches/Peek/Peek.h"
 #import "Patches/CommandBar/Tabs.h"
 #import "Patches/HideToolbar/HideToolbar.h"
 #import <Carbon/Carbon.h>
@@ -207,20 +207,20 @@ void DPPeekHideDragZone(void) {}
 NSURL *DPAddressURL(NSString *typed) { return [NSURL URLWithString:typed]; }
 NSButton *DPMakeBarButton(NSString *symbol, NSString *label, NSString *key, void (^action)(void)) { return [NSButton new]; }
 
-#import "Peek/Controls.m"
-#import "Peek/Address.m"
-#import "Peek/Find.m"
-#import "Peek/Tab.m"
-#import "Peek/Selection.m"
-#import "Peek/Motion.m"
-#import "Peek/Keys.m"
-#import "Peek/Visibility.m"
-#import "Peek/Chat.m"
-#import "Peek/ChatContext.m"
-#import "Peek/Card.m"
-#import "Peek/Pages.m"
-#import "Peek/Handoff.m"
-#import "Peek/Zoom.m"
+#import "Patches/Peek/Controls.m"
+#import "Patches/Peek/Address.m"
+#import "Patches/Peek/Find.m"
+#import "Patches/Peek/Tab.m"
+#import "Patches/Peek/Selection.m"
+#import "Patches/Peek/Motion.m"
+#import "Patches/Peek/Keys.m"
+#import "Patches/Peek/Visibility.m"
+#import "Patches/Peek/Chat.m"
+#import "Patches/Peek/ChatContext.m"
+#import "Patches/Peek/Card.m"
+#import "Patches/Peek/Pages.m"
+#import "Patches/Peek/Handoff.m"
+#import "Patches/Peek/Zoom.m"
 
 static IMP gViewUpdateTrackingAreas;
 static void DPProbe_updateTrackingAreas(NSView *self, SEL _cmd) {

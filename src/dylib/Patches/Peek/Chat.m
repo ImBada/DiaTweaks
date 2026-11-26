@@ -1,4 +1,4 @@
-#import "Peek.h"
+#import "Patches/Peek/Peek.h"
 
 @interface DPPeekCard (ChatLayout)
 - (void)followPane;

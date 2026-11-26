@@ -287,6 +287,31 @@ static void testBriefLanguage(NSString *dir) {
     CFPreferencesAppSynchronize(cfdom);
 }
 
+static void testMigratesPeekOnce(NSString *dir) {
+    NSString *domain = [dir stringByAppendingPathComponent:@"peek-prefs"];
+    CFStringRef cfdom = (__bridge CFStringRef)domain;
+    setenv("DIATWEAKS_DOMAIN", domain.fileSystemRepresentation, 1);
+    CFPreferencesSetAppValue(CFSTR("peek"), kCFBooleanTrue, cfdom);
+    CFPreferencesSetAppValue(CFSTR("peekPinnedLinks"), kCFBooleanTrue, cfdom);
+    CFPreferencesAppSynchronize(cfdom);
+    DPMigratePrefs();
+    expect(![DPPref(@"peek") boolValue] && [DPPref(@"peekTurnedOffForNative") boolValue], @"the first migration turns Peek off and records it");
+    expect([DPPref(@"peekPinnedLinks") boolValue], @"and leaves Peek's other switches alone");
+
+    CFPreferencesSetAppValue(CFSTR("peek"), kCFBooleanTrue, cfdom);
+    CFPreferencesAppSynchronize(cfdom);
+    DPMigratePrefs();
+    expect([DPPref(@"peek") boolValue], @"a Peek switched back on is kept by later migrations");
+
+    for (NSString *key in @[ @"peek", @"peekPinnedLinks", @"peekTurnedOffForNative" ]) CFPreferencesSetAppValue((__bridge CFStringRef)key, NULL, cfdom);
+    CFPreferencesAppSynchronize(cfdom);
+    DPMigratePrefs();
+    expect([DPPref(@"peekTurnedOffForNative") boolValue] && !DPPref(@"peek"), @"a clean domain is marked without gaining a Peek switch");
+    for (NSString *key in @[ @"peek", @"peekTurnedOffForNative" ]) CFPreferencesSetAppValue((__bridge CFStringRef)key, NULL, cfdom);
+    CFPreferencesAppSynchronize(cfdom);
+    unsetenv("DIATWEAKS_DOMAIN");
+}
+
 static void testFeedFollowsDomain(NSString *dir) {
     NSString *domain = [dir stringByAppendingPathComponent:@"feed-prefs"];
     setenv("DIATWEAKS_DOMAIN", domain.fileSystemRepresentation, 1);
@@ -506,6 +531,7 @@ int main(void) {
         testFeedCache(dir);
         testBriefLanguage(dir);
         testFeedFollowsDomain(dir);
+        testMigratesPeekOnce(dir);
         testIconCatalog(dir);
         testUninstallPreservesStateWhenPristineMissing(dir);
         testRootGuard();
