@@ -155,6 +155,6 @@ body:
     id: versions
     attributes:
       label: Dia and macOS versions
-      placeholder: Dia 1.55.1, macOS 26.1
+      placeholder: Dia 1.59.0, macOS 26.x
     validations:
       required: true

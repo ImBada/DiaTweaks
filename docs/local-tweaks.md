@@ -1,6 +1,6 @@
 # Local Tweaks
 
-Local Tweaks runs tweaks you keep in a folder of your own. They are ordinary DiaTweaks tweaks: each one gets a switch in **Settings → Patches**, a key in `com.diapatches`, and a line in `diatweaks list`. They survive Dia updates, DiaTweaks updates, and `diapatch uninstall --purge`.
+Local Tweaks runs tweaks you keep in a folder of your own. They are ordinary DiaTweaks tweaks: each one gets a switch in **Dia → Settings → Patches**, a key in `com.diapatches`, and a line in `diatweaks list`. They survive Dia updates, DiaTweaks updates, and `diapatch uninstall --purge`.
 
 The folder is:
 
@@ -8,7 +8,7 @@ The folder is:
 ~/Library/Application Support/DiaPatches/local/
 ```
 
-Open it from **Settings → Patches → Local Tweaks → Open Folder**, or with `diatweaks local open`.
+Open it from **Dia → Settings → Patches → App → Local Tweaks → Open Folder**, or with `diatweaks local open`.
 
 ## What you can drop in
 
@@ -28,11 +28,11 @@ diatweaks local add ~/Downloads/MyTweak.m
 
 ## Optional tweaks
 
-**Settings → Patches → Local Tweaks → Available** lists tweaks DiaTweaks keeps in [`tweaks/`](../tweaks/) instead of building them in. **Install** downloads one into your local folder, builds it and switches it on for the next launch. A tweak you had on before it moved out of the built-in list comes first, marked *Previously on*.
+**Dia → Settings → Patches → App → Local Tweaks → Available** lists tweaks DiaTweaks keeps in [`tweaks/`](../tweaks/) instead of building them in. **Install** downloads one into your local folder, builds it and switches it on for the next launch. A tweak you had on before it moved out of the built-in list comes first, marked *Previously on*.
 
 ```sh
 diatweaks local available
-diatweaks local install mouseBackForward
+diatweaks local install Peek
 ```
 
 `install` takes a tweak's name, key or title, and needs the network once; after that it's an ordinary local tweak. Nothing is listed when there are no optional tweaks yet, and a tweak your DiaTweaks already has built in is never offered.
@@ -83,7 +83,7 @@ A broken local tweak never stops Dia from opening. Its row under **Installed** i
 - A tweak that reuses a key DiaTweaks already has is dropped, and the rest of the file still loads.
 - A `requires`, `disabledBy` or `coveredBy` that points at nothing, or loops, is dropped.
 
-If Dia crashes at launch while local tweaks are loaded, the next launch turns **only** the local tweaks off and leaves the other 100 alone. Settings then offers **Turn Local Tweaks Back On**.
+If Dia crashes at launch while local tweaks are loaded, the next launch turns **only** the local tweaks off and leaves the built-in tweaks alone. Settings then offers **Turn Local Tweaks Back On**.
 
 ## The command
 
@@ -107,7 +107,7 @@ If Dia crashes at launch while local tweaks are loaded, the next launch turns **
 
 ## Turning it off
 
-**Local Tweaks** in **Settings → Patches → App** is the master switch. Turn it off and no local code is loaded at all; your files stay where they are. **Pause Tweaks** and Safe Mode also stop local tweaks from loading.
+**Local Tweaks** in **Dia → Settings → Patches → App** is the master switch. Turn it off and no local code is loaded at all; your files stay where they are. **Pause Tweaks** and Safe Mode also stop local tweaks from loading.
 
 ## Requirements
 

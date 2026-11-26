@@ -5,7 +5,7 @@ Keep it small, test it hard, show it working.
 ## Pull requests
 
 - One change per PR.
-- Fill in the template: What, Why, Proof, Tested on, Checklist. Short sentences.
+- Fill in the template: What, Why, Proof, Tested on, Checklist. Short sentences, under 250 words not counting Proof and links. A check comments on your PR until it follows these rules, and updates as you edit.
 - Never leave a section empty or delete it. If one doesn't apply, write `N/A` in it, and tick a checklist item that doesn't apply with `(N/A)` after it. Proof is never N/A for a change you can see in Dia.
 - Proof is required for anything visible in Dia: a screenshot for static changes, a screen recording for anything that animates. Show before and after when you change existing behaviour.
 - Try to break what you made before you open the PR, and fix what you find. Every change has to work with tabs in the sidebar and tabs at the top, and with each tweak on and off.
@@ -33,9 +33,9 @@ With the developer tools on, a script can also drive Dia: post the distributed n
 
 Every tweak has a page on the [wiki](https://github.com/JaceThings/DiaTweaks/wiki), titled as it is in Settings, and a preview video on its Settings page. You don't make either: a maintainer records the preview and writes the page, from [`docs/tweak-page.md`](docs/tweak-page.md), before merging. So a new tweak needs a change you can see in Dia: one recording of it becomes both the preview and the picture on its page.
 
-The preview comes from the wiki repo's `previews` folder, 16:10: `vertical-<key>.mp4` recorded with tabs in the sidebar, `horizontal-<key>.mp4` with tabs at the top, or a `.png` of either. Settings shows the one matching Dia's layout and falls back to the other, so one is enough unless the tweak looks different in each. Encode videos at 1120×700 and 60 fps: `ffmpeg -i in.mp4 -an -vf fps=60,scale=1120:700 -c:v libx264 -preset veryslow -crf 26 -pix_fmt yuv420p -movflags +faststart vertical-<key>.mp4`.
+The preview comes from the wiki repo's `previews` folder, 16:10. `vertical-` is recorded with tabs in the sidebar and `horizontal-` with tabs at the top. For Dia's layout, Settings looks for `<layout>-<key>-onoff.webp`, then `<layout>-<key>.mp4`, then `<layout>-<key>.png`, and falls back to the other layout, so one file is enough unless the tweak looks different in each. An `-onoff.webp` is a still with the tweak off in the top half and on in the bottom half, and Settings flips between them. Encode videos at 1120×700 and 60 fps: `ffmpeg -i in.mp4 -an -vf fps=60,scale=1120:700 -c:v libx264 -preset veryslow -crf 26 -pix_fmt yuv420p -movflags +faststart vertical-<key>.mp4`. The animated `vertical-<key>.webp` in [`docs/tweak-page.md`](docs/tweak-page.md) is only the picture on the wiki page. Settings never loads it.
 
-CI fails if a patch has no wiki page or the sidebar doesn't link to it, so a new tweak's PR stays red until its page is up. Run `scripts/check-tweak-docs` after `make` to check.
+CI warns if a patch has no wiki page or the sidebar doesn't link to it, because the page goes up after the code merges. Run `scripts/check-tweak-docs` after `make` to check.
 
 ## Testing
 

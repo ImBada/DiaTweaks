@@ -1,2 +1,4 @@
 build/
 cli/target/
+.DS_Store
+tweaks/index.json.tmp

@@ -2,7 +2,14 @@
 set -eu
 cd "$(dirname "$0")"
 support="${DIAPATCH_HOME:-$HOME/Library/Application Support/DiaPatches}"
-dia="${DIAPATCH_APP:-/Applications/Dia.app}/Contents/MacOS/Dia"
+app=${DIAPATCH_APP:-}
+if [ -z "$app" ]; then
+    app=/Applications/Dia.app
+    for candidate in "$(cat "$support/dia-app" 2>/dev/null)" /Applications/Dia.app "$HOME/Applications/Dia.app"; do
+        if [ -x "$candidate/Contents/MacOS/Dia" ]; then app=$candidate; break; fi
+    done
+fi
+dia="$app/Contents/MacOS/Dia"
 report="$PWD/build/test-report.json"
 
 pid=$(pgrep -f "$dia\$" || true)

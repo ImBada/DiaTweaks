@@ -9,7 +9,7 @@ Usage: ./install.sh [-y|--yes] [-h|--help]
 
 Builds DiaTweaks from this folder, installs it and patches Dia.
 
-  -y, --yes   Don't ask before installing or updating Rust
+  -y, --yes   Never ask about Rust; skip the diatweaks command if it's missing or too old
   -h, --help  Show this help
 EOF
 }

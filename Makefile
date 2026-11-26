@@ -582,6 +582,6 @@ patch:
 	@scripts/new-patch "$(NAME)"
 
 clean:
-	rm -rf build
+	rm -rf build cli/target
 
 .PHONY: all check clean test patch

@@ -1084,9 +1084,9 @@ static const char kUsage[] =
     "  status [--json]  official, installed, staged and offered versions, and the update channel\n"
     "  local [list|build [NAME...]|doctor]\n"
     "                   list, compile or check the tweaks in DiaPatches/local\n"
-    "environment: DIAPATCH_IDENTITY (codesigning identity, remembered by install), DIAPATCH_HOME,\n"
-    "  DIAPATCH_APP (remembered by install), DIAPATCH_CACHE, DIAPATCH_FEED, DIAPATCH_RELEASES, DIAPATCH_COMMIT (the source commit installed), DIAPATCH_COMPARE, DIATWEAKS_LINK_DIR, DIAPATCH_NO_RELAUNCH (ignore --relaunch)\n"
-    "  DIAPATCH_HOME (also keeps install, apply and uninstall from clearing Dia's Screen Recording permission or changing Launch Services)\n"
+    "environment: DIAPATCH_IDENTITY (codesigning identity, remembered by install),\n"
+    "  DIAPATCH_HOME (DiaPatches' folder; setting it also keeps install, apply and uninstall from clearing Dia's Screen Recording permission or changing Launch Services),\n"
+    "  DIAPATCH_APP (remembered by install), DIAPATCH_CACHE, DIAPATCH_FEED, DIAPATCH_RELEASES, DIAPATCH_COMMIT (the source commit installed), DIAPATCH_COMPARE, DIATWEAKS_LINK_DIR, DIATWEAKS_DOMAIN (the settings domain, instead of com.diapatches), DIAPATCH_NO_RELAUNCH (ignore --relaunch)\n"
     "  DIAPATCH_ALLOW_ROOT (lets root run commands that change files)\n";
 
 static NSString *findDia(void) {

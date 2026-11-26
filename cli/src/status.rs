@@ -57,7 +57,10 @@ fn report(env: &Env, spinner: &Spinner) -> Result<Vec<String>> {
         format!("Staged     {staged}"),
         format!("Latest     {latest}"),
         format!("Safe mode  {safe_mode}"),
-        format!("DiaTweaks  {}", COMMIT.get(..7).unwrap_or(COMMIT)),
+        format!(
+            "DiaTweaks  {}",
+            tweaks_version(status.release.as_deref(), COMMIT)
+        ),
     ];
     if paused {
         lines.push("Paused     yes: every tweak is off and keeps its settings; run `diatweaks resume` to turn them back on".into());
@@ -77,4 +80,33 @@ fn report(env: &Env, spinner: &Spinner) -> Result<Vec<String>> {
         ));
     }
     Ok(lines)
+}
+
+fn tweaks_version(release: Option<&str>, commit: &str) -> String {
+    let short = commit.get(..7).unwrap_or(commit);
+    match release.map(|tag| tag.trim().trim_start_matches('v')) {
+        Some(version) if !version.is_empty() => format!("{version} ({short})"),
+        _ => short.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SHA: &str = "abc1234def5678abc1234def5678abc1234def56";
+
+    #[test]
+    fn release_builds_show_their_version_and_commit() {
+        assert_eq!(tweaks_version(Some("v1.2.0"), SHA), "1.2.0 (abc1234)");
+        assert_eq!(tweaks_version(Some("1.2.0"), SHA), "1.2.0 (abc1234)");
+    }
+
+    #[test]
+    fn dev_builds_show_only_the_commit() {
+        assert_eq!(tweaks_version(None, SHA), "abc1234");
+        assert_eq!(tweaks_version(Some(""), SHA), "abc1234");
+        assert_eq!(tweaks_version(Some("v"), SHA), "abc1234");
+        assert_eq!(tweaks_version(None, "unknown"), "unknown");
+    }
 }

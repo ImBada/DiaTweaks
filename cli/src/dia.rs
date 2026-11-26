@@ -32,6 +32,8 @@ pub struct Status {
     pub staged: Option<String>,
     pub feed: Option<String>,
     pub channel: String,
+    #[serde(default)]
+    pub release: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -375,6 +377,18 @@ mod tests {
             "{}",
             String::from_utf8_lossy(&ran.stderr)
         );
+    }
+
+    #[test]
+    fn status_reads_the_installed_release_when_diapatch_reports_one() {
+        let base = r#""official":"1.59.0","installed":"1.59.0","patched":true,"staged":null,"feed":null,"channel":"stable""#;
+        let source: Status = serde_json::from_str(&format!("{{{base},\"release\":null}}")).unwrap();
+        assert_eq!(source.release, None);
+        let older: Status = serde_json::from_str(&format!("{{{base}}}")).unwrap();
+        assert_eq!(older.release, None);
+        let release: Status =
+            serde_json::from_str(&format!("{{{base},\"release\":\"v1.2.0\"}}")).unwrap();
+        assert_eq!(release.release.as_deref(), Some("v1.2.0"));
     }
 
     #[test]

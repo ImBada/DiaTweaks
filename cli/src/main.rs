@@ -100,7 +100,7 @@ enum Command {
         #[arg(long)]
         purge: bool,
     },
-    /// Add, build and list tweaks you keep in your own folder
+    /// Add, build, install and list tweaks you keep in your own folder
     Local {
         #[command(subcommand)]
         command: Option<LocalCommand>,

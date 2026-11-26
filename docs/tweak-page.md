@@ -5,7 +5,7 @@ Keep the sentences short. Delete the sections that don't apply, and these commen
 
 One or two sentences on what it does.
 
-<!-- The Settings preview, as an animated WebP pushed next to it in previews/:
+<!-- The page's picture, an animated WebP pushed to previews/ next to the Settings preview. Settings never loads it: it fetches <layout>-key-onoff.webp, <layout>-key.mp4 or <layout>-key.png (see CONTRIBUTING.md).
      ffmpeg -i vertical-key.mp4 -vf fps=30,scale=800:500 frames/%04d.png
      img2webp -lossy -q 75 -m 6 -d 33 -mixed frames/*.png -o vertical-key.webp
      If the tweak looks different in each layout, put the vertical and horizontal ones side by side. -->

@@ -16,6 +16,7 @@ jobs:
       - uses: actions/checkout@v4
       - run: make
       - run: make check
+      - run: cargo test --manifest-path cli/Cargo.toml
       # The wiki goes live after the code it documents merges, so a missing page warns instead of failing.
       - run: scripts/check-tweak-docs
         continue-on-error: true
