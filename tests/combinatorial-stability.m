@@ -176,6 +176,7 @@ BOOL DPAdoptSpare(NSWindow *window, NSView *page) { return NO; }
 void DPNotMakingSpare(void) {}
 NSView *DPCommandBarPart(NSView *commandBar, const char *className) { return nil; }
 NSView *DPGoButton(NSView *toolbar) { return nil; }
+CGFloat DPTrim(NSView *container) { return 0; }
 NSString *DPRowName(NSCollectionView *list, NSIndexPath *path) {
     NSInteger idx = path.section == 0 ? path.item : 3 + path.item;
     return idx >= 0 && idx < (NSInteger)gRowNames.count ? gRowNames[idx] : nil;

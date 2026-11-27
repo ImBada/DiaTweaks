@@ -125,6 +125,31 @@ NSView *DPGoButton(NSView *toolbar) { return nil; }
 - (void)setFrame:(NSRect)frame { self.frameWrites++; [super setFrame:frame]; }
 @end
 
+// Compact Command Bar keeps the panel 48 pt short of the height Dia sets, and DPTrim reports the difference.
+@interface DPTrimmedPanel : _TtC20AssistantPanelUIBase22AssistantPanelRootView
+@property BOOL compact;
+@property CGFloat trim, kept;
+@end
+@implementation DPTrimmedPanel
+- (void)setFrameSize:(NSSize)size {
+    if (self.compact && size.height != self.kept) {
+        self.trim = 48;
+        size.height -= self.trim;
+        self.kept = size.height;
+    } else if (!self.compact) self.trim = 0;
+    [super setFrameSize:size];
+}
+@end
+
+CGFloat DPTrim(NSView *container) { return [container isKindOfClass:DPTrimmedPanel.class] ? ((DPTrimmedPanel *)container).trim : 0; }
+
+@interface DPFakeSuggestions : NSView
+@property CGFloat rows;
+@end
+@implementation DPFakeSuggestions
+- (NSSize)intrinsicContentSize { return NSMakeSize(NSViewNoIntrinsicMetric, self.rows); }
+@end
+
 @interface _TtCC14DynamicPopover28DynamicPopoverViewControllerP33_AB0357A1429F4D6D7F128058B713C93F8RootView : NSView
 @end
 @implementation _TtCC14DynamicPopover28DynamicPopoverViewControllerP33_AB0357A1429F4D6D7F128058B713C93F8RootView
@@ -359,6 +384,93 @@ static void DPCheckRepeatedNewTab(Class pageCls, Class stripCls, BOOL hiding, BO
     [page removeFromSuperview];
     [row removeFromSuperview];
     DPSet(window, &DPBlankKey, nil);
+}
+
+// #622: ⌘L's bar opens where it stays, before any ⌘T has measured a bar for the window.
+static void DPCheckFirstCommandL(Class popoverCls, Class barCls, Class suggestionsCls, Class toolbarCls, NSString *position, BOOL compact) {
+    gChoice = position;
+    NSString *name = [NSString stringWithFormat:@"window-first-l-%@-%d", position, compact];
+    NSString *mode = [NSString stringWithFormat:@"%@, Compact Command Bar %@", position, compact ? @"on" : @"off"];
+    NSRect visible = NSScreen.mainScreen ? NSScreen.mainScreen.visibleFrame : NSMakeRect(0, 0, 1400, 1000);
+    _TtC6Window14PlatformWindow *window = [[_TtC6Window14PlatformWindow alloc] initWithContentRect:NSMakeRect(-30000, -30000, 700, MIN(1000, NSHeight(visible) - 100))
+                                                                                        styleMask:NSWindowStyleMaskTitled
+                                                                                          backing:NSBackingStoreBuffered defer:NO];
+    window.identifier = name;
+    [window setFrameTopLeftPoint:NSMakePoint(NSMinX(visible), NSMaxY(visible))];
+    gWindows = @[ window ];
+    DPFakeTab *site = DPTab([name stringByAppendingString:@"-site"], @"https://example.org");
+    DPFakeScriptWindow *script = [DPFakeScriptWindow new];
+    script.windowId = name;
+    script.front = DPSpace(@[ site ]);
+    script.appleScriptProfiles = @[ script.front ];
+    script.activeTab = site;
+    gDelegate.appleScriptWindows = @[ script ];
+
+    DPTrimmedPanel *panel = [[DPTrimmedPanel alloc] initWithFrame:NSMakeRect(40, 40, 500, 108)];
+    panel.compact = compact;
+    NSView *commandBar = [[barCls alloc] initWithFrame:panel.bounds];
+    DPFakeSuggestions *suggestions = [[suggestionsCls alloc] initWithFrame:NSMakeRect(0, 60, 500, 0)];
+    [commandBar addSubview:suggestions];
+    [commandBar addSubview:[[toolbarCls alloc] initWithFrame:NSMakeRect(0, 0, 500, 48)]];
+    [panel addSubview:commandBar];
+    NSView *popover = [[popoverCls alloc] initWithFrame:window.contentView.bounds];
+    [popover addSubview:panel];
+    [window.contentView addSubview:popover];
+
+    DPCommandBarOverlay *bar = DPGet(window, &DPOverlayKey);
+    CHECK(bar != nil && DPGet(window, &DPAnchorKey) == nil, [@"⌘L lifts its bar in a window no ⌘T has measured: " stringByAppendingString:mode].UTF8String);
+    if (!bar) return [popover removeFromSuperview];
+    CGFloat want = NSMinY(DPBarFrame(bar, NSMakeSize(500, 108), 108));
+    NSMutableArray<NSString *> *moved = [NSMutableArray array];
+    void (^settled)(NSString *) = ^(NSString *step) {
+        if (NSMinY(panel.frame) != want) [moved addObject:[NSString stringWithFormat:@"%@ %.0f", step, NSMinY(panel.frame) - want]];
+    };
+    NSRect (^diaSizes)(CGFloat) = ^NSRect(CGFloat height) { return NSMakeRect(40, 40, 500, height); };
+    settled(@"lifted");
+    panel.frame = diaSizes(108);
+    settled(@"Dia sizes it");
+    [bar layout];
+    settled(@"overlay layout");
+    DPSpin(0.6);
+    CHECK(bar.alphaValue == 1, [@"⌘L's bar shows once built: " stringByAppendingString:mode].UTF8String);
+    settled(@"shown");
+    panel.frame = diaSizes(108);
+    [bar layout];
+    settled(@"Dia sizes it again");
+    suggestions.rows = 160;
+    panel.frame = diaSizes(108 + 168);
+    settled(@"suggestions grow");
+    [bar layout];
+    settled(@"layout with suggestions");
+    suggestions.rows = 0;
+    panel.frame = diaSizes(108);
+    [bar layout];
+    settled(@"suggestions go");
+    panel.compact = !compact;
+    [panel setFrameSize:NSMakeSize(500, 108)];
+    [bar layout];
+    settled(@"Compact Command Bar toggled");
+    panel.frame = diaSizes(108);
+    [bar layout];
+    settled(@"Dia sizes it after the toggle");
+
+    DPCommandBarOverlay *newTabBar = [[DPCommandBarOverlay alloc] initWithFrame:window.contentView.bounds];
+    newTabBar.host = window;
+    NSView *newTabPage = [[NSView alloc] initWithFrame:NSZeroRect];
+    newTabBar.page = newTabPage;
+    NSView *newTabPanel = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 500, 108)];
+    [newTabPanel addSubview:[[barCls alloc] initWithFrame:newTabPanel.bounds]];
+    newTabBar.panel = newTabPanel;
+    [newTabBar frameForPanelSize:NSMakeSize(500, 108)];
+    CHECK([DPGet(window, &DPAnchorKey) doubleValue] == 108, [@"the new tab bar measures the same height ⌘L opened with: " stringByAppendingString:mode].UTF8String);
+    [bar layout];
+    settled(@"⌘T measured the window");
+    panel.frame = diaSizes(108);
+    settled(@"Dia sizes it after ⌘T");
+    NSString *shifts = [NSString stringWithFormat:@"⌘L's bar stays put from its first frame (%@): %@", mode, [moved componentsJoinedByString:@", "]];
+    CHECK(!moved.count, shifts.UTF8String);
+    [popover removeFromSuperview];
+    CHECK(!DPGet(window, &DPOverlayKey), [@"closing the popover closes the lifted bar: " stringByAppendingString:mode].UTF8String);
 }
 
 int main(void) {
@@ -967,6 +1079,15 @@ int main(void) {
         CHECK(topA == round(NSMidY(newTabBarA.bounds) - 30), "the new tab bar places its top from its own one line height");
         CHECK(topB == round(NSMidY(popoverBarB.bounds) - 42),
               "a window without a bar of its own places Cmd+L from its own height, not another window's");
+
+        Class suggestionsCls = objc_allocateClassPair(DPFakeSuggestions.class, DPDiaCommandBarSuggestions, 0);
+        objc_registerClassPair(suggestionsCls);
+        Class toolbarCls = objc_allocateClassPair(NSView.class, DPDiaCommandBarToolbar, 0);
+        objc_registerClassPair(toolbarCls);
+        for (NSString *position in @[ @"macos", @"window", @"page" ])
+            for (NSNumber *compact in @[ @NO, @YES ])
+                DPCheckFirstCommandL(popover.class, barCls, suggestionsCls, toolbarCls, position, compact.boolValue);
+        gChoice = @"window";
 
         // #618: mounting a content pane with the bar off must not walk Dia's scripting bridge.
         NSView *offPane = [[paneCls alloc] initWithFrame:NSMakeRect(0, 0, 300, 200)];

@@ -167,6 +167,11 @@ static CGFloat DPSuggestionsHeight(NSView *panel) {
     return height > 0 ? height + 8 : 0;
 }
 
+// The bar is placed by the height Dia sets, which Compact Command Bar trims the panel below.
+static CGFloat DPFullHeight(NSView *panel, CGFloat height) {
+    return height + (height == NSHeight(panel.frame) ? DPTrim(panel) : 0);
+}
+
 static NSView *DPCardIn(NSWindow *window) {
     NSView *pane = DPFindView(window.contentView, ^BOOL(NSView *view) { return DPIsKind(view, DPDiaContentPane) && !view.isHiddenOrHasHiddenAncestor; });
     for (NSView *view = pane; view && view != window.contentView; view = view.superview)
@@ -313,8 +318,10 @@ static void DPFitText(DPCommandBarOverlay *overlay, NSTextView *text);
 - (NSRect)frameForPanelSize:(NSSize)size {
     if (DPIsKind(self.page, DPDiaPopover)) {
         size.width = MIN(652, NSWidth((DPCardIn(self.host) ?: self).bounds) - 28);
-        CGFloat anchor = self.host ? [DPGet(self.host, &DPAnchorKey) doubleValue] : 0;
-        return DPBarFrame(self, size, anchor ?: size.height - DPSuggestionsHeight(self.panel));
+        CGFloat anchor = self.host ? [DPGet(self.host, &DPAnchorKey) doubleValue] : 0, full = DPFullHeight(self.panel, size.height);
+        NSRect frame = DPBarFrame(self, NSMakeSize(size.width, full), anchor ?: full - DPSuggestionsHeight(self.panel));
+        frame.size.height = size.height;
+        return frame;
     }
     // Measure the bar directly because tweaks may clip the panel and launch restore lays it out narrow first.
     NSView *bar = DPFindView(self.panel, ^BOOL(NSView *view) { return DPIsKind(view, DPDiaCommandBar); });
@@ -829,7 +836,7 @@ static void DPPanel_setFrame(NSView *self, SEL _cmd, NSRect frame) {
     if (![self.superview isKindOfClass:DPCommandBarOverlay.class]) return DPCallOriginal(DPPanel_setFrame, self, frame);
     DPCommandBarOverlay *overlay = (DPCommandBarOverlay *)self.superview;
     if (DPIsKind(overlay.page, DPDiaPopover)) {
-        frame.size.height += DPStyleAsNewTab(self);
+        frame.size.height = DPFullHeight(self, frame.size.height) + DPStyleAsNewTab(self);
         overlay.sizedAt = CACurrentMediaTime();
     }
     frame = [overlay frameForPanelSize:frame.size];
