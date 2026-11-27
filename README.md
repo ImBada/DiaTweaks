@@ -23,6 +23,7 @@ Each tweak changes one thing about Dia: it hides something you don't use, change
 | Passwords | Password managers and passkeys |
 | Links | Opening links in Little Dia or Peek, and the address shown on hover |
 | Network | Getting past networks that block sites by name |
+| Ad Blocking | Running uBlock Origin in place of Dia's ad blocker |
 
 Turn them on and off in **Dia → Settings → Patches**, or with the `diatweaks` command. Each one's Settings page links to its wiki page, which says what it does and when you'd want it. Experimental tweaks stay out of the list until you switch on **Show Experimental Tweaks** in **Settings → Home** (or click **Show** at the bottom of **Patches**). Home is also where you back up or import your settings.
 
@@ -102,7 +103,7 @@ rm -rf /tmp/DiaTweaks && git clone --depth 1 https://github.com/JaceThings/DiaTw
 <details>
 <summary><strong>Is it safe?</strong></summary>
 
-The first install is built on your Mac from this code, and updates are prebuilt downloads from this repo's GitHub releases, built there from the same code. It doesn't send anything about you anywhere. It goes online only to check for updates and to load the preview pictures in Settings. A few tweaks look at what's in Dia to work: Group Tabs by Domain reads your tabs' addresses, and Tidy Tabs gives your tab titles and addresses to Apple's on-device model, which runs on your Mac. The password tweaks pass messages between your password manager and its extension without reading them.
+The first install is built on your Mac from this code, and updates are prebuilt downloads from this repo's GitHub releases, built there from the same code. It doesn't send anything about you anywhere. It goes online only to check for updates, to load the preview pictures in Settings, and to download uBlock Origin from its GitHub releases if you turn that tweak on. A few tweaks look at what's in Dia to work: Group Tabs by Domain reads your tabs' addresses, and Tidy Tabs gives your tab titles and addresses to Apple's on-device model, which runs on your Mac. The password tweaks pass messages between your password manager and its extension without reading them.
 
 </details>
 
