@@ -105,7 +105,7 @@ static void DPInstallSidebarAddress(void) {
         DPHookClass(NSApp.class, @selector(replyToApplicationShouldTerminate:), (IMP)DPAddressAppReplyToQuit);
         DPHookClass(NSApp.delegate.class, @selector(applicationShouldTerminate:), (IMP)DPAddressAppShouldTerminate);
         DPHookClass(NSApp.class, @selector(sendAction:to:from:), (IMP)DPAddressAppSendAction);
-        Class toast = objc_getClass(DPDiaToasts);
+        Class toast = objc_getClass("_TtC11DiaToastsV210ToastPanel");  // upstream #431 dropped DPDiaToasts
         if (toast) {
             DPHookClass(toast, @selector(orderFront:), (IMP)DPAddressToastOrderFront);
             DPHookClass(toast, @selector(orderFrontRegardless), (IMP)DPAddressToastOrderRegardless);
