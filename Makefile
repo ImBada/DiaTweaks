@@ -36,6 +36,16 @@ build/diapatch: $(wildcard src/diapatch/*.[hm]) build/commit | build
 build/DiaPatchesSwift.o: $(DYLIB_SWIFT) | build
 	swiftc $(SWIFTFLAGS) -emit-object -o $@ $^
 
+# Syphon's server, vendored for Send PiP to Syphon. Its own code, so its warnings stay quiet.
+SYPHON := src/vendor/Syphon
+SYPHON_OBJECTS := $(patsubst $(SYPHON)/%,build/syphon/%.o,$(wildcard $(SYPHON)/*.m $(SYPHON)/*.c))
+
+build/syphon/%.o: $(SYPHON)/% $(wildcard $(SYPHON)/*.h) | build
+	@mkdir -p build/syphon
+	clang $(CFLAGS) -w -include $(SYPHON)/Syphon_Prefix.pch -Isrc/vendor -c $< -o $@
+
+build/obj/Patches/PiPSyphon/PiPSyphon.o: CFLAGS += -Isrc/vendor
+
 $(HEADERS_BIN): $(DYLIB_HEADERS) scripts/pack-headers | build
 	scripts/pack-headers src/dylib $@
 
@@ -74,8 +84,8 @@ build/objsan-tweaks/%.o: tweaks/%.m
 
 -include $(DYLIB_OBJS:.o=.d) $(wildcard build/*.d build/objsan/*.d build/objsan/*/*.d build/objsan/*/*/*.d build/obj-tweaks/*/*.d build/objsan-tweaks/*/*.d)
 
-build/DiaPatches.dylib: $(DYLIB_OBJS) build/DiaPatchesSwift.o $(HEADERS_BIN) $(wildcard $(PASSKEYS)/*) | build
-	clang $(CFLAGS) -Isrc/dylib -dynamiclib $(EXTENSION) -Wl,-sectcreate,__TEXT,__dp_headers,$(HEADERS_BIN) -framework AppKit -framework QuartzCore -framework Metal -framework AVFoundation -framework VideoToolbox -framework CoreMedia -framework CoreVideo -framework UniformTypeIdentifiers \
+build/DiaPatches.dylib: $(DYLIB_OBJS) build/DiaPatchesSwift.o $(SYPHON_OBJECTS) $(HEADERS_BIN) $(wildcard $(PASSKEYS)/*) | build
+	clang $(CFLAGS) -Isrc/dylib -dynamiclib $(EXTENSION) -Wl,-sectcreate,__TEXT,__dp_headers,$(HEADERS_BIN) -framework AppKit -framework QuartzCore -framework Metal -framework AVFoundation -framework VideoToolbox -framework CoreMedia -framework CoreVideo -framework UniformTypeIdentifiers -framework IOSurface \
 		-L$(SWIFT_LIB) -Wl,-rpath,/usr/lib/swift $(FOUNDATION_MODELS) -o $@ $(filter %.o,$^)
 
 # With DIAPATCH_MANIFEST set, the dylib writes the patch list and exits as it loads, so diapatch never runs.
