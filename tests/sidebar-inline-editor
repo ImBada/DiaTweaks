@@ -1,0 +1,14 @@
+#!/bin/sh
+set -eu
+cd "$(dirname "$0")/.."
+mkdir -p build
+clang -fobjc-arc -Isrc/dylib -framework AppKit -framework QuartzCore \
+    tests/sidebar-inline-editor.m src/dylib/Patches/SidebarAddressBar/Layout.m src/dylib/Patches/SidebarAddressBar/Actions.m src/dylib/Patches/SidebarAddressBar/CurrentURL.m src/dylib/Patches/SidebarAddressBar/Spacing.m src/dylib/Patches/SidebarAddressBar/Popover.m \
+    src/dylib/Patches/SidebarAddressBar/Row.m src/dylib/Patches/SidebarAddressBar/Context.m src/dylib/Patches/SidebarAddressBar/SiteMenu.m src/dylib/Patches/SidebarAddressBar/WindowTabs.m src/dylib/StdPatch/Views.m \
+    src/dylib/Patches/SidebarAddressBar/Hover.m src/dylib/Patches/SidebarAddressBar/NativeControls.m \
+    src/dylib/Patches/SidebarAddressBar/NativeExtensions.m src/dylib/Patches/SidebarAddressBar/NativeSlot.m \
+    src/dylib/Patches/SidebarAddressBar/ExtensionGrid.m src/dylib/Patches/SidebarAddressBar/NativeHooks.m \
+    src/dylib/Patches/SidebarAddressBar/Inline*.m src/dylib/Patches/SidebarAddressBar/Suggestion*.m \
+    src/dylib/Patches/SidebarAddressBar/Settings.m src/dylib/Patches/SidebarAddressBar/EditorMode.m src/dylib/Patches/SidebarAddressBar/DropdownTracking.m \
+    tests/sidebar-settings-support.m src/dylib/StdPatch/Hook.m -o build/sidebar-inline-editor-checks
+exec build/sidebar-inline-editor-checks

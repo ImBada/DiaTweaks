@@ -1,0 +1,10 @@
+#!/bin/sh
+set -eu
+cd "$(dirname "$0")/.."
+mkdir -p build
+clang -fobjc-arc -Isrc/dylib -framework AppKit -framework QuartzCore \
+    tests/sidebar-toolbar.m tests/sidebar-settings-support.m \
+    src/dylib/Patches/SidebarAddressBar/Toolbar*.m \
+    src/dylib/StdPatch/Views.m src/dylib/StdPatch/Hook.m \
+    -o build/sidebar-toolbar-checks
+exec build/sidebar-toolbar-checks
