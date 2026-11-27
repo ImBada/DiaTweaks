@@ -6,6 +6,7 @@ static inline NSArray *DPScriptTabs(id scriptSpace) {
 }
 
 id DPScriptWindow(NSWindow *window);
+void DPClearScriptWindowCache(void);
 id DPScriptTab(NSWindow *window, NSString *tabID);
 id DPScriptTabIn(id scriptWindow, NSString *tabID);
 id DPScriptTabInAnyProfile(id scriptWindow, NSString *tabID);

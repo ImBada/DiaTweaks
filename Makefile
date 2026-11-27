@@ -128,10 +128,10 @@ GROUP_TABS_SAN := $(call OBJSAN,$(addprefix src/dylib/Commands/GroupTabs/,Plan.m
 build/runtime-guards: tests/runtime-guards.m src/dylib/StdPatch/Patch.m src/dylib/Local/Local.h src/dylib/StdPatch/TypedURL.m src/dylib/StdPatch/Hide.m src/dylib/StdPatch/HideHosts.m src/dylib/StdPatch/Hide.h src/dylib/Settings/Settings.m src/dylib/Settings/Settings.h src/dylib/Commands/GroupTabs/Order.m src/dylib/Commands/GroupTabs/Grouping.m src/dylib/Commands/GroupTabs/Menu.m src/dylib/Commands/GroupTabs/GroupTabs.h $(S_HOOK) $(S_VIEWS) $(S_APP) $(GROUP_TABS_SAN) $(S_MESSAGES) $(wildcard src/dylib/StdPatch/*.h) | build
 	clang $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=all -Isrc/dylib -framework AppKit -framework QuartzCore -o $@ tests/runtime-guards.m $(S_HOOK) $(S_VIEWS) $(S_APP) $(GROUP_TABS_SAN) $(S_MESSAGES)
 
-TIDY := $(call OBJ,src/dylib/Patches/TidyTabs/Tabs.m) $(O_BARTABS) $(O_MESSAGES)
+TIDY := $(call OBJSAN,src/dylib/Patches/TidyTabs/Tabs.m) $(S_BARTABS) $(S_MESSAGES)
 
-build/tidy-tabs: tests/tidy-tabs.m $(TIDY) | build
-	clang $(CFLAGS) -Isrc/dylib -framework AppKit -framework QuartzCore -o $@ $^
+build/tidy-tabs: tests/tidy-tabs.m $(TIDY) $(wildcard src/dylib/Patches/TidyTabs/*.[hm] src/dylib/Patches/NewTabNextToCurrent/*.m src/dylib/Patches/CommandBar/*.h src/dylib/StdPatch/*.[hm]) | build
+	clang $(CFLAGS) $(SANITIZE) -Isrc/dylib -framework AppKit -framework QuartzCore -o $@ tests/tidy-tabs.m $(TIDY)
 
 build/drag-offset: tests/drag-offset.m src/dylib/Patches/CompactTabRows/CompactTabRows.m $(O_HOOK) $(O_VIEWS) $(wildcard src/dylib/StdPatch/*.h) | build
 	clang $(CFLAGS) -Isrc/dylib -framework AppKit -framework QuartzCore -o $@ tests/drag-offset.m $(O_HOOK) $(O_VIEWS)

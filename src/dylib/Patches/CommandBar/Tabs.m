@@ -15,7 +15,7 @@
 static NSMapTable<NSWindow *, DPScriptWindowMemo *> *DPScriptWindowCache;
 static BOOL DPScriptWindowClearArmed;
 
-static void DPClearScriptWindowCache(void) {
+void DPClearScriptWindowCache(void) {
     [DPScriptWindowCache removeAllObjects];
     DPScriptWindowClearArmed = NO;
 }

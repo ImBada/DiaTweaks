@@ -401,6 +401,9 @@ int main(void) {
         CHECK(DPSpareTimer == nil, "timer stays nil when spares are effectively off");
         DPCommandBarHideTab.unavailable = NO;
         CHECK(DPSparesOn(), "DPSparesOn is YES when dependencies are on and available");
+        DPNewTabNextToCurrent.on = YES;
+        CHECK(!DPSparesOn(), "DPSparesOn is NO with Open New Tabs Next to Current, whose bar tab is placed when kept");
+        DPNewTabNextToCurrent.on = NO;
         DPApplySpares(&DPCommandBarSpare);
         CHECK(DPSpareTimer != nil && DPSpareTimer.valid, "apply creates the 1 Hz timer when on");
         DPCommandBarSpare.on = NO;

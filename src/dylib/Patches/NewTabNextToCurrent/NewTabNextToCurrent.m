@@ -1,5 +1,6 @@
 #import "StdPatch/StdPatch.h"
 #import "Patches/CommandBar/Tabs.h"
+#import "Patches/CommandBar/CommandBarOverlay.h"
 #import "Commands/GroupTabs/GroupTabs.h"
 #import <objc/message.h>
 
@@ -11,6 +12,9 @@ static char DPStateKey, DPRelayKey;
 @property(copy) NSString *lastFrontID;
 @property BOOL moving;
 @property(strong) NSMutableDictionary<NSString *, NSString *> *originOf;
+@property(strong) NSMutableDictionary<NSString *, NSString *> *barOrigin;
+@property(copy) NSString *fromTabID;
+@property long long fromSession;
 @end
 
 @implementation DPNextTabs
@@ -49,6 +53,7 @@ static DPNextTabs *DPStateWith(NSWindow *window, NSString *active, NSArray<NSStr
     if (state || !active) return state;
     state = [DPNextTabs new];
     state.originOf = [NSMutableDictionary dictionary];
+    state.barOrigin = [NSMutableDictionary dictionary];
     state.knownIDs = [NSSet setWithArray:ids];
     state.lastFrontID = active;
     DPSet(window, &DPStateKey, state);
@@ -90,24 +95,36 @@ static NSSet<NSNumber *> *DPSessions(id browser) {
     return sessions;
 }
 
+// The one page open at an address, or 0 when none or several are.
+static long long DPSessionAt(id browser, NSString *url, long long except) {
+    long long found = 0;
+    for (id contents in DPTrackedContents(browser)) {
+        long long sid = DPSessionOf(contents);
+        if (sid <= 0 || sid == except || ![contents respondsToSelector:@selector(url)] || ![DPText(DPMsg(contents, @selector(url))) isEqual:url]) continue;
+        if (found) return 0;
+        found = sid;
+    }
+    return found;
+}
+
+static NSString *DPAddressOf(id tab) {
+    NSString *url = [DPValueForKey(tab, @"URL") description];
+    return url.length ? url : nil;
+}
+
+static void DPNote(NSWindow *window);
+
 static void DPDoneMoving(NSWindow *window, DPNextTabs *state) {
     state.moving = NO;
     state.knownIDs = [NSSet setWithArray:DPTabIDs(window)];
     state.lastFrontID = DPActiveTabID(window);
+    // A bar kept while this move ran went unseen.
+    dispatch_async(dispatch_get_main_queue(), ^{ if (DPNewTabNextToCurrent.on) DPNote(window); });
 }
 
-static void DPPlace(NSWindow *window, NSString *newID, NSString *fromID, long long fromSession, NSSet<NSNumber *> *before, DPNextTabs *state, int tries) {
+static void DPMoveNextTo(NSWindow *window, NSString *newID, NSString *fromID, long long fromSession, NSNumber *sid, DPNextTabs *state) {
     id browser = DPBrowserOfWindow(window), delegate = DPGroupingDelegate(browser);
     if (!DPNewTabNextToCurrent.on || !DPScriptTab(window, newID) || !delegate) return DPDoneMoving(window, state);
-    NSMutableSet<NSNumber *> *gained = [DPSessions(browser) mutableCopy];
-    [gained minusSet:before];
-    if (gained.count != 1) {
-        if (tries <= 0) return DPDoneMoving(window, state);
-        return (void)dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 50 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
-            DPPlace(window, newID, fromID, fromSession, before, state, tries - 1);
-        });
-    }
-    NSNumber *sid = gained.anyObject;
     NSMutableArray<NSString *> *others = [DPTabIDs(window) mutableCopy];
     NSUInteger newIndex = [others indexOfObject:newID];
     [others removeObject:newID];
@@ -131,18 +148,62 @@ static void DPPlace(NSWindow *window, NSString *newID, NSString *fromID, long lo
     }, finish);
 }
 
+static void DPPlace(NSWindow *window, NSString *newID, NSString *fromID, long long fromSession, NSSet<NSNumber *> *before, DPNextTabs *state, int tries) {
+    id browser = DPBrowserOfWindow(window), delegate = DPGroupingDelegate(browser);
+    if (!DPNewTabNextToCurrent.on || !DPScriptTab(window, newID) || !delegate) return DPDoneMoving(window, state);
+    NSMutableSet<NSNumber *> *gained = [DPSessions(browser) mutableCopy];
+    [gained minusSet:before];
+    if (gained.count != 1) {
+        if (tries <= 0) return DPDoneMoving(window, state);
+        return (void)dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 50 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
+            DPPlace(window, newID, fromID, fromSession, before, state, tries - 1);
+        });
+    }
+    DPMoveNextTo(window, newID, fromID, fromSession, gained.anyObject, state);
+}
+
+// A tab the command bar opened has no page to move until a result loads in it, so it's placed once the bar keeps it.
+static void DPPlaceKept(NSWindow *window, NSString *tabID, NSString *originID, DPNextTabs *state, int tries) {
+    id browser = DPBrowserOfWindow(window), tab = DPScriptTab(window, tabID), origin = DPScriptTab(window, originID);
+    if (!DPNewTabNextToCurrent.on || DPGet(window, &DPStateKey) != state || !DPGroupingDelegate(browser) || !tab || !origin) return;
+    NSString *url = DPAddressOf(tab), *originURL = DPAddressOf(origin);
+    // Another tab at the same address would be moved in its place.
+    for (id other in DPScriptTabs(DPScriptWindow(window)))
+        if (![DPTabID(other) isEqual:tabID] && url && [DPAddressOf(other) isEqual:url]) return;
+    long long fromSession = [state.fromTabID isEqual:originID] ? state.fromSession : (originURL ? DPSessionAt(browser, originURL, 0) : 0);
+    long long sid = url && !state.moving ? DPSessionAt(browser, url, fromSession) : 0;
+    if (sid <= 0) {
+        if (tries <= 0) return;
+        return (void)dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 100 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
+            DPPlaceKept(window, tabID, originID, state, tries - 1);
+        });
+    }
+    state.originOf[tabID] = originID;
+    state.moving = YES;
+    DPMoveNextTo(window, tabID, originID, fromSession, @(sid), state);
+}
+
 static BOOL DPOpenNextToCurrent(NSWindow *window) {
     if (!DPNewTabNextToCurrent.on) return NO;
     id scripted = DPScriptWindow(window), browser = DPBrowserOfWindow(window);
     NSString *from = DPActiveTabID(window);
     Class tabClass = NSClassFromString(@"DiaAppleScriptTab");
     SEL make = NSSelectorFromString(@"newScriptingObjectOfClass:forValueForKey:withContentsValue:properties:");
-    if (!from || !browser || !DPGroupingDelegate(browser) || !tabClass || ![scripted respondsToSelector:make]) return NO;
+    if (!from || !browser || !DPGroupingDelegate(browser)) return NO;
     if (DPIsBlank(window, from)) return NO;
     DPNextTabs *state = DPStateFor(window);
     if (state.moving) return NO;
-    NSSet<NSNumber *> *before = DPSessions(browser);
     long long fromSession = DPActiveSession(browser);
+    // The bar opens over Dia's own new tab, not a scripted one; it's placed once the bar keeps it.
+    if (DPCommandBar.on && ![DPSplits(window) containsObject:from]) {
+        state.fromTabID = from;
+        state.fromSession = fromSession;
+        // Dia mounts its new tab page inside this same event; a script window read above would still call this tab the front one.
+        DPClearScriptWindowCache();
+        return NO;
+    }
+    if (!tabClass || ![scripted respondsToSelector:make]) return NO;
+    NSSet<NSNumber *> *before = DPSessions(browser);
     NSArray<NSString *> *tabsBefore = DPTabIDs(window);
     id tab = ((id (*)(id, SEL, Class, NSString *, id, id))objc_msgSend)(scripted, make, tabClass, @"appleScriptTabs", nil, @{});
     NSMutableArray<NSString *> *added = [DPTabIDs(window) mutableCopy];
@@ -205,6 +266,22 @@ static void DPReturnTo(NSWindow *window, NSString *originID, NSString *expectedF
     if (origin && [DPActiveTabID(window) isEqual:expectedFront]) DPFocusTab(origin);
 }
 
+static void DPNoteBar(NSWindow *window, DPNextTabs *state, NSString *active, NSSet<NSString *> *now) {
+    DPCommandBarOverlay *bar = DPCommandBar.on ? DPGet(window, &DPOverlayKey) : nil;
+    NSString *open = DPTabID(bar.openedTab), *over = DPTabID(bar.returnTab);
+    if (open && over) state.barOrigin[open] = over;
+    for (NSString *tab in state.barOrigin.allKeys)
+        if (![now containsObject:tab] || ![now containsObject:state.barOrigin[tab]]) [state.barOrigin removeObjectForKey:tab];
+    // Dia may keep showing the tab the bar came from while it keeps the bar's tab, so a bar that is gone is enough to go on.
+    for (NSString *tab in state.barOrigin.allKeys) {
+        NSString *origin = state.barOrigin[tab];
+        if ([open isEqual:tab]) continue;
+        [state.barOrigin removeObjectForKey:tab];
+        if ([active isEqual:tab]) state.originOf[tab] = origin;
+        dispatch_async(dispatch_get_main_queue(), ^{ DPPlaceKept(window, tab, origin, state, 30); });
+    }
+}
+
 static void DPNote(NSWindow *window) {
     DPNextTabs *state = DPGet(window, &DPStateKey);
     if (state.moving) return;
@@ -219,6 +296,7 @@ static void DPNote(NSWindow *window) {
 
     if (state.lastFrontID && switched && ![state.knownIDs containsObject:active] && [now containsObject:state.lastFrontID] && DPIsBlankIn(tabs, active))
         state.originOf[active] = state.lastFrontID;
+    DPNoteBar(window, state, active, now);
 
     for (NSString *tab in state.originOf.allKeys) {
         NSString *origin = state.originOf[tab];
